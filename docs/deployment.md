@@ -55,7 +55,7 @@ The web service internally proxies `/api/*` to `api:4000`, so you do not need se
 docker compose -f docker-compose.prod.yml up -d
 ```
 
-- `panel-api` runs `prisma migrate deploy` and the seed script.
+- `panel-api` syncs the DB schema (`prisma db push`) and runs the seed script. When you evolve the schema past the MVP, generate real migration files with `prisma migrate dev` and swap `db push` for `prisma migrate deploy` in `apps/api/Dockerfile`.
 - Open the panel → create the OWNER account.
 - Paste a CurseForge API key in **Integrations** if desired.
 

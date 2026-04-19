@@ -14,7 +14,6 @@ import { NodeClient } from "../nodes/node-client.js";
 import {
   createServerRecord,
   provisionServerOnNode,
-  toContainerName,
 } from "./service.js";
 
 export async function serversRoutes(app: FastifyInstance): Promise<void> {
@@ -282,6 +281,4 @@ export async function serversRoutes(app: FastifyInstance): Promise<void> {
     };
   });
 
-  // Just make the helper exportable for the websocket layer.
-  app.decorate("toContainerName", toContainerName);
 }
