@@ -1,6 +1,6 @@
 import { z } from "zod";
-import { SERVER_TYPES } from "./server-types.js";
-import { ROLES } from "./roles.js";
+import { SERVER_TYPES } from "./server-types";
+import { ROLES } from "./roles";
 
 export const emailSchema = z.string().email().max(255);
 export const usernameSchema = z

@@ -1,3 +1,3 @@
-export * from "./roles.js";
-export * from "./server-types.js";
-export * from "./schemas.js";
+export * from "./roles";
+export * from "./server-types";
+export * from "./schemas";

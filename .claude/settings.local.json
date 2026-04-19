@@ -8,7 +8,23 @@
       "Bash(git commit -q -m 'feat: add node-agent service \\(Fastify + dockerode\\) *)",
       "Bash(git commit -q -m 'feat: Next.js 14 web UI with dark theme and full page set *)",
       "Bash(git commit -q -m 'docs+infra: docker compose for dev & prod, full documentation set *)",
-      "Bash(git commit -q -m 'fix\\(api\\): tsconfig rootDir and use prisma db push for MVP bootstrap *)"
+      "Bash(git commit -q -m 'fix\\(api\\): tsconfig rootDir and use prisma db push for MVP bootstrap *)",
+      "Bash(pnpm --version)",
+      "Bash(npm --version)",
+      "Bash(corepack --version)",
+      "Bash(corepack enable *)",
+      "Bash(corepack prepare *)",
+      "Bash(npm install *)",
+      "Bash(pnpm install *)",
+      "Bash(pnpm --filter @cofemine/shared run typecheck)",
+      "Bash(pnpm --filter @cofemine/api exec prisma generate)",
+      "Bash(pnpm --filter @cofemine/api run typecheck)",
+      "Bash(pnpm --filter @cofemine/agent run typecheck)",
+      "Bash(pnpm --filter @cofemine/web run typecheck)",
+      "Bash(pnpm --filter @cofemine/api run build)",
+      "Bash(pnpm --filter @cofemine/agent run build)",
+      "Bash(pnpm --filter @cofemine/web run build)",
+      "Bash(git commit -q -m 'fix: ws types for @fastify/websocket v10, ext-less shared imports *)"
     ]
   }
 }

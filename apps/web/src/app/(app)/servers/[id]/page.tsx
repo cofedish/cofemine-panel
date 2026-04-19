@@ -88,6 +88,7 @@ export default function ServerDetailPage(): JSX.Element {
   }
 
   async function remove(): Promise<void> {
+    if (!data) return;
     if (!confirm(`Delete server "${data.name}"? This is irreversible.`)) return;
     try {
       await api.del(`/servers/${id}`);
