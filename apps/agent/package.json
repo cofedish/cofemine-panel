@@ -1,0 +1,29 @@
+{
+  "name": "@cofemine/agent",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/main.ts",
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/main.js",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@cofemine/shared": "workspace:*",
+    "@fastify/websocket": "^10.0.1",
+    "dockerode": "^4.0.2",
+    "fastify": "^4.28.1",
+    "pino": "^9.3.2",
+    "tar": "^7.4.3",
+    "undici": "^6.19.8",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/dockerode": "^3.3.31",
+    "@types/node": "^20.14.10",
+    "@types/tar": "^6.1.13",
+    "tsx": "^4.19.0",
+    "typescript": "^5.5.4"
+  }
+}
