@@ -1,0 +1,176 @@
+// Cofemine Panel — data model
+// One monolithic schema file is fine here; Prisma requires a single source.
+
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = []
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  OWNER
+  ADMIN
+  OPERATOR
+  VIEWER
+}
+
+enum NodeStatus {
+  ONLINE
+  OFFLINE
+  UNKNOWN
+}
+
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  username  String   @unique
+  password  String
+  role      Role     @default(VIEWER)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  sessions    Session[]
+  memberships Membership[]
+  auditEvents AuditEvent[]
+}
+
+model Session {
+  id        String   @id @default(cuid())
+  userId    String
+  tokenHash String   @unique
+  expiresAt DateTime
+  userAgent String?
+  ip        String?
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model Node {
+  id         String     @id @default(cuid())
+  name       String
+  host       String
+  tokenHash  String
+  status     NodeStatus @default(UNKNOWN)
+  lastSeenAt DateTime?
+  createdAt  DateTime   @default(now())
+  updatedAt  DateTime   @updatedAt
+
+  servers Server[]
+}
+
+model Template {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+  type        String
+  version     String
+  memoryMb    Int
+  env         Json     @default("{}")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  servers Server[]
+}
+
+model Server {
+  id            String   @id @default(cuid())
+  name          String
+  description   String?
+  nodeId        String
+  containerId   String?
+  containerName String?  @unique
+  runtime       String   @default("itzg")
+  type          String
+  version       String
+  memoryMb      Int      @default(2048)
+  cpuLimit      Float?
+  ports         Json     @default("[]")
+  env           Json     @default("{}")
+  eulaAccepted  Boolean  @default(false)
+  status        String   @default("stopped")
+  lastStartedAt DateTime?
+  templateId    String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  node        Node         @relation(fields: [nodeId], references: [id])
+  template    Template?    @relation(fields: [templateId], references: [id])
+  backups     Backup[]
+  schedules   Schedule[]
+  memberships Membership[]
+
+  @@index([nodeId])
+}
+
+model Membership {
+  id        String   @id @default(cuid())
+  userId    String
+  serverId  String
+  role      Role
+  createdAt DateTime @default(now())
+
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  server Server @relation(fields: [serverId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, serverId])
+  @@index([serverId])
+}
+
+model Backup {
+  id         String    @id @default(cuid())
+  serverId   String
+  name       String
+  sizeBytes  BigInt?
+  status     String    @default("pending")
+  path       String?
+  createdAt  DateTime  @default(now())
+  finishedAt DateTime?
+
+  server Server @relation(fields: [serverId], references: [id], onDelete: Cascade)
+
+  @@index([serverId])
+}
+
+model Schedule {
+  id        String    @id @default(cuid())
+  serverId  String
+  name      String
+  cron      String
+  action    String
+  payload   Json?
+  enabled   Boolean   @default(true)
+  lastRunAt DateTime?
+  createdAt DateTime  @default(now())
+
+  server Server @relation(fields: [serverId], references: [id], onDelete: Cascade)
+
+  @@index([serverId])
+}
+
+model AuditEvent {
+  id        String   @id @default(cuid())
+  userId    String?
+  action    String
+  resource  String?
+  metadata  Json?
+  ip        String?
+  createdAt DateTime @default(now())
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([createdAt])
+  @@index([userId])
+}
+
+model IntegrationSetting {
+  key       String   @id
+  value     String
+  updatedAt DateTime @updatedAt
+}

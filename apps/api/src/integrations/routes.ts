@@ -1,0 +1,174 @@
+import type { FastifyInstance } from "fastify";
+import { z } from "zod";
+import {
+  installCurseforgeSchema,
+  installModrinthSchema,
+  modrinthSearchSchema,
+} from "@cofemine/shared";
+import { prisma } from "../db.js";
+import { encryptSecret } from "../crypto.js";
+import {
+  assertServerPermission,
+  requireGlobalPermission,
+} from "../auth/rbac.js";
+import { writeAudit } from "../audit/service.js";
+import { NodeClient } from "../nodes/node-client.js";
+import { ModrinthProvider } from "./modrinth-provider.js";
+import { CurseForgeProvider } from "./curseforge-provider.js";
+import type { ContentProvider } from "./content-provider.js";
+
+const modrinth = new ModrinthProvider();
+const curseforge = new CurseForgeProvider();
+const providers: Record<string, ContentProvider> = {
+  modrinth,
+  curseforge,
+};
+
+const settingPatchSchema = z.object({
+  value: z.string().max(1000),
+});
+
+export async function integrationsRoutes(app: FastifyInstance): Promise<void> {
+  app.get("/", async () => {
+    const [modrinthOn, curseforgeOn, rows] = await Promise.all([
+      modrinth.isEnabled(),
+      curseforge.isEnabled(),
+      prisma.integrationSetting.findMany({
+        select: { key: true, updatedAt: true },
+      }),
+    ]);
+    return {
+      providers: {
+        modrinth: { enabled: modrinthOn, requiresKey: false },
+        curseforge: {
+          enabled: curseforgeOn,
+          requiresKey: true,
+          fallback: "manual-upload",
+        },
+      },
+      settings: rows,
+    };
+  });
+
+  app.patch(
+    "/:key",
+    { preHandler: requireGlobalPermission("integration.manage") },
+    async (req) => {
+      const { key } = req.params as { key: string };
+      const body = settingPatchSchema.parse(req.body);
+      const encrypted = encryptSecret(body.value);
+      await prisma.integrationSetting.upsert({
+        where: { key },
+        create: { key, value: encrypted },
+        update: { value: encrypted },
+      });
+      await writeAudit(req, {
+        action: "integration.update",
+        resource: key,
+      });
+      return { ok: true };
+    }
+  );
+
+  app.delete(
+    "/:key",
+    { preHandler: requireGlobalPermission("integration.manage") },
+    async (req) => {
+      const { key } = req.params as { key: string };
+      await prisma.integrationSetting.delete({ where: { key } }).catch(() => {});
+      await writeAudit(req, { action: "integration.delete", resource: key });
+      return { ok: true };
+    }
+  );
+
+  // Modrinth
+  app.get("/modrinth/search", async (req) => {
+    const filters = modrinthSearchSchema.parse(req.query);
+    return modrinth.search(filters);
+  });
+
+  app.get("/modrinth/projects/:id", async (req) => {
+    const { id } = req.params as { id: string };
+    return modrinth.getProject(id);
+  });
+
+  app.get("/modrinth/projects/:id/versions", async (req) => {
+    const { id } = req.params as { id: string };
+    const q = req.query as { gameVersion?: string; loader?: string };
+    return modrinth.getVersions(id, q);
+  });
+
+  // CurseForge
+  app.get("/curseforge/search", async (req) => {
+    if (!(await curseforge.isEnabled())) {
+      return { disabled: true, results: [] };
+    }
+    const filters = modrinthSearchSchema.parse(req.query);
+    return { disabled: false, results: await curseforge.search(filters) };
+  });
+
+  app.get("/curseforge/projects/:id/versions", async (req) => {
+    const { id } = req.params as { id: string };
+    const q = req.query as { gameVersion?: string; loader?: string };
+    return curseforge.getVersions(Number(id), q);
+  });
+
+  // Install: routed through provider, then delegated to the node-agent.
+  app.post("/servers/:id/install/modrinth", async (req) => {
+    const { id } = req.params as { id: string };
+    await assertServerPermission(req, id, "server.edit");
+    const body = installModrinthSchema.parse(req.body);
+    const server = await prisma.server.findUniqueOrThrow({ where: { id } });
+    const versions = await modrinth.getVersions(body.projectId);
+    const version =
+      versions.find((v) => v.id === body.versionId) ?? versions[0];
+    if (!version) throw new Error("No compatible version found on Modrinth");
+    const plan = await modrinth.planInstall(version, body.kind);
+    const client = await NodeClient.forId(server.nodeId);
+    const res = await client.call("POST", `/servers/${id}/install`, {
+      provider: "modrinth",
+      kind: body.kind,
+      plan,
+    });
+    await writeAudit(req, {
+      action: "content.install",
+      resource: id,
+      metadata: { provider: "modrinth", projectId: body.projectId, kind: body.kind },
+    });
+    return { ok: true, result: res };
+  });
+
+  app.post("/servers/:id/install/curseforge", async (req) => {
+    const { id } = req.params as { id: string };
+    await assertServerPermission(req, id, "server.edit");
+    const body = installCurseforgeSchema.parse(req.body);
+    if (!(await curseforge.isEnabled())) {
+      const err = new Error(
+        "CurseForge API key is not set. Configure it in Integrations or use manual ZIP upload."
+      );
+      (err as any).statusCode = 409;
+      throw err;
+    }
+    const server = await prisma.server.findUniqueOrThrow({ where: { id } });
+    const versions = await curseforge.getVersions(body.projectId);
+    const version =
+      versions.find((v) => v.id === String(body.fileId)) ?? versions[0];
+    if (!version) throw new Error("No compatible file found on CurseForge");
+    const plan = await curseforge.planInstall(version, body.kind);
+    const client = await NodeClient.forId(server.nodeId);
+    const res = await client.call("POST", `/servers/${id}/install`, {
+      provider: "curseforge",
+      kind: body.kind,
+      plan,
+    });
+    await writeAudit(req, {
+      action: "content.install",
+      resource: id,
+      metadata: { provider: "curseforge", projectId: body.projectId, kind: body.kind },
+    });
+    return { ok: true, result: res };
+  });
+
+  // unused reference to silence tsc about `providers` if needed later
+  void providers;
+}

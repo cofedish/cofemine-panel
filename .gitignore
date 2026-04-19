@@ -1,0 +1,15 @@
+node_modules
+dist
+build
+.next
+.turbo
+.cache
+*.log
+.env
+.env.local
+.DS_Store
+coverage
+pnpm-lock.yaml.bak
+apps/*/prisma/migrations/dev.db*
+data/
+backups/

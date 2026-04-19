@@ -1,0 +1,21 @@
+{
+  "name": "cofemine-panel",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Self-hosted Docker-first Minecraft server control panel",
+  "packageManager": "pnpm@9.7.0",
+  "scripts": {
+    "dev": "pnpm -r --parallel --filter \"./apps/*\" run dev",
+    "build": "pnpm -r run build",
+    "lint": "pnpm -r run lint",
+    "typecheck": "pnpm -r run typecheck",
+    "db:generate": "pnpm --filter @cofemine/api exec prisma generate",
+    "db:migrate": "pnpm --filter @cofemine/api exec prisma migrate dev",
+    "db:deploy": "pnpm --filter @cofemine/api exec prisma migrate deploy",
+    "db:seed": "pnpm --filter @cofemine/api exec tsx prisma/seed.ts"
+  },
+  "engines": {
+    "node": ">=20.10.0",
+    "pnpm": ">=9"
+  }
+}
