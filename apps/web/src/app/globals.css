@@ -1,0 +1,60 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+}
+
+html,
+body {
+  @apply bg-surface-0 text-zinc-100;
+}
+
+body {
+  font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+}
+
+::selection {
+  background-color: #10b98133;
+}
+
+/* Scrollbars */
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+*::-webkit-scrollbar-thumb {
+  background: #2a3140;
+  border-radius: 6px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.card {
+  @apply bg-surface-1 border border-surface-border rounded-xl;
+}
+
+.input,
+.textarea,
+.select {
+  @apply bg-surface-2 border border-surface-border rounded-md px-3 py-2 text-sm w-full outline-none focus:border-accent/60;
+}
+
+.btn {
+  @apply inline-flex items-center gap-2 px-3.5 py-2 rounded-md text-sm font-medium transition-colors;
+}
+.btn-primary {
+  @apply btn bg-accent text-black hover:bg-accent-hover;
+}
+.btn-ghost {
+  @apply btn bg-transparent border border-surface-border hover:bg-surface-2;
+}
+.btn-danger {
+  @apply btn bg-danger/90 text-white hover:bg-danger;
+}
+
+.badge {
+  @apply inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium;
+}
