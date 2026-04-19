@@ -1,0 +1,105 @@
+name: cofemine
+
+# Dev compose: brings up db, panel-api, node-agent, and panel-web.
+# The web service is reachable at http://localhost:3000.
+# The agent is NOT exposed to the host; only panel-api talks to it.
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-cofemine}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-cofemine}
+      POSTGRES_DB: ${POSTGRES_DB:-cofemine}
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-cofemine}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  agent:
+    build:
+      context: .
+      dockerfile: apps/agent/Dockerfile
+    restart: unless-stopped
+    environment:
+      AGENT_PORT: "4100"
+      AGENT_HOST: "0.0.0.0"
+      AGENT_TOKEN: ${AGENT_TOKEN:?AGENT_TOKEN required}
+      AGENT_DATA_ROOT: "/var/lib/cofemine/servers"
+      AGENT_BACKUP_ROOT: "/var/lib/cofemine/backups"
+      AGENT_DOCKER_NETWORK: "cofemine_mcnet"
+      AGENT_LABEL_PREFIX: "cofemine"
+      DOCKER_SOCKET: "/var/run/docker.sock"
+    volumes:
+      # The agent needs the Docker socket so it can start Minecraft containers.
+      - /var/run/docker.sock:/var/run/docker.sock
+      # Bind-mount the server data/backup roots so MC containers can share
+      # the same filesystem view as the agent.
+      - mc_data:/var/lib/cofemine/servers
+      - mc_backups:/var/lib/cofemine/backups
+    networks:
+      - cofemine_internal
+      - cofemine_mcnet
+
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      API_PORT: "4000"
+      API_HOST: "0.0.0.0"
+      API_PUBLIC_URL: ${API_PUBLIC_URL:-http://localhost:4000}
+      WEB_ORIGIN: ${WEB_ORIGIN:-http://localhost:3000}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-cofemine}:${POSTGRES_PASSWORD:-cofemine}@db:5432/${POSTGRES_DB:-cofemine}?schema=public
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET required}
+      SECRETS_KEY: ${SECRETS_KEY:?SECRETS_KEY required}
+      SESSION_TTL_HOURS: ${SESSION_TTL_HOURS:-168}
+      MODRINTH_USER_AGENT: ${MODRINTH_USER_AGENT:-cofemine-panel/0.1}
+      # Used by seed script to auto-register the local node
+      AGENT_TOKEN: ${AGENT_TOKEN}
+      AGENT_PUBLIC_URL: http://agent:4100
+      BOOTSTRAP_OWNER_EMAIL: ${BOOTSTRAP_OWNER_EMAIL:-}
+      BOOTSTRAP_OWNER_USERNAME: ${BOOTSTRAP_OWNER_USERNAME:-}
+      BOOTSTRAP_OWNER_PASSWORD: ${BOOTSTRAP_OWNER_PASSWORD:-}
+    depends_on:
+      db:
+        condition: service_healthy
+      agent:
+        condition: service_started
+    networks:
+      - cofemine_internal
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      API_INTERNAL_URL: http://api:4000
+    depends_on:
+      - api
+    ports:
+      - "${WEB_PORT:-3000}:3000"
+    networks:
+      - cofemine_internal
+
+volumes:
+  db_data:
+  mc_data:
+  mc_backups:
+
+networks:
+  cofemine_internal:
+    driver: bridge
+  # Dedicated network that MC containers (spawned by the agent) will join,
+  # so they can address each other and the agent if needed.
+  cofemine_mcnet:
+    name: cofemine_mcnet
+    driver: bridge

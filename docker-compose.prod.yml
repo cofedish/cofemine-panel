@@ -1,0 +1,90 @@
+name: cofemine
+
+# Production compose: pins image tags, keeps the db internal, exposes only
+# the web service through a reverse proxy of your choice (nginx, Caddy,
+# Traefik). Adjust environment via .env or a secrets manager.
+#
+# Differences from dev compose:
+#   - no rebuild of images; point at your registry
+#   - db has no published port
+#   - web exposes only to a front network where your reverse proxy lives
+#   - stricter healthchecks
+#   - explicit log driver
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: always
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER}"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "5" }
+    networks: [cofemine_internal]
+
+  agent:
+    image: ${AGENT_IMAGE:-ghcr.io/cofemine/panel-agent:latest}
+    restart: always
+    environment:
+      AGENT_TOKEN: ${AGENT_TOKEN}
+      AGENT_DATA_ROOT: "/var/lib/cofemine/servers"
+      AGENT_BACKUP_ROOT: "/var/lib/cofemine/backups"
+      AGENT_DOCKER_NETWORK: "cofemine_mcnet"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - mc_data:/var/lib/cofemine/servers
+      - mc_backups:/var/lib/cofemine/backups
+    networks: [cofemine_internal, cofemine_mcnet]
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "5" }
+
+  api:
+    image: ${API_IMAGE:-ghcr.io/cofemine/panel-api:latest}
+    restart: always
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}?schema=public
+      JWT_SECRET: ${JWT_SECRET}
+      SECRETS_KEY: ${SECRETS_KEY}
+      WEB_ORIGIN: ${WEB_ORIGIN}
+      API_PUBLIC_URL: ${API_PUBLIC_URL}
+      AGENT_TOKEN: ${AGENT_TOKEN}
+      AGENT_PUBLIC_URL: http://agent:4100
+    depends_on:
+      db: { condition: service_healthy }
+      agent: { condition: service_started }
+    networks: [cofemine_internal]
+
+  web:
+    image: ${WEB_IMAGE:-ghcr.io/cofemine/panel-web:latest}
+    restart: always
+    environment:
+      NODE_ENV: production
+      API_INTERNAL_URL: http://api:4000
+    depends_on: [api]
+    networks: [cofemine_internal, cofemine_public]
+
+volumes:
+  db_data:
+  mc_data:
+  mc_backups:
+
+networks:
+  cofemine_internal:
+    driver: bridge
+  cofemine_mcnet:
+    name: cofemine_mcnet
+    driver: bridge
+  # Attach your reverse proxy to this network.
+  cofemine_public:
+    external: true

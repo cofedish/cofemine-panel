@@ -6,7 +6,8 @@
       "Bash(git add *)",
       "Bash(git commit -q -m 'feat: scaffold monorepo with shared package and panel-api *)",
       "Bash(git commit -q -m 'feat: add node-agent service \\(Fastify + dockerode\\) *)",
-      "Bash(git commit -q -m 'feat: Next.js 14 web UI with dark theme and full page set *)"
+      "Bash(git commit -q -m 'feat: Next.js 14 web UI with dark theme and full page set *)",
+      "Bash(git commit -q -m 'docs+infra: docker compose for dev & prod, full documentation set *)"
     ]
   }
 }
