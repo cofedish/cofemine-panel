@@ -65,18 +65,12 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     env:
-      # Hard restart is triggered by (a) explicit workflow_dispatch input, or
-      # (b) a `[reset-stack]` or `[hard-restart]` marker anywhere in the head
-      # commit message. Soft path is `docker compose up -d` (only recreates
-      # containers whose image/config changed — zero downtime for unchanged
-      # services). Hard path is `down && up -d` (full recreate, recreates
-      # networks too — fixes stale bridge/network issues).
-      HARD_RESTART: >-
-        ${{
-          github.event.inputs.hard_restart == 'true'
-          || contains(github.event.head_commit.message, '[reset-stack]')
-          || contains(github.event.head_commit.message, '[hard-restart]')
-        }}
+      # TEMPORARY: force hard restart on every deploy until the stack is
+      # stable. Flip this back to the conditional form once things settle:
+      #   github.event.inputs.hard_restart == 'true'
+      #   || contains(github.event.head_commit.message, '[reset-stack]')
+      #   || contains(github.event.head_commit.message, '[hard-restart]')
+      HARD_RESTART: "true"
     steps:
       - name: SSH pull & restart
         uses: appleboy/ssh-action@v1.2.0
@@ -90,17 +84,34 @@ jobs:
           script: |
             set -euo pipefail
             cd "${{ secrets.DEPLOY_PATH }}"
+            COMPOSE="docker compose -f docker-compose.prod.yml"
+
+            echo "::group::git update"
             git fetch --prune
             git reset --hard origin/main
-            docker compose -f docker-compose.prod.yml pull
+            echo "::endgroup::"
+
+            echo "::group::docker compose pull"
+            $COMPOSE pull
+            echo "::endgroup::"
+
             if [ "${HARD_RESTART:-false}" = "true" ]; then
-              echo ">> hard restart requested: docker compose down && up -d"
-              docker compose -f docker-compose.prod.yml down
-              docker compose -f docker-compose.prod.yml up -d
-            else
-              docker compose -f docker-compose.prod.yml up -d
+              echo "::group::docker compose down (hard restart)"
+              $COMPOSE down || true
+              echo "::endgroup::"
             fi
-            docker image prune -f
+
+            echo "::group::docker compose up -d"
+            $COMPOSE up -d
+            echo "::endgroup::"
+
+            echo "::group::ps after up"
+            $COMPOSE ps
+            echo "::endgroup::"
+
+            echo "::group::docker image prune"
+            docker image prune -f || true
+            echo "::endgroup::"
 
       - name: Health check
         uses: appleboy/ssh-action@v1.2.0
