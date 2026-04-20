@@ -75,7 +75,7 @@ services:
     depends_on: [api]
     # No ports published on the host. Caddy (running in Docker) reaches the
     # panel via the shared external network below as `web:3000`. The network
-    # must be pre-created on the host: `docker network create caddy_net`.
+    # must be pre-created on the host: `docker network create caddy-net`.
     networks: [cofemine_internal, caddy_net]
     logging:
       driver: json-file
@@ -92,10 +92,10 @@ networks:
   cofemine_mcnet:
     name: cofemine_mcnet
     driver: bridge
-  # Shared bridge that Caddy attaches to. Pre-create with:
-  #   docker network create caddy_net
-  # Then add `networks: [caddy_net]` to your Caddy service, and
-  # `reverse_proxy web:3000` in the Caddyfile.
+  # Shared bridge that Caddy attaches to. Pre-create once on the host:
+  #   docker network create caddy-net
+  # Then in Caddy's compose add `networks: [caddy-net]` and declare it as
+  # external too. In the Caddyfile: `reverse_proxy web:3000`.
   caddy_net:
-    name: ${CADDY_NETWORK:-caddy_net}
+    name: ${CADDY_NETWORK:-caddy-net}
     external: true
