@@ -77,6 +77,7 @@ Vanilla, Paper, Purpur, Fabric, Forge, NeoForge, Mohist, Quilt — via `itzg/min
 - [Deployment](docs/deployment.md)
 - [API reference](docs/api.md)
 - [Security model](docs/security.md)
+- [CI/CD & автодеплой](docs/ci-cd.md)
 - [Roadmap](docs/roadmap.md)
 
 ## License

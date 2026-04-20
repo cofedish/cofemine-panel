@@ -24,7 +24,14 @@
       "Bash(pnpm --filter @cofemine/api run build)",
       "Bash(pnpm --filter @cofemine/agent run build)",
       "Bash(pnpm --filter @cofemine/web run build)",
-      "Bash(git commit -q -m 'fix: ws types for @fastify/websocket v10, ext-less shared imports *)"
+      "Bash(git commit -q -m 'fix: ws types for @fastify/websocket v10, ext-less shared imports *)",
+      "Bash(git branch *)",
+      "Bash(git remote *)",
+      "Bash(git push *)",
+      "Bash(git fetch *)",
+      "Bash(git pull *)",
+      "Bash(git stash *)",
+      "Bash(git commit -q -m 'ci: GitHub Actions build+push to GHCR and SSH deploy to server *)"
     ]
   }
 }
