@@ -67,7 +67,7 @@ export async function consoleAgentWs(app: FastifyInstance): Promise<void> {
       logs.on("end", () => send({ type: "status", message: "log stream ended" }));
       logs.on("error", (err) => send({ type: "error", message: String(err) }));
 
-      socket.on("message", async (raw) => {
+      socket.on("message", async (raw: Buffer) => {
         try {
           const msg = JSON.parse(raw.toString()) as {
             type?: string;

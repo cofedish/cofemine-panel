@@ -54,7 +54,7 @@ export async function registerConsoleWs(app: FastifyInstance): Promise<void> {
           socket.close(1011, "upstream error");
         } catch {}
       });
-      socket.on("message", (data) => {
+      socket.on("message", (data: Buffer) => {
         if (upstream.readyState === UpstreamWS.OPEN) {
           upstream.send(data.toString());
         }

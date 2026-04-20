@@ -11,5 +11,5 @@ build
 coverage
 pnpm-lock.yaml.bak
 apps/*/prisma/migrations/dev.db*
-data/
-backups/
+/data/
+/backups/
