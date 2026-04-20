@@ -1,5 +1,8 @@
 FROM node:20-alpine AS base
-RUN corepack enable && corepack prepare pnpm@9.7.0 --activate
+# Prisma on Alpine 3.19+ needs openssl3 explicitly; without it the query
+# engine fails with "Could not parse schema engine response" at startup.
+RUN apk add --no-cache openssl \
+ && corepack enable && corepack prepare pnpm@9.7.0 --activate
 WORKDIR /app
 
 FROM base AS deps
