@@ -112,14 +112,24 @@ jobs:
           script: |
             set -e
             COMPOSE="docker compose -f ${{ secrets.DEPLOY_PATH }}/docker-compose.prod.yml"
-            # Give the API up to ~3 minutes to come up. First deploys need
-            # Postgres to initialize its data dir + prisma db push + seed.
+            # Use node's built-in fetch instead of busybox wget — node is
+            # guaranteed present in the api image, and this is the same
+            # runtime that serves /health, so a success here proves the
+            # whole stack is live.
+            PROBE='fetch("http://127.0.0.1:4000/health").then(r=>{process.exit(r.ok?0:1)}).catch(()=>process.exit(1))'
+            # Give the API up to ~3 minutes. First deploys do Postgres
+            # initdb + prisma db push + seed, which legitimately needs time.
             for i in $(seq 1 36); do
-              if $COMPOSE exec -T api wget -qO- http://localhost:4000/health >/dev/null 2>&1; then
+              if $COMPOSE exec -T api node -e "$PROBE" >/dev/null 2>&1; then
                 echo "API healthy (after ${i} checks)"
                 exit 0
               fi
-              echo "waiting for API... ($i/36)"
+              if [ "$((i % 6))" -eq 0 ]; then
+                echo "--- still waiting (attempt $i/36); last 10 api log lines ---"
+                $COMPOSE logs --tail=10 api || true
+              else
+                echo "waiting for API... ($i/36)"
+              fi
               sleep 5
             done
             echo "API did not become healthy in time"
