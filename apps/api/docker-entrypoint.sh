@@ -24,4 +24,10 @@ echo "bootstrap: running seed"
 pnpm exec tsx prisma/seed.ts
 
 echo "bootstrap: starting API"
-exec node dist/main.js
+# Run through tsx rather than plain node: the panel-api depends on
+# @cofemine/shared which is a workspace package exported as .ts source
+# (so both dev and prod can consume it without a separate build step).
+# tsx is a thin Node loader that resolves .ts on demand; overhead at
+# cold start is ~200ms, irrelevant for a control panel, and it keeps
+# the monorepo free of the dual-publish dance.
+exec pnpm exec tsx src/main.ts

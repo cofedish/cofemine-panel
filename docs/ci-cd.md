@@ -164,6 +164,23 @@ docker compose -f docker-compose.prod.yml up -d
 
 Эти переменные перекрывают `latest` в compose-файле.
 
+## 5.1. Hard restart (полное пересоздание стека)
+
+Обычный деплой делает `docker compose pull && up -d` — zero-downtime, пересоздаются только контейнеры с новым образом. Иногда нужен чистый старт: например, после переключения volumes, смены сети, или если Docker «прилип» к старой bridge-сети после пересоздания.
+
+Два способа запустить hard restart (`down && up -d`):
+
+**Вариант A — тэг в коммит-сообщении.** Добавьте `[reset-stack]` или `[hard-restart]` в любое место текста коммита:
+
+```bash
+git commit -m "fix: change db volume mapping [reset-stack]"
+git push
+```
+
+**Вариант B — ручной запуск.** <https://github.com/cofedish/cofemine-panel/actions> → Deploy → **Run workflow** → отметьте галочку «Hard restart» → Run.
+
+Оба варианта ведут себя идентично: `docker compose down` (останавливает + удаляет контейнеры и сети, **volumes не трогаются**), затем `up -d`. Даунтайм — примерно 15–30 секунд.
+
 ## 6. Reverse proxy через Caddy
 
 `docker-compose.prod.yml` биндит `web` **только на 127.0.0.1:3000** — наружу 3000 не выставлен. Домен и TLS вешает Caddy, который уже стоит на хосте.

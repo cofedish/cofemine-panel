@@ -40,7 +40,8 @@
       "Bash(chmod 700 ~/.ssh)",
       "Bash(ssh-keygen -t ed25519 -C \"cofemine-deploy\" -f ~/.ssh/cofemine_deploy -N \"\" -q)",
       "Bash(git commit -q -m 'feat\\(ops\\): bind web to loopback only, document Caddy reverse proxy *)",
-      "Bash(git commit -q -m 'fix\\(api\\): retry prisma db push in entrypoint, LF-locked .sh files *)"
+      "Bash(git commit -q -m 'fix\\(api\\): retry prisma db push in entrypoint, LF-locked .sh files *)",
+      "Bash(git commit -q -m 'fix\\(api\\): run via tsx at runtime + add CI hard-restart option *)"
     ]
   }
 }

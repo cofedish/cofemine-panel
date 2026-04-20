@@ -4,6 +4,11 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      hard_restart:
+        description: "Hard restart (docker compose down && up). Use when containers are stuck to a stale network or volume."
+        type: boolean
+        default: false
 
 concurrency:
   group: deploy-${{ github.ref }}
@@ -59,6 +64,19 @@ jobs:
     name: Deploy to server
     needs: build
     runs-on: ubuntu-latest
+    env:
+      # Hard restart is triggered by (a) explicit workflow_dispatch input, or
+      # (b) a `[reset-stack]` or `[hard-restart]` marker anywhere in the head
+      # commit message. Soft path is `docker compose up -d` (only recreates
+      # containers whose image/config changed — zero downtime for unchanged
+      # services). Hard path is `down && up -d` (full recreate, recreates
+      # networks too — fixes stale bridge/network issues).
+      HARD_RESTART: >-
+        ${{
+          github.event.inputs.hard_restart == 'true'
+          || contains(github.event.head_commit.message, '[reset-stack]')
+          || contains(github.event.head_commit.message, '[hard-restart]')
+        }}
     steps:
       - name: SSH pull & restart
         uses: appleboy/ssh-action@v1.2.0
@@ -68,13 +86,20 @@ jobs:
           key: ${{ secrets.DEPLOY_SSH_KEY }}
           port: ${{ secrets.DEPLOY_PORT || 22 }}
           script_stop: true
+          envs: HARD_RESTART
           script: |
             set -euo pipefail
             cd "${{ secrets.DEPLOY_PATH }}"
             git fetch --prune
             git reset --hard origin/main
             docker compose -f docker-compose.prod.yml pull
-            docker compose -f docker-compose.prod.yml up -d
+            if [ "${HARD_RESTART:-false}" = "true" ]; then
+              echo ">> hard restart requested: docker compose down && up -d"
+              docker compose -f docker-compose.prod.yml down
+              docker compose -f docker-compose.prod.yml up -d
+            else
+              docker compose -f docker-compose.prod.yml up -d
+            fi
             docker image prune -f
 
       - name: Health check
