@@ -1,17 +1,42 @@
-# Cofemine Panel — пример секции для Caddyfile на хосте
+# Cofemine Panel — пример секции для Caddy
 #
-# Кладётся в /etc/caddy/Caddyfile. Caddy автоматически получит
-# Let's Encrypt сертификат, сделает HTTP→HTTPS и пропустит
-# WebSocket-апгрейды (для live-консоли панели) без дополнительных
-# заголовков — это поведение Caddy по умолчанию.
+# Предпосылки:
+#  1) На хосте один раз создан shared network:
+#        docker network create caddy_net
+#  2) Ваш Caddy-контейнер подключён к этой сети (см. ниже).
+#  3) docker-compose.prod.yml панели уже подключает `web` к той же сети.
 #
-# Замените panel.example.com на ваш домен и перезагрузите Caddy:
-#   sudo systemctl reload caddy
+# Caddy тогда резолвит `web` по Docker DNS и ходит напрямую — никаких
+# публичных портов у web нет, `host.docker.internal` не нужен.
+#
+# TLS и WebSocket-апгрейды Caddy тянет сам, без дополнительных директив.
 
-panel.example.com {
-	# encode gzip zstd            # если нужно — Caddy умеет сам
-	reverse_proxy 127.0.0.1:3000
+panel.cofemine.ru {
+	reverse_proxy web:3000
+	tls cofedish@gmail.com
 }
 
-# Если держите несколько сервисов за одним Caddy, каждый — отдельный
-# блок. Общий log/tls глобально настраивается в начале Caddyfile.
+# ----------------------------------------------------------------------
+# Минимальный docker-compose для самого Caddy (если нужно с нуля):
+#
+# services:
+#   caddy:
+#     image: caddy:2
+#     restart: always
+#     ports:
+#       - "80:80"
+#       - "443:443"
+#       - "443:443/udp"     # HTTP/3
+#     volumes:
+#       - ./Caddyfile:/etc/caddy/Caddyfile:ro
+#       - caddy_data:/data
+#       - caddy_config:/config
+#     networks: [caddy_net]
+#
+# volumes:
+#   caddy_data:
+#   caddy_config:
+#
+# networks:
+#   caddy_net:
+#     external: true

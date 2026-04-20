@@ -73,13 +73,10 @@ services:
       NODE_ENV: production
       API_INTERNAL_URL: http://api:4000
     depends_on: [api]
-    # Bind only to loopback. The host's Caddy reverse-proxies panel.example
-    # to 127.0.0.1:3000 over HTTPS. Nothing is published on the public
-    # interface. For a Dockerised Caddy instead, drop this ports: block and
-    # attach web to Caddy's shared network, then reverse_proxy web:3000.
-    ports:
-      - "127.0.0.1:${WEB_PORT:-3000}:3000"
-    networks: [cofemine_internal]
+    # No ports published on the host. Caddy (running in Docker) reaches the
+    # panel via the shared external network below as `web:3000`. The network
+    # must be pre-created on the host: `docker network create caddy_net`.
+    networks: [cofemine_internal, caddy_net]
     logging:
       driver: json-file
       options: { max-size: "10m", max-file: "5" }
@@ -95,3 +92,10 @@ networks:
   cofemine_mcnet:
     name: cofemine_mcnet
     driver: bridge
+  # Shared bridge that Caddy attaches to. Pre-create with:
+  #   docker network create caddy_net
+  # Then add `networks: [caddy_net]` to your Caddy service, and
+  # `reverse_proxy web:3000` in the Caddyfile.
+  caddy_net:
+    name: ${CADDY_NETWORK:-caddy_net}
+    external: true
