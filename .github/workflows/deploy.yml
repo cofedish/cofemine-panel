@@ -65,12 +65,20 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     env:
-      # TEMPORARY: force hard restart on every deploy until the stack is
-      # stable. Flip this back to the conditional form once things settle:
-      #   github.event.inputs.hard_restart == 'true'
-      #   || contains(github.event.head_commit.message, '[reset-stack]')
-      #   || contains(github.event.head_commit.message, '[hard-restart]')
-      HARD_RESTART: "true"
+      # Default strategy: `up -d --force-recreate`. Recreates containers
+      # (new images + new config apply) but does NOT tear down networks.
+      # Re-creating networks via `docker compose down` has reproducibly
+      # left Docker on kernel 6.17 + nftables in a stale-veth state where
+      # containers share a bridge but TCP silently drops — see incident
+      # history. Hard reset (`down && up -d`) is still available via the
+      # `[reset-stack]` / `[hard-restart]` commit-message marker or the
+      # workflow_dispatch checkbox, for when you need to clear networks.
+      HARD_RESTART: >-
+        ${{
+          github.event.inputs.hard_restart == 'true'
+          || contains(github.event.head_commit.message, '[reset-stack]')
+          || contains(github.event.head_commit.message, '[hard-restart]')
+        }}
     steps:
       - name: SSH pull & restart
         uses: appleboy/ssh-action@v1.2.0
@@ -96,14 +104,19 @@ jobs:
             echo "::endgroup::"
 
             if [ "${HARD_RESTART:-false}" = "true" ]; then
-              echo "::group::docker compose down (hard restart)"
+              echo "::group::docker compose down (hard restart — network reset)"
               $COMPOSE down || true
               echo "::endgroup::"
+              echo "::group::docker compose up -d"
+              $COMPOSE up -d
+              echo "::endgroup::"
+            else
+              echo "::group::docker compose up -d --force-recreate (preserve networks)"
+              # Recreate containers so new images take effect, but keep the
+              # existing networks so we don't hit the stale-veth bug.
+              $COMPOSE up -d --force-recreate
+              echo "::endgroup::"
             fi
-
-            echo "::group::docker compose up -d"
-            $COMPOSE up -d
-            echo "::endgroup::"
 
             echo "::group::ps after up"
             $COMPOSE ps
