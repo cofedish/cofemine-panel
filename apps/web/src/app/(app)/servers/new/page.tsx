@@ -84,9 +84,9 @@ export default function CreateServerPage(): JSX.Element {
     <form onSubmit={submit} className="max-w-2xl space-y-6">
       <div>
         <h1 className="text-2xl font-semibold">Create server</h1>
-        <p className="text-sm text-zinc-400 mt-1">
+        <p className="text-sm text-ink-secondary mt-1">
           Minecraft servers run as sibling Docker containers using{" "}
-          <code className="text-zinc-200">itzg/minecraft-server</code>.
+          <code className="text-ink">itzg/minecraft-server</code>.
         </p>
       </div>
 
@@ -246,7 +246,7 @@ function Labeled({
 }): JSX.Element {
   return (
     <div className="space-y-1">
-      <div className="text-xs text-zinc-400">{label}</div>
+      <div className="text-xs text-ink-secondary">{label}</div>
       {children}
     </div>
   );

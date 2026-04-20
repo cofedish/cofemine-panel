@@ -76,7 +76,7 @@ export default function ServerDetailPage(): JSX.Element {
     { refreshInterval: 10000 }
   );
 
-  if (!data) return <div className="text-zinc-500">Loading…</div>;
+  if (!data) return <div className="text-ink-muted">Loading…</div>;
 
   async function lifecycle(action: "start" | "stop" | "restart" | "kill"): Promise<void> {
     try {
@@ -115,7 +115,7 @@ export default function ServerDetailPage(): JSX.Element {
             <h1 className="text-2xl font-semibold">{data.name}</h1>
             <StatusBadge status={data.status} />
           </div>
-          <div className="text-sm text-zinc-400 mt-1">
+          <div className="text-sm text-ink-secondary mt-1">
             {data.type} · {data.version} · {data.node.name}
           </div>
         </div>
@@ -141,15 +141,15 @@ export default function ServerDetailPage(): JSX.Element {
         </div>
       </div>
 
-      <div className="border-b border-surface-border flex gap-1">
+      <div className="border-b border-line flex gap-1">
         {TABS.map((t) => (
           <button
             key={t.key}
             className={cn(
               "px-4 py-2 text-sm rounded-t-md border-b-2",
               tab === t.key
-                ? "border-accent text-white bg-surface-2"
-                : "border-transparent text-zinc-400 hover:text-white"
+                ? "border-accent text-ink bg-surface-2"
+                : "border-transparent text-ink-secondary hover:text-ink"
             )}
             onClick={() => setTab(t.key)}
           >
@@ -175,14 +175,14 @@ export default function ServerDetailPage(): JSX.Element {
 
 function StatusBadge({ status }: { status: string }): JSX.Element {
   const style: Record<string, string> = {
-    running: "bg-accent-muted text-accent",
+    running: "bg-accent-soft text-accent",
     starting: "bg-amber-500/20 text-amber-300",
     stopping: "bg-amber-500/20 text-amber-300",
-    stopped: "bg-zinc-700/40 text-zinc-300",
+    stopped: "bg-surface-2 text-ink-secondary",
     crashed: "bg-danger/20 text-danger",
   };
   return (
-    <span className={cn("badge", style[status] ?? "bg-zinc-700/40 text-zinc-400")}>
+    <span className={cn("badge", style[status] ?? "bg-surface-2 text-ink-secondary")}>
       {status}
     </span>
   );
@@ -233,7 +233,7 @@ function OverviewTab({
           {players ? `${players.online} / ${players.max}` : "—"}
         </Row>
         {players && players.players.length > 0 && (
-          <div className="text-xs text-zinc-400">{players.players.join(", ")}</div>
+          <div className="text-xs text-ink-secondary">{players.players.join(", ")}</div>
         )}
       </div>
     </div>
@@ -249,8 +249,8 @@ function Row({
 }): JSX.Element {
   return (
     <div className="flex items-center justify-between gap-3 text-sm">
-      <dt className="text-zinc-500">{label}</dt>
-      <dd className="text-zinc-200 truncate">{children}</dd>
+      <dt className="text-ink-muted">{label}</dt>
+      <dd className="text-ink truncate">{children}</dd>
     </div>
   );
 }

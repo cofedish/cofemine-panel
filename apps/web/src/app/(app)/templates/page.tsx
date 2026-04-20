@@ -57,19 +57,19 @@ export default function TemplatesPage(): JSX.Element {
 
       <div className="card">
         {data && data.length > 0 ? (
-          <ul className="divide-y divide-surface-border">
+          <ul className="divide-y divide-line">
             {data.map((t) => (
               <li key={t.id} className="px-4 py-3 flex items-center gap-4 text-sm">
                 <div className="flex-1">
                   <div className="font-medium">{t.name}</div>
-                  <div className="text-xs text-zinc-500">{t.type} · {t.version} · {t.memoryMb} MB</div>
+                  <div className="text-xs text-ink-muted">{t.type} · {t.version} · {t.memoryMb} MB</div>
                 </div>
                 <button className="text-xs text-danger hover:underline" onClick={() => remove(t.id)}>delete</button>
               </li>
             ))}
           </ul>
         ) : (
-          <div className="p-6 text-center text-zinc-500">No templates yet.</div>
+          <div className="p-6 text-center text-ink-muted">No templates yet.</div>
         )}
       </div>
     </div>

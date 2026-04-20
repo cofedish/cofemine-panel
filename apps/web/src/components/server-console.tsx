@@ -56,23 +56,23 @@ export function ServerConsole({ serverId }: { serverId: string }): JSX.Element {
 
   return (
     <div className="card overflow-hidden">
-      <div className="flex items-center justify-between px-4 py-2 border-b border-surface-border text-xs">
+      <div className="flex items-center justify-between px-4 py-2 border-b border-line text-xs">
         <span>Console</span>
-        <span className={connected ? "text-accent" : "text-zinc-500"}>
+        <span className={connected ? "text-accent" : "text-ink-muted"}>
           {connected ? "connected" : "disconnected"}
         </span>
       </div>
       <div
         ref={viewRef}
-        className="font-mono text-xs whitespace-pre-wrap bg-surface-0 p-4 h-[480px] overflow-auto"
+        className="font-mono text-xs whitespace-pre-wrap bg-base p-4 h-[480px] overflow-auto"
       >
         {lines.length === 0 ? (
-          <div className="text-zinc-600">Waiting for output…</div>
+          <div className="text-ink-muted">Waiting for output…</div>
         ) : (
           lines.join("")
         )}
       </div>
-      <div className="p-3 border-t border-surface-border flex gap-2">
+      <div className="p-3 border-t border-line flex gap-2">
         <input
           className="input font-mono text-xs"
           placeholder="say Hello, world"

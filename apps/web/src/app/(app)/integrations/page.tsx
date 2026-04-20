@@ -41,11 +41,11 @@ export default function IntegrationsPage(): JSX.Element {
         <div className="flex items-center justify-between">
           <div>
             <h2 className="font-medium">Modrinth</h2>
-            <p className="text-sm text-zinc-400">
+            <p className="text-sm text-ink-secondary">
               Public API. No configuration required.
             </p>
           </div>
-          <span className="badge bg-accent-muted text-accent">
+          <span className="badge bg-accent-soft text-accent">
             {data?.providers.modrinth.enabled ? "enabled" : "disabled"}
           </span>
         </div>
@@ -55,7 +55,7 @@ export default function IntegrationsPage(): JSX.Element {
         <div className="flex items-center justify-between">
           <div>
             <h2 className="font-medium">CurseForge</h2>
-            <p className="text-sm text-zinc-400">
+            <p className="text-sm text-ink-secondary">
               Requires an API key from{" "}
               <a
                 className="text-accent underline"
@@ -70,7 +70,7 @@ export default function IntegrationsPage(): JSX.Element {
             </p>
           </div>
           <span
-            className={`badge ${data?.providers.curseforge.enabled ? "bg-accent-muted text-accent" : "bg-zinc-700/50 text-zinc-300"}`}
+            className={`badge ${data?.providers.curseforge.enabled ? "bg-accent-soft text-accent" : "bg-surface-2 text-ink-secondary"}`}
           >
             {data?.providers.curseforge.enabled ? "enabled" : "disabled"}
           </span>
@@ -91,7 +91,7 @@ export default function IntegrationsPage(): JSX.Element {
             </button>
           )}
         </div>
-        {msg && <div className="text-sm text-zinc-300">{msg}</div>}
+        {msg && <div className="text-sm text-ink-secondary">{msg}</div>}
       </div>
     </div>
   );

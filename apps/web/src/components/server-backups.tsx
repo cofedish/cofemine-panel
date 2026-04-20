@@ -47,14 +47,14 @@ export function ServerBackups({ serverId }: { serverId: string }): JSX.Element {
 
   return (
     <div className="card">
-      <div className="flex items-center justify-between px-4 py-3 border-b border-surface-border">
+      <div className="flex items-center justify-between px-4 py-3 border-b border-line">
         <h3 className="font-medium">Backups</h3>
         <button className="btn-primary" onClick={create} disabled={busy}>
           {busy ? "Creating…" : "Create backup"}
         </button>
       </div>
       {data && data.length > 0 ? (
-        <ul className="divide-y divide-surface-border">
+        <ul className="divide-y divide-line">
           {data.map((b) => (
             <li
               key={b.id}
@@ -62,14 +62,14 @@ export function ServerBackups({ serverId }: { serverId: string }): JSX.Element {
             >
               <div className="flex-1 min-w-0">
                 <div className="font-medium truncate">{b.name}</div>
-                <div className="text-xs text-zinc-500">
+                <div className="text-xs text-ink-muted">
                   {new Date(b.createdAt).toLocaleString()} ·{" "}
                   {b.sizeBytes
                     ? `${(Number(b.sizeBytes) / 1024 / 1024).toFixed(1)} MB`
                     : "—"}
                 </div>
               </div>
-              <span className="badge bg-surface-3 text-zinc-300">{b.status}</span>
+              <span className="badge badge-muted">{b.status}</span>
               <button
                 className="text-xs hover:underline"
                 onClick={() => restore(b.id)}
@@ -87,7 +87,7 @@ export function ServerBackups({ serverId }: { serverId: string }): JSX.Element {
           ))}
         </ul>
       ) : (
-        <div className="p-10 text-center text-zinc-500">
+        <div className="p-10 text-center text-ink-muted">
           No backups yet. Click <b>Create backup</b> to snapshot the world + configs.
         </div>
       )}

@@ -20,7 +20,7 @@ export default function AuditPage(): JSX.Element {
       <div className="card">
         {data && data.items.length > 0 ? (
           <table className="w-full text-sm">
-            <thead className="text-left text-xs text-zinc-500 uppercase">
+            <thead className="text-left text-xs text-ink-muted uppercase">
               <tr>
                 <th className="px-4 py-3">When</th>
                 <th className="px-4 py-3">Who</th>
@@ -30,7 +30,7 @@ export default function AuditPage(): JSX.Element {
                 <th className="px-4 py-3">Metadata</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-surface-border">
+            <tbody className="divide-y divide-line">
               {data.items.map((e) => (
                 <tr key={e.id} className="hover:bg-surface-2">
                   <td className="px-4 py-2 font-mono text-xs">{new Date(e.createdAt).toLocaleString()}</td>
@@ -46,7 +46,7 @@ export default function AuditPage(): JSX.Element {
             </tbody>
           </table>
         ) : (
-          <div className="p-6 text-center text-zinc-500">No audit events yet.</div>
+          <div className="p-6 text-center text-ink-muted">No audit events yet.</div>
         )}
       </div>
     </div>

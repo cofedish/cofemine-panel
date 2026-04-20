@@ -13,19 +13,19 @@ export default function SettingsPage(): JSX.Element {
         <h2 className="font-medium">Account</h2>
         <div className="text-sm space-y-1">
           <div>
-            <span className="text-zinc-500">Username:</span> {data?.username}
+            <span className="text-ink-muted">Username:</span> {data?.username}
           </div>
           <div>
-            <span className="text-zinc-500">Email:</span> {data?.email}
+            <span className="text-ink-muted">Email:</span> {data?.email}
           </div>
           <div>
-            <span className="text-zinc-500">Role:</span> {data?.role}
+            <span className="text-ink-muted">Role:</span> {data?.role}
           </div>
         </div>
       </div>
       <div className="card p-5 space-y-3">
         <h2 className="font-medium">Panel</h2>
-        <p className="text-sm text-zinc-400">
+        <p className="text-sm text-ink-secondary">
           Cofemine Panel v0.1.0 — self-hosted Docker-first Minecraft control
           panel. See <code>docs/</code> for architecture, deployment, and API
           reference.

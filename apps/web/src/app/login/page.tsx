@@ -1,7 +1,10 @@
 "use client";
 import { useState, useEffect, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
+import { motion } from "framer-motion";
 import { api, ApiError } from "@/lib/api";
+import { LogoMark, Wordmark } from "@/components/logo";
+import { ThemeToggle } from "@/components/theme-toggle";
 
 export default function LoginPage(): JSX.Element {
   const router = useRouter();
@@ -34,19 +37,35 @@ export default function LoginPage(): JSX.Element {
   }
 
   return (
-    <div className="min-h-screen grid place-items-center bg-surface-0">
-      <form
+    <div className="min-h-screen grid place-items-center px-4 relative">
+      <div className="absolute top-4 right-4">
+        <ThemeToggle />
+      </div>
+      <motion.form
         onSubmit={submit}
-        className="card p-8 w-[360px] space-y-4 shadow-xl"
+        initial={{ opacity: 0, y: 12 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.35, ease: [0.2, 0.8, 0.2, 1] }}
+        className="card p-8 w-full max-w-[400px] space-y-5 shadow-lift"
       >
-        <div>
-          <div className="text-xl font-semibold">
-            <span className="text-accent">cofemine</span> panel
+        <div className="flex items-center gap-3">
+          <span className="w-10 h-10 rounded-lg bg-accent-soft text-ink grid place-items-center block-accent">
+            <LogoMark size={24} />
+          </span>
+          <div>
+            <Wordmark className="text-xl" />
+            <div className="text-xs text-ink-muted mt-0.5">
+              Self-hosted Minecraft control
+            </div>
           </div>
-          <div className="text-sm text-zinc-400 mt-1">Sign in to continue</div>
         </div>
+
+        <div className="divider" />
+
         <div className="space-y-2">
-          <label className="text-xs text-zinc-400">Username or email</label>
+          <label className="text-xs text-ink-muted font-medium">
+            Username or email
+          </label>
           <input
             className="input"
             autoFocus
@@ -56,7 +75,7 @@ export default function LoginPage(): JSX.Element {
           />
         </div>
         <div className="space-y-2">
-          <label className="text-xs text-zinc-400">Password</label>
+          <label className="text-xs text-ink-muted font-medium">Password</label>
           <input
             className="input"
             type="password"
@@ -65,11 +84,23 @@ export default function LoginPage(): JSX.Element {
             required
           />
         </div>
-        {err && <div className="text-danger text-sm">{err}</div>}
-        <button disabled={busy} className="btn-primary w-full justify-center">
-          {busy ? "Signing in…" : "Sign in"}
+        {err && (
+          <motion.div
+            initial={{ opacity: 0, y: -4 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="text-sm text-danger bg-danger-soft border border-danger/20 rounded-lg px-3 py-2"
+          >
+            {err}
+          </motion.div>
+        )}
+        <button
+          disabled={busy}
+          className="btn-primary w-full justify-center"
+          type="submit"
+        >
+          {busy ? "Brewing your session…" : "Sign in"}
         </button>
-      </form>
+      </motion.form>
     </div>
   );
 }

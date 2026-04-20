@@ -46,7 +46,10 @@
       "Bash(git commit -q -m 'ci: force hard restart on every deploy \\(temporary\\) + step markers *)",
       "Bash(git commit -q -m 'fix\\(ops\\): share caddy_net between web and user'\\\\''s Caddy container *)",
       "Bash(git commit -q -m 'ops: default shared network name to caddy-net \\(hyphen\\) *)",
-      "Bash(git commit -q -m 'ops: default shared network name to '\\\\''caddy'\\\\'' \\(matches user'\\\\''s setup\\) *)"
+      "Bash(git commit -q -m 'ops: default shared network name to '\\\\''caddy'\\\\'' \\(matches user'\\\\''s setup\\) *)",
+      "Bash(xargs -0 sed -i -e s/text-zinc-200/text-ink/g -e s/text-zinc-300/text-ink-secondary/g -e s/text-zinc-400/text-ink-secondary/g -e s/text-zinc-500/text-ink-muted/g -e s/text-zinc-600/text-ink-muted/g -e 's/bg-zinc-700\\\\/40/bg-surface-2/g' -e 's/bg-zinc-700\\\\/50/bg-surface-2/g' -e s/hover:text-white/hover:text-ink/g -e s/text-white/text-ink/g -e s/border-surface-border/border-line/g -e s/bg-surface-border/bg-line/g -e s/bg-surface-0/bg-base/g -e s/bg-accent-muted/bg-accent-soft/g -e 's/bg-surface-3 text-ink-secondary/badge-muted/g')",
+      "Bash(xargs -0 sed -i 's/divide-surface-border/divide-line/g')",
+      "Bash(git commit -q -m 'feat\\(web\\): coffee-themed light+dark UI with framer-motion *)"
     ]
   }
 }

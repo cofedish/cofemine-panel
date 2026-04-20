@@ -66,21 +66,21 @@ export default function NodesPage(): JSX.Element {
 
       <div className="card">
         {data && data.length > 0 ? (
-          <ul className="divide-y divide-surface-border">
+          <ul className="divide-y divide-line">
             {data.map((n) => (
               <li key={n.id} className="px-4 py-3 flex items-center gap-4 text-sm">
                 <div className="flex-1">
                   <div className="font-medium">{n.name}</div>
-                  <div className="text-xs text-zinc-500">{n.host}</div>
+                  <div className="text-xs text-ink-muted">{n.host}</div>
                 </div>
-                <span className="badge bg-surface-3 text-zinc-300">{n.status}</span>
+                <span className="badge badge-muted">{n.status}</span>
                 <button className="text-xs hover:underline" onClick={() => check(n.id)}>health</button>
                 <button className="text-xs text-danger hover:underline" onClick={() => remove(n.id)}>remove</button>
               </li>
             ))}
           </ul>
         ) : (
-          <div className="p-6 text-center text-zinc-500">No nodes configured.</div>
+          <div className="p-6 text-center text-ink-muted">No nodes configured.</div>
         )}
       </div>
     </div>

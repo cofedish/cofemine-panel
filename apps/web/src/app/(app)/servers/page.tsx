@@ -19,7 +19,7 @@ export default function ServersPage(): JSX.Element {
         </Link>
       </div>
       {isLoading ? (
-        <div className="card p-10 text-center text-zinc-500">Loading…</div>
+        <div className="card p-10 text-center text-ink-muted">Loading…</div>
       ) : servers && servers.length > 0 ? (
         <div className="grid grid-cols-2 gap-4">
           {servers.map((s) => (
@@ -27,7 +27,7 @@ export default function ServersPage(): JSX.Element {
           ))}
         </div>
       ) : (
-        <div className="card p-10 text-center text-zinc-500">
+        <div className="card p-10 text-center text-ink-muted">
           No servers yet. Create your first one.
         </div>
       )}

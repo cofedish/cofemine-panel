@@ -42,7 +42,7 @@ export function AuthGate({ children }: { children: ReactNode }): JSX.Element {
 
   if (status !== "ok") {
     return (
-      <div className="min-h-screen flex items-center justify-center text-zinc-500 text-sm">
+      <div className="min-h-screen flex items-center justify-center text-ink-muted text-sm">
         Loading…
       </div>
     );

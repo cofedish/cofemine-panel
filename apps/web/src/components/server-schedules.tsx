@@ -89,11 +89,11 @@ export function ServerSchedules({
       </div>
 
       <div className="card">
-        <div className="px-4 py-3 border-b border-surface-border font-medium">
+        <div className="px-4 py-3 border-b border-line font-medium">
           Active schedules
         </div>
         {data && data.length > 0 ? (
-          <ul className="divide-y divide-surface-border">
+          <ul className="divide-y divide-line">
             {data.map((s) => (
               <li
                 key={s.id}
@@ -101,12 +101,12 @@ export function ServerSchedules({
               >
                 <div className="flex-1">
                   <div className="font-medium">{s.name}</div>
-                  <div className="text-xs text-zinc-500 font-mono">
+                  <div className="text-xs text-ink-muted font-mono">
                     {s.cron} · {s.action}
                     {s.payload ? ` · ${JSON.stringify(s.payload)}` : ""}
                   </div>
                 </div>
-                <span className="badge bg-surface-3 text-zinc-300">
+                <span className="badge badge-muted">
                   {s.enabled ? "enabled" : "disabled"}
                 </span>
                 <button
@@ -119,7 +119,7 @@ export function ServerSchedules({
             ))}
           </ul>
         ) : (
-          <div className="p-6 text-center text-zinc-500 text-sm">
+          <div className="p-6 text-center text-ink-muted text-sm">
             No schedules. Common example: <code>0 4 * * *</code> for nightly backups.
           </div>
         )}

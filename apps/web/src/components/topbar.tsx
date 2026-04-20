@@ -3,6 +3,7 @@ import { useRouter } from "next/navigation";
 import useSWR from "swr";
 import { api, fetcher } from "@/lib/api";
 import { LogOut } from "lucide-react";
+import { ThemeToggle } from "./theme-toggle";
 
 type Me = { id: string; email: string; username: string; role: string };
 
@@ -16,21 +17,37 @@ export function Topbar(): JSX.Element {
   }
 
   return (
-    <header className="h-14 border-b border-surface-border px-6 flex items-center justify-between bg-surface-1/80 backdrop-blur">
-      <div className="text-sm text-zinc-400">Welcome back</div>
-      <div className="flex items-center gap-4 text-sm">
+    <header className="h-14 border-b border-line px-6 flex items-center justify-between bg-surface-1/60 backdrop-blur-xl sticky top-0 z-30">
+      <div className="text-sm text-ink-muted">
+        {greeting()}
+        {data?.username ? (
+          <>
+            , <span className="text-ink font-medium">{data.username}</span>
+          </>
+        ) : null}
+      </div>
+      <div className="flex items-center gap-2 text-sm">
         {data && (
-          <div className="flex items-center gap-2">
-            <div className="text-zinc-200">{data.username}</div>
-            <span className="badge bg-accent-muted text-accent">
-              {data.role}
-            </span>
-          </div>
+          <span className="badge badge-accent mr-1">{data.role}</span>
         )}
-        <button onClick={logout} className="btn-ghost !py-1.5 !px-2">
-          <LogOut size={14} /> Logout
+        <ThemeToggle />
+        <button
+          onClick={logout}
+          className="btn-ghost !py-1.5 !px-2.5"
+          aria-label="Sign out"
+        >
+          <LogOut size={14} />
+          <span className="hidden sm:inline">Sign out</span>
         </button>
       </div>
     </header>
   );
+}
+
+function greeting(): string {
+  const h = new Date().getHours();
+  if (h < 6) return "Late brew";
+  if (h < 12) return "Good morning";
+  if (h < 18) return "Good afternoon";
+  return "Good evening";
 }

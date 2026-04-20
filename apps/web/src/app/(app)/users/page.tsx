@@ -57,20 +57,20 @@ export default function UsersPage(): JSX.Element {
       </div>
       <div className="card">
         {data && data.length > 0 ? (
-          <ul className="divide-y divide-surface-border">
+          <ul className="divide-y divide-line">
             {data.map((u) => (
               <li key={u.id} className="px-4 py-3 flex items-center gap-4 text-sm">
                 <div className="flex-1">
                   <div className="font-medium">{u.username}</div>
-                  <div className="text-xs text-zinc-500">{u.email}</div>
+                  <div className="text-xs text-ink-muted">{u.email}</div>
                 </div>
-                <span className="badge bg-surface-3 text-zinc-300">{u.role}</span>
+                <span className="badge badge-muted">{u.role}</span>
                 <button className="text-xs text-danger hover:underline" onClick={() => remove(u.id)}>delete</button>
               </li>
             ))}
           </ul>
         ) : (
-          <div className="p-6 text-center text-zinc-500">No users.</div>
+          <div className="p-6 text-center text-ink-muted">No users.</div>
         )}
       </div>
     </div>

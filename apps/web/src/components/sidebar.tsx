@@ -1,6 +1,7 @@
 "use client";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { motion } from "framer-motion";
 import {
   LayoutDashboard,
   Server,
@@ -12,6 +13,7 @@ import {
   Settings,
 } from "lucide-react";
 import { cn } from "@/lib/cn";
+import { LogoMark, Wordmark } from "./logo";
 
 const links = [
   { href: "/", label: "Dashboard", icon: LayoutDashboard },
@@ -27,14 +29,21 @@ const links = [
 export function Sidebar(): JSX.Element {
   const pathname = usePathname();
   return (
-    <aside className="w-60 shrink-0 bg-surface-1 border-r border-surface-border h-screen sticky top-0 flex flex-col">
-      <div className="px-5 py-5 border-b border-surface-border">
-        <div className="font-semibold text-lg tracking-tight">
-          <span className="text-accent">cofemine</span> panel
-        </div>
-        <div className="text-xs text-zinc-500 mt-0.5">Minecraft control</div>
+    <aside className="w-64 shrink-0 h-screen sticky top-0 flex flex-col bg-surface-1/70 backdrop-blur-xl border-r border-line">
+      <div className="px-5 py-5 border-b border-line">
+        <Link href="/" className="flex items-center gap-2.5 group">
+          <span className="relative flex items-center justify-center w-9 h-9 rounded-lg bg-accent-soft text-ink block-accent animate-subtle-bob">
+            <LogoMark size={22} />
+          </span>
+          <span className="flex flex-col leading-tight">
+            <Wordmark className="text-lg" />
+            <span className="text-[10px] uppercase tracking-[0.18em] text-ink-muted">
+              Minecraft control
+            </span>
+          </span>
+        </Link>
       </div>
-      <nav className="flex-1 py-3 px-2 space-y-1">
+      <nav className="flex-1 py-3 px-2 space-y-0.5">
         {links.map((l) => {
           const active =
             l.href === "/"
@@ -46,20 +55,33 @@ export function Sidebar(): JSX.Element {
               key={l.href}
               href={l.href}
               className={cn(
-                "flex items-center gap-3 px-3 py-2 rounded-md text-sm text-zinc-300",
+                "relative flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors",
                 active
-                  ? "bg-surface-3 text-white"
-                  : "hover:bg-surface-2 hover:text-white"
+                  ? "text-ink"
+                  : "text-ink-secondary hover:text-ink hover:bg-surface-2"
               )}
             >
-              <Icon size={16} />
-              {l.label}
+              {active && (
+                <motion.span
+                  layoutId="sidebar-active"
+                  className="absolute inset-0 rounded-lg bg-accent-soft"
+                  transition={{ type: "spring", duration: 0.38, bounce: 0.12 }}
+                />
+              )}
+              <Icon
+                size={16}
+                className={cn(
+                  "relative z-10 transition-colors",
+                  active ? "text-accent" : "text-ink-muted"
+                )}
+              />
+              <span className="relative z-10 font-medium">{l.label}</span>
             </Link>
           );
         })}
       </nav>
-      <div className="px-5 py-3 text-xs text-zinc-500 border-t border-surface-border">
-        v0.1.0 MVP
+      <div className="px-5 py-3 text-[11px] text-ink-muted border-t border-line">
+        v0.1.0 MVP · dark/light
       </div>
     </aside>
   );

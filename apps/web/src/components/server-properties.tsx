@@ -28,7 +28,7 @@ export function ServerProperties({ serverId }: { serverId: string }): JSX.Elemen
   const [edits, setEdits] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
 
-  if (!data) return <div className="text-zinc-500">Loading…</div>;
+  if (!data) return <div className="text-ink-muted">Loading…</div>;
 
   const merged = { ...data.parsed, ...edits };
   const keys = Array.from(
@@ -63,7 +63,7 @@ export function ServerProperties({ serverId }: { serverId: string }): JSX.Elemen
       <div className="grid grid-cols-2 gap-3">
         {keys.map((k) => (
           <div key={k} className="space-y-1">
-            <label className="text-xs text-zinc-400 font-mono">{k}</label>
+            <label className="text-xs text-ink-secondary font-mono">{k}</label>
             <input
               className="input"
               value={merged[k] ?? ""}
@@ -74,7 +74,7 @@ export function ServerProperties({ serverId }: { serverId: string }): JSX.Elemen
           </div>
         ))}
       </div>
-      <div className="text-xs text-zinc-500">
+      <div className="text-xs text-ink-muted">
         Editing here updates the file directly. Most changes take effect on
         next restart.
       </div>

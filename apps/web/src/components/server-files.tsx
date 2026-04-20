@@ -59,7 +59,7 @@ export function ServerFiles({ serverId }: { serverId: string }): JSX.Element {
 
   return (
     <div className="card">
-      <div className="px-4 py-2 border-b border-surface-border flex items-center gap-2 text-sm">
+      <div className="px-4 py-2 border-b border-line flex items-center gap-2 text-sm">
         <button
           className="btn-ghost !py-1 !px-2"
           onClick={up}
@@ -67,7 +67,7 @@ export function ServerFiles({ serverId }: { serverId: string }): JSX.Element {
         >
           <ChevronLeft size={14} />
         </button>
-        <span className="text-zinc-400">/{path}</span>
+        <span className="text-ink-secondary">/{path}</span>
         {data?.kind === "file" && (
           <button
             className="ml-auto btn-primary !py-1 !px-3"
@@ -79,9 +79,9 @@ export function ServerFiles({ serverId }: { serverId: string }): JSX.Element {
         )}
       </div>
       {data?.kind === "dir" && (
-        <ul className="divide-y divide-surface-border text-sm">
+        <ul className="divide-y divide-line text-sm">
           {data.entries.length === 0 && (
-            <li className="px-4 py-6 text-zinc-500">Empty directory</li>
+            <li className="px-4 py-6 text-ink-muted">Empty directory</li>
           )}
           {data.entries.map((e) => (
             <li
@@ -95,7 +95,7 @@ export function ServerFiles({ serverId }: { serverId: string }): JSX.Element {
                 {e.isDir ? (
                   <Folder size={14} className="text-accent" />
                 ) : (
-                  <FileIcon size={14} className="text-zinc-400" />
+                  <FileIcon size={14} className="text-ink-secondary" />
                 )}
                 <span>{e.name}</span>
               </button>
@@ -112,12 +112,12 @@ export function ServerFiles({ serverId }: { serverId: string }): JSX.Element {
       {data?.kind === "file" && (
         <div>
           {data.truncated ? (
-            <div className="p-6 text-sm text-zinc-500">
+            <div className="p-6 text-sm text-ink-muted">
               File too large to edit in browser ({data.size} bytes).
             </div>
           ) : (
             <textarea
-              className="w-full bg-surface-0 font-mono text-xs p-4 h-[540px] outline-none"
+              className="w-full bg-base font-mono text-xs p-4 h-[540px] outline-none"
               value={editor ?? data.content ?? ""}
               onChange={(e) => {
                 setEditor(e.target.value);
@@ -128,7 +128,7 @@ export function ServerFiles({ serverId }: { serverId: string }): JSX.Element {
         </div>
       )}
       {data?.kind === "missing" && (
-        <div className="p-6 text-sm text-zinc-500">
+        <div className="p-6 text-sm text-ink-muted">
           File does not exist yet. Start the server once to generate default files.
         </div>
       )}

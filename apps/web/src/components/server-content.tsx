@@ -143,7 +143,7 @@ export function ServerContent({ serverId }: { serverId: string }): JSX.Element {
           Search
         </button>
       </div>
-      {msg && <div className="text-sm text-zinc-300">{msg}</div>}
+      {msg && <div className="text-sm text-ink-secondary">{msg}</div>}
       <div className="grid grid-cols-2 gap-3">
         {results.map((r) => (
           <div key={r.id} className="card p-4 flex gap-3">
@@ -156,10 +156,10 @@ export function ServerContent({ serverId }: { serverId: string }): JSX.Element {
             )}
             <div className="flex-1 min-w-0">
               <div className="font-medium truncate">{r.name}</div>
-              <div className="text-xs text-zinc-400 mt-0.5 line-clamp-2">
+              <div className="text-xs text-ink-secondary mt-0.5 line-clamp-2">
                 {r.description}
               </div>
-              <div className="text-xs text-zinc-500 mt-2">
+              <div className="text-xs text-ink-muted mt-2">
                 by {r.author ?? "—"} · {r.downloads?.toLocaleString() ?? 0} dls
               </div>
             </div>
@@ -173,7 +173,7 @@ export function ServerContent({ serverId }: { serverId: string }): JSX.Element {
         ))}
       </div>
       {cfDisabled && provider === "curseforge" && (
-        <div className="card p-5 text-sm text-zinc-400">
+        <div className="card p-5 text-sm text-ink-secondary">
           CurseForge requires an API key. Go to <b>Integrations</b> and paste
           one in. Without a key, CurseForge mods can be installed manually by
           uploading the JAR to the <code>mods/</code> folder in the File
@@ -205,8 +205,8 @@ function ProviderPill({
       className={cn(
         "px-3 py-1.5 rounded-full text-sm border",
         active
-          ? "bg-accent-muted border-accent/40 text-accent"
-          : "bg-surface-2 border-surface-border text-zinc-300",
+          ? "bg-accent-soft border-accent/40 text-accent"
+          : "bg-surface-2 border-line text-ink-secondary",
         disabled && "opacity-40 cursor-not-allowed"
       )}
     >

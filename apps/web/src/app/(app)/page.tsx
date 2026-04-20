@@ -3,7 +3,8 @@ import useSWR from "swr";
 import Link from "next/link";
 import { fetcher } from "@/lib/api";
 import { ServerCard, type ServerSummary } from "@/components/server-card";
-import { Server, HardDrive, Users } from "lucide-react";
+import { Stagger, StaggerItem } from "@/components/motion";
+import { Server, HardDrive, Users, Plus } from "lucide-react";
 
 export default function Dashboard(): JSX.Element {
   const { data: servers } = useSWR<ServerSummary[]>("/servers", fetcher);
@@ -13,42 +14,84 @@ export default function Dashboard(): JSX.Element {
   );
   const { data: users } = useSWR<Array<unknown>>("/users", fetcher);
 
+  const runningCount =
+    servers?.filter((s) => s.status === "running").length ?? 0;
+
   return (
-    <div className="space-y-8">
-      <div>
-        <h1 className="text-2xl font-semibold">Dashboard</h1>
-        <p className="text-sm text-zinc-400 mt-1">
-          Overview of your infrastructure.
-        </p>
+    <div className="space-y-10">
+      <div className="flex items-end justify-between gap-4">
+        <div>
+          <h1 className="heading-xl">Dashboard</h1>
+          <p className="text-ink-muted mt-2">
+            {servers && servers.length > 0
+              ? `${servers.length} server${servers.length === 1 ? "" : "s"}, ${runningCount} running.`
+              : "Spin up your first Minecraft server in under a minute."}
+          </p>
+        </div>
+        <Link href="/servers/new" className="btn-primary">
+          <Plus size={16} /> Create server
+        </Link>
       </div>
 
-      <div className="grid grid-cols-3 gap-4">
-        <Stat icon={<Server size={18} />} label="Servers" value={servers?.length ?? 0} />
-        <Stat icon={<HardDrive size={18} />} label="Nodes online" value={
-          nodes?.filter((n) => n.status === "ONLINE").length ?? 0
-        } suffix={`/ ${nodes?.length ?? 0}`} />
-        <Stat icon={<Users size={18} />} label="Users" value={users?.length ?? "—"} />
-      </div>
+      <Stagger className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <StaggerItem>
+          <Stat
+            icon={<Server size={18} />}
+            label="Servers"
+            value={servers?.length ?? "—"}
+            hint={
+              servers && servers.length > 0
+                ? `${runningCount} running`
+                : "none yet"
+            }
+          />
+        </StaggerItem>
+        <StaggerItem>
+          <Stat
+            icon={<HardDrive size={18} />}
+            label="Nodes online"
+            value={
+              nodes
+                ? `${nodes.filter((n) => n.status === "ONLINE").length}/${nodes.length}`
+                : "—"
+            }
+            hint="Docker hosts"
+          />
+        </StaggerItem>
+        <StaggerItem>
+          <Stat
+            icon={<Users size={18} />}
+            label="Team"
+            value={users?.length ?? "—"}
+            hint="members with access"
+          />
+        </StaggerItem>
+      </Stagger>
 
-      <div>
-        <div className="flex items-center justify-between mb-3">
-          <h2 className="text-lg font-medium">Your servers</h2>
-          <Link href="/servers/new" className="btn-primary">
-            Create server
-          </Link>
+      <section>
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="heading-lg">Your servers</h2>
+          {servers && servers.length > 0 && (
+            <Link
+              href="/servers"
+              className="text-sm text-ink-secondary hover:text-accent transition-colors"
+            >
+              View all →
+            </Link>
+          )}
         </div>
         {servers && servers.length > 0 ? (
-          <div className="grid grid-cols-2 gap-4">
-            {servers.map((s) => (
-              <ServerCard key={s.id} server={s} />
+          <Stagger className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            {servers.slice(0, 6).map((s) => (
+              <StaggerItem key={s.id}>
+                <ServerCard server={s} />
+              </StaggerItem>
             ))}
-          </div>
+          </Stagger>
         ) : (
-          <div className="card p-10 text-center text-zinc-500">
-            No servers yet. Click <b>Create server</b> to spin one up.
-          </div>
+          <EmptyState />
         )}
-      </div>
+      </section>
     </div>
   );
 }
@@ -57,27 +100,43 @@ function Stat({
   icon,
   label,
   value,
-  suffix,
+  hint,
 }: {
   icon: React.ReactNode;
   label: string;
   value: React.ReactNode;
-  suffix?: string;
+  hint?: string;
 }): JSX.Element {
   return (
     <div className="card p-5 flex items-center gap-4">
-      <div className="w-10 h-10 rounded-md bg-surface-2 grid place-items-center text-accent">
+      <div className="w-11 h-11 rounded-lg bg-accent-soft text-accent grid place-items-center block-accent">
         {icon}
       </div>
-      <div>
-        <div className="text-xs text-zinc-400 uppercase tracking-wide">
+      <div className="min-w-0">
+        <div className="text-[11px] uppercase tracking-wider text-ink-muted">
           {label}
         </div>
-        <div className="text-2xl font-semibold mt-0.5">
-          {value}
-          {suffix && <span className="text-sm text-zinc-500 ml-1">{suffix}</span>}
-        </div>
+        <div className="text-2xl font-semibold mt-0.5">{value}</div>
+        {hint && <div className="text-xs text-ink-muted mt-0.5">{hint}</div>}
       </div>
+    </div>
+  );
+}
+
+function EmptyState(): JSX.Element {
+  return (
+    <div className="card p-12 text-center">
+      <div className="mx-auto w-14 h-14 rounded-2xl bg-accent-soft text-accent grid place-items-center block-accent mb-4">
+        <Server size={24} />
+      </div>
+      <div className="heading-lg mb-1">No servers yet</div>
+      <p className="text-ink-muted max-w-md mx-auto mb-5">
+        Pick a type (Vanilla, Paper, Fabric, Forge…), choose a version, and the
+        agent will spin up a fresh Minecraft container for you.
+      </p>
+      <Link href="/servers/new" className="btn-primary">
+        <Plus size={16} /> Create your first server
+      </Link>
     </div>
   );
 }
