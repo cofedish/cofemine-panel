@@ -86,14 +86,20 @@ jobs:
           port: ${{ secrets.DEPLOY_PORT || 22 }}
           script: |
             set -e
-            for i in 1 2 3 4 5 6 7 8 9 10; do
-              if docker compose -f "${{ secrets.DEPLOY_PATH }}/docker-compose.prod.yml" exec -T api wget -qO- http://localhost:4000/health >/dev/null 2>&1; then
-                echo "API healthy"
+            COMPOSE="docker compose -f ${{ secrets.DEPLOY_PATH }}/docker-compose.prod.yml"
+            # Give the API up to ~3 minutes to come up. First deploys need
+            # Postgres to initialize its data dir + prisma db push + seed.
+            for i in $(seq 1 36); do
+              if $COMPOSE exec -T api wget -qO- http://localhost:4000/health >/dev/null 2>&1; then
+                echo "API healthy (after ${i} checks)"
                 exit 0
               fi
-              echo "waiting for API... ($i/10)"
+              echo "waiting for API... ($i/36)"
               sleep 5
             done
             echo "API did not become healthy in time"
-            docker compose -f "${{ secrets.DEPLOY_PATH }}/docker-compose.prod.yml" logs --tail=200 api
+            echo "--- db logs ---"
+            $COMPOSE logs --tail=50 db || true
+            echo "--- api logs ---"
+            $COMPOSE logs --tail=200 api || true
             exit 1

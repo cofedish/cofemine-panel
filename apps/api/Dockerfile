@@ -22,5 +22,7 @@ FROM base AS runner
 ENV NODE_ENV=production
 COPY --from=build /app /app
 WORKDIR /app/apps/api
+COPY apps/api/docker-entrypoint.sh /usr/local/bin/cofemine-api-entrypoint
+RUN chmod +x /usr/local/bin/cofemine-api-entrypoint
 EXPOSE 4000
-CMD ["sh", "-c", "pnpm exec prisma db push --skip-generate && pnpm exec tsx prisma/seed.ts && node dist/main.js"]
+CMD ["/usr/local/bin/cofemine-api-entrypoint"]
