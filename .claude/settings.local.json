@@ -31,7 +31,15 @@
       "Bash(git fetch *)",
       "Bash(git pull *)",
       "Bash(git stash *)",
-      "Bash(git commit -q -m 'ci: GitHub Actions build+push to GHCR and SSH deploy to server *)"
+      "Bash(git commit -q -m 'ci: GitHub Actions build+push to GHCR and SSH deploy to server *)",
+      "Bash(git ls-tree *)",
+      "Bash(git check-ignore *)",
+      "Bash(git commit -q -m 'fix: un-ignore apps/api/src/backups and strict-type ws message handlers *)",
+      "Bash(git commit -q -m 'fix\\(api\\): Prisma engine binary for Alpine OpenSSL 3 *)",
+      "Bash(mkdir -p ~/.ssh)",
+      "Bash(chmod 700 ~/.ssh)",
+      "Bash(ssh-keygen -t ed25519 -C \"cofemine-deploy\" -f ~/.ssh/cofemine_deploy -N \"\" -q)",
+      "Bash(git commit -q -m 'feat\\(ops\\): bind web to loopback only, document Caddy reverse proxy *)"
     ]
   }
 }

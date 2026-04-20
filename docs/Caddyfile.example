@@ -1,0 +1,17 @@
+# Cofemine Panel — пример секции для Caddyfile на хосте
+#
+# Кладётся в /etc/caddy/Caddyfile. Caddy автоматически получит
+# Let's Encrypt сертификат, сделает HTTP→HTTPS и пропустит
+# WebSocket-апгрейды (для live-консоли панели) без дополнительных
+# заголовков — это поведение Caddy по умолчанию.
+#
+# Замените panel.example.com на ваш домен и перезагрузите Caddy:
+#   sudo systemctl reload caddy
+
+panel.example.com {
+	# encode gzip zstd            # если нужно — Caddy умеет сам
+	reverse_proxy 127.0.0.1:3000
+}
+
+# Если держите несколько сервисов за одним Caddy, каждый — отдельный
+# блок. Общий log/tls глобально настраивается в начале Caddyfile.

@@ -102,9 +102,11 @@ JWT_SECRET=$(openssl rand -base64 48 | tr -d '/+=')
 SECRETS_KEY=$(openssl rand -base64 32)
 AGENT_TOKEN=$(openssl rand -base64 32 | tr -d '/+=')
 
-# URLs (замените на свой домен/IP когда поднимете reverse proxy)
-WEB_ORIGIN=http://37.195.210.6:3000
-API_PUBLIC_URL=http://37.195.210.6:3000/api
+# URLs — подставляется ваш домен, который слушает Caddy.
+# CORS использует WEB_ORIGIN; браузер с API напрямую не общается.
+WEB_ORIGIN=https://panel.example.com
+API_PUBLIC_URL=https://panel.example.com/api
+# Порт для loopback-биндинга web-контейнера, Caddy проксирует сюда.
 WEB_PORT=3000
 
 # Optional: bootstrap owner — если заполнено, панель создаст этого пользователя
@@ -162,26 +164,36 @@ docker compose -f docker-compose.prod.yml up -d
 
 Эти переменные перекрывают `latest` в compose-файле.
 
-## 6. Reverse proxy (опционально, рекомендуется)
+## 6. Reverse proxy через Caddy
 
-Когда будете вешать домен и HTTPS — вытащите `web` из прямого публичного `ports:` и заверните через Caddy. Пример `Caddyfile`:
+`docker-compose.prod.yml` биндит `web` **только на 127.0.0.1:3000** — наружу 3000 не выставлен. Домен и TLS вешает Caddy, который уже стоит на хосте.
+
+Готовый пример: [`docs/Caddyfile.example`](Caddyfile.example). Минимальная секция:
 
 ```
 panel.example.com {
-  reverse_proxy localhost:3000
+    reverse_proxy 127.0.0.1:3000
 }
 ```
 
-Потом в `.env`:
+Положите её в `/etc/caddy/Caddyfile` и перезагрузите:
+
+```bash
+sudo systemctl reload caddy
 ```
-WEB_ORIGIN=https://panel.example.com
-API_PUBLIC_URL=https://panel.example.com/api
-```
+
+Caddy сам получит сертификат Let's Encrypt и пропустит WebSocket-апгрейды для live-консоли (поведение по умолчанию, ничего настраивать не нужно).
+
+В `.env` на сервере — `WEB_ORIGIN` и `API_PUBLIC_URL` с вашим доменом (`https://panel.example.com`). Браузер с API напрямую не общается, но `WEB_ORIGIN` используется CORS-фильтром API.
+
+### Если Caddy тоже в Docker
+
+Уберите из `docker-compose.prod.yml` блок `ports:` у сервиса `web` и добавьте `web` в ту же внешнюю docker network, в которой живёт Caddy. В Caddyfile тогда `reverse_proxy web:3000` — Caddy отрезолвит по Docker DNS.
 
 ## Troubleshooting
 
 - **CI фейлится на `appleboy/ssh-action`** — 99% случаев это неверный формат `DEPLOY_SSH_KEY`. Скопируйте файл целиком, с переводами строк, с обоими `BEGIN`/`END`.
 - **`permission denied` при `docker compose`** — пользователь не в группе `docker`. `sudo usermod -aG docker cofedish` и перелогиньтесь.
 - **`Cannot connect to the Docker daemon`** — `sudo systemctl start docker` и `enable` для автостарта.
-- **Порт 3000 закрыт извне** — откройте файрвол: `sudo ufw allow 3000/tcp` (либо настройте через вашу панель VPS).
+- **Caddy отвечает 502** — проверьте что `docker compose ps web` показывает `Up`, а `curl -I http://127.0.0.1:3000` с хоста отдаёт `200`. Если curl работает, а Caddy 502 — скорее всего опечатка в Caddyfile или неперезагружен конфиг.
 - **Образы не пулятся с GHCR** — если GHCR приватный (он у вас публичный, но на будущее), нужно сделать `docker login ghcr.io` на сервере с PAT.
