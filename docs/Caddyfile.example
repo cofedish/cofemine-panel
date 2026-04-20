@@ -1,10 +1,12 @@
 # Cofemine Panel — пример секции для Caddy
 #
 # Предпосылки:
-#  1) На хосте один раз создан shared network:
-#        docker network create caddy_net
-#  2) Ваш Caddy-контейнер подключён к этой сети (см. ниже).
-#  3) docker-compose.prod.yml панели уже подключает `web` к той же сети.
+#  1) У вас уже есть shared network, на которую навешан Caddy (например
+#     `caddy`). docker-compose.prod.yml панели по умолчанию подключает
+#     `web` к сети с именем `caddy` — переопределяется через
+#     переменную CADDY_NETWORK в .env.
+#  2) Caddy и web видят друг друга по Docker DNS, так что
+#     `reverse_proxy web:3000` работает напрямую.
 #
 # Caddy тогда резолвит `web` по Docker DNS и ходит напрямую — никаких
 # публичных портов у web нет, `host.docker.internal` не нужен.
