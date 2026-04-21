@@ -273,6 +273,7 @@ export default function CreateServerPage(): JSX.Element {
               setHostPort={setHostPort}
               env={env}
               setEnv={setEnv}
+              currentType={effectiveType}
             />
           )}
           {step === "Review" && (
@@ -649,6 +650,7 @@ function ResourcesStep({
   setHostPort,
   env,
   setEnv,
+  currentType,
 }: {
   nodes: Node[];
   name: string;
@@ -663,6 +665,7 @@ function ResourcesStep({
   setHostPort: (v: number) => void;
   env: Record<string, string>;
   setEnv: (v: Record<string, string>) => void;
+  currentType: string;
 }): JSX.Element {
   return (
     <div className="space-y-5">
@@ -732,7 +735,7 @@ function ResourcesStep({
             section to edit its settings.
           </p>
         </div>
-        <EnvForm env={env} onChange={setEnv} />
+        <EnvForm env={env} onChange={setEnv} currentType={currentType} />
       </div>
     </div>
   );

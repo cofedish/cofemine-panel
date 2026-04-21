@@ -5,24 +5,22 @@ import { cn } from "@/lib/cn";
 import {
   ENV_DEFS_BY_GROUP,
   ENV_GROUP_LABELS,
+  ENV_GROUP_ORDER,
   ENV_KNOWN_KEYS,
+  envDefApplies,
+  isGroupVisibleForType,
   type EnvDef,
   type EnvGroup,
 } from "./env-meta";
-import { ChevronDown, Plus, Trash2 } from "lucide-react";
-
-const GROUP_ORDER: EnvGroup[] = [
-  "gameplay",
-  "world",
-  "spawning",
-  "jvm",
-  "advanced",
-];
+import { ChevronDown, Plus, Trash2, Search } from "lucide-react";
 
 /**
  * Typed form for itzg container env vars. The external state is the plain
  * `Record<string,string>` that the wizard already sends to the API, so the
  * form is a drop-in replacement for the old KEY=VALUE textarea.
+ *
+ * When `currentType` is provided, groups and fields that don't apply to
+ * that server type are hidden — e.g. Paper-only vars on a Fabric server.
  *
  * Anything in env that isn't in the curated list is surfaced in a
  * "Custom variables" editor at the bottom (add, edit, remove).
@@ -30,16 +28,15 @@ const GROUP_ORDER: EnvGroup[] = [
 export function EnvForm({
   env,
   onChange,
+  currentType,
 }: {
   env: Record<string, string>;
   onChange: (next: Record<string, string>) => void;
+  currentType?: string;
 }): JSX.Element {
-  const [openGroups, setOpenGroups] = useState<Record<EnvGroup, boolean>>({
+  const [query, setQuery] = useState("");
+  const [openGroups, setOpenGroups] = useState<Partial<Record<EnvGroup, boolean>>>({
     gameplay: true,
-    world: false,
-    spawning: false,
-    jvm: false,
-    advanced: false,
   });
 
   const customKeys = useMemo(
@@ -49,6 +46,34 @@ export function EnvForm({
         .sort(),
     [env]
   );
+
+  // Which groups are visible for this type?
+  const visibleGroups = useMemo(
+    () =>
+      ENV_GROUP_ORDER.filter((g) => {
+        if (!isGroupVisibleForType(g, currentType)) return false;
+        const defs = ENV_DEFS_BY_GROUP[g].filter((d) =>
+          envDefApplies(d, currentType)
+        );
+        return defs.length > 0;
+      }),
+    [currentType]
+  );
+
+  const filteredDefs = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return null;
+    return visibleGroups.flatMap((g) =>
+      ENV_DEFS_BY_GROUP[g]
+        .filter((d) => envDefApplies(d, currentType))
+        .filter(
+          (d) =>
+            d.key.toLowerCase().includes(q) ||
+            d.label.toLowerCase().includes(q) ||
+            (d.help ?? "").toLowerCase().includes(q)
+        )
+    );
+  }, [query, visibleGroups, currentType]);
 
   function setKey(key: string, value: string | undefined): void {
     const next = { ...env };
@@ -66,10 +91,53 @@ export function EnvForm({
 
   return (
     <div className="space-y-3">
-      {GROUP_ORDER.map((g) => {
-        const defs = ENV_DEFS_BY_GROUP[g];
+      {/* Search */}
+      <div className="relative">
+        <Search
+          size={14}
+          className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-muted"
+        />
+        <input
+          className="input pl-8"
+          placeholder={`Search ${ENV_DEFS_BY_GROUP ? Object.values(ENV_DEFS_BY_GROUP).flat().length : 0}+ settings…`}
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+        />
+      </div>
+
+      {/* Search results view */}
+      {query && filteredDefs && (
+        <div className="border border-line rounded-lg p-5 space-y-5 bg-[rgb(var(--bg-surface-1))]">
+          <div className="text-sm text-ink-muted">
+            {filteredDefs.length} match
+            {filteredDefs.length === 1 ? "" : "es"}
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-5">
+            {filteredDefs.map((d) => (
+              <FieldRow
+                key={d.key}
+                def={d}
+                value={env[d.key]}
+                onChange={(v) => setKey(d.key, v)}
+              />
+            ))}
+          </div>
+          {filteredDefs.length === 0 && (
+            <div className="text-sm text-ink-muted">
+              Nothing matches. Try shorter query.
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Grouped view (hidden when searching) */}
+      {!query &&
+        visibleGroups.map((g) => {
+        const defs = ENV_DEFS_BY_GROUP[g].filter((d) =>
+          envDefApplies(d, currentType)
+        );
         const overriddenCount = defs.filter((d) => d.key in env).length;
-        const open = openGroups[g];
+        const open = !!openGroups[g];
         return (
           <div key={g} className="border border-line rounded-lg overflow-hidden">
             <button
