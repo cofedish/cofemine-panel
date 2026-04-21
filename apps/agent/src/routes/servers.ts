@@ -78,6 +78,42 @@ export async function serversAgentRoutes(app: FastifyInstance): Promise<void> {
     return reply.code(201).send({ containerId: info.Id });
   });
 
+  /**
+   * Recreate the container with an updated spec. /data survives because
+   * it's a bind mount to AGENT_DATA_ROOT/<id>. Used to re-sync env vars
+   * that changed after initial creation — e.g. a CurseForge API key
+   * added in Integrations *after* the server was made.
+   */
+  app.post("/servers/:id/reprovision", async (req, reply) => {
+    const spec = specSchema.parse(req.body);
+    const runtime = getRuntime("itzg");
+    await ensureNetwork(config.AGENT_DOCKER_NETWORK);
+    const dataDir = dataDirFor(spec.id);
+    await ensureDir(dataDir);
+    const containerSpec = runtime.createContainerSpec(spec, dataDir);
+    const image = (containerSpec as any).Image as string;
+    if (image) {
+      await ensureImagePulled(docker, image, (m) => req.log.info(m));
+    }
+    const existing = await findContainer(spec.id);
+    if (existing) {
+      try {
+        await existing.stop({ t: 20 });
+      } catch {}
+      try {
+        await existing.remove({ force: true });
+      } catch (err) {
+        req.log.warn(
+          { err },
+          "failed to remove existing container on reprovision"
+        );
+      }
+    }
+    const container = await docker.createContainer(containerSpec);
+    const info = await container.inspect();
+    return reply.code(200).send({ containerId: info.Id });
+  });
+
   app.delete("/servers/:id", async (req) => {
     const { id } = req.params as { id: string };
     const container = await findContainer(id);

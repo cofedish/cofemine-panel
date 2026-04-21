@@ -15,6 +15,7 @@ import { NodeClient } from "../nodes/node-client.js";
 import {
   createServerRecord,
   provisionServerOnNode,
+  reconcileAndReprovision,
 } from "./service.js";
 
 export async function serversRoutes(app: FastifyInstance): Promise<void> {
@@ -107,12 +108,49 @@ export async function serversRoutes(app: FastifyInstance): Promise<void> {
     return { ok: true };
   });
 
+  // Manual "repair": reprovision the container with env recomputed from
+  // current integration secrets (picks up CF_API_KEY / MODRINTH config
+  // that changed after create). /data is preserved.
+  app.post("/:id/repair", async (req) => {
+    const { id } = req.params as { id: string };
+    await assertServerPermission(req, id, "server.edit");
+    const result = await reconcileAndReprovision(id);
+    await writeAudit(req, {
+      action: "server.repair",
+      resource: id,
+      metadata: { envChanged: result.changed },
+    });
+    return { ok: true, ...result };
+  });
+
   // Lifecycle actions proxied to the agent.
   for (const action of ["start", "stop", "restart", "kill"] as const) {
     app.post(`/:id/${action}`, async (req) => {
       const { id } = req.params as { id: string };
       await assertServerPermission(req, id, "server.control");
       const server = await prisma.server.findUniqueOrThrow({ where: { id } });
+      // Auto-heal: for modpack-source servers, make sure the container
+      // has the current CF_API_KEY / MODRINTH config baked in. If the
+      // user added the CF key *after* creating the server, or we
+      // extended the injected env in a panel upgrade, reprovision
+      // transparently here so Start actually boots.
+      if (
+        action === "start" &&
+        (server.type === "CURSEFORGE" || server.type === "MODRINTH")
+      ) {
+        const env = (server.env as Record<string, string> | null) ?? {};
+        const needsCfKey =
+          server.type === "CURSEFORGE" && !env.CF_API_KEY;
+        if (needsCfKey) {
+          req.log.info(
+            { id },
+            "auto-reprovisioning before start (missing CF_API_KEY)"
+          );
+          await reconcileAndReprovision(id).catch((err) =>
+            req.log.warn({ err }, "auto-reprovision failed; attempting start anyway")
+          );
+        }
+      }
       const client = await NodeClient.forId(server.nodeId);
       await client.call("POST", `/servers/${id}/${action}`);
       const newStatus =

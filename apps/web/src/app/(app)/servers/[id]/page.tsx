@@ -22,6 +22,7 @@ import {
   Zap,
   Copy,
   Trash2,
+  Wrench,
   Users,
   Cpu,
   HardDrive as HardDriveIcon,
@@ -110,6 +111,28 @@ export default function ServerDetailPage(): JSX.Element {
       alert(err instanceof ApiError ? err.message : String(err));
     }
   }
+  async function repair(): Promise<void> {
+    if (
+      !confirm(
+        "Reprovision the container with current integration keys?\n\nThe world and /data are preserved — only the container itself is recreated."
+      )
+    ) {
+      return;
+    }
+    try {
+      const res = await api.post<{ changed: boolean }>(
+        `/servers/${id}/repair`
+      );
+      alert(
+        res.changed
+          ? "Container rebuilt with updated env. You can start the server now."
+          : "Container rebuilt. No env changes were needed."
+      );
+      mutate();
+    } catch (err) {
+      alert(err instanceof ApiError ? err.message : String(err));
+    }
+  }
   async function remove(): Promise<void> {
     if (!data) return;
     if (!confirm(`Delete server "${data.name}"? This is irreversible.`)) return;
@@ -165,6 +188,13 @@ export default function ServerDetailPage(): JSX.Element {
             </button>
             <button className="btn btn-ghost" onClick={clone} title="Clone">
               <Copy size={15} />
+            </button>
+            <button
+              className="btn btn-ghost"
+              onClick={repair}
+              title="Repair — rebuild container with current integration keys (preserves /data)"
+            >
+              <Wrench size={15} />
             </button>
             <button className="btn btn-danger" onClick={remove}>
               <Trash2 size={15} />

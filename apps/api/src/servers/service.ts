@@ -87,6 +87,96 @@ export async function createServerRecord(input: CreateServerInput) {
 }
 
 /**
+ * Recompute env for an existing server (injecting current integration
+ * secrets like CF_API_KEY) and ask the agent to recreate the container
+ * with the refreshed spec. /data is preserved via bind mount, so worlds
+ * and configs survive.
+ */
+export async function reconcileAndReprovision(
+  serverId: string
+): Promise<{ changed: boolean }> {
+  const server = await prisma.server.findUnique({ where: { id: serverId } });
+  if (!server) {
+    throw Object.assign(new Error("Server not found"), { statusCode: 404 });
+  }
+  const currentEnv = (server.env as Record<string, string> | null) ?? {};
+  const refreshedEnv = await mergeModpackEnv({
+    name: server.name,
+    nodeId: server.nodeId,
+    type: server.type as any,
+    version: server.version,
+    memoryMb: server.memoryMb,
+    ports: server.ports as any,
+    env: currentEnv,
+    eulaAccepted: server.eulaAccepted as true,
+    modpack: inferModpackHint(server.type, currentEnv),
+  });
+
+  const changed =
+    JSON.stringify(refreshedEnv) !== JSON.stringify(currentEnv);
+  if (changed) {
+    await prisma.server.update({
+      where: { id: server.id },
+      data: { env: refreshedEnv as unknown as object },
+    });
+  }
+
+  const client = await NodeClient.forId(server.nodeId);
+  const containerName =
+    server.containerName ?? toContainerName(server.name, server.id);
+  const spec = {
+    id: server.id,
+    name: server.name,
+    containerName,
+    type: server.type,
+    version: server.version,
+    memoryMb: server.memoryMb,
+    cpuLimit: server.cpuLimit,
+    ports: server.ports,
+    env: refreshedEnv,
+    eulaAccepted: server.eulaAccepted,
+  };
+  const res = await client.call<{ containerId: string }>(
+    "POST",
+    `/servers/${server.id}/reprovision`,
+    spec
+  );
+  await prisma.server.update({
+    where: { id: server.id },
+    data: { containerId: res.containerId, containerName },
+  });
+  return { changed };
+}
+
+/**
+ * Rebuild the `modpack` hint used by mergeModpackEnv from env alone.
+ * On create we stored the modpack object on the input; for reprovision
+ * we only have the container env, so we infer slug/url/id from the
+ * CF_SLUG / CF_PAGE_URL / MODRINTH_PROJECT we wrote earlier.
+ */
+function inferModpackHint(
+  type: string,
+  env: Record<string, string>
+): CreateServerInput["modpack"] | undefined {
+  if (type === "CURSEFORGE") {
+    return {
+      provider: "curseforge",
+      projectId: env.CF_SLUG ?? env.CF_PAGE_URL ?? "auto",
+      ...(env.CF_SLUG ? { slug: env.CF_SLUG } : {}),
+      ...(env.CF_PAGE_URL ? { url: env.CF_PAGE_URL } : {}),
+    };
+  }
+  if (type === "MODRINTH") {
+    return {
+      provider: "modrinth",
+      projectId: env.MODRINTH_PROJECT ?? "auto",
+      ...(env.MODRINTH_PROJECT ? { slug: env.MODRINTH_PROJECT } : {}),
+    };
+  }
+  return undefined;
+}
+
+/**
  * Ask the node-agent to provision the container for a freshly-created server,
  * then persist the resulting container id / container name.
  */
