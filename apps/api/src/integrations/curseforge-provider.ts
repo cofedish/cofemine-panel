@@ -62,10 +62,14 @@ export class CurseForgeProvider implements ContentProvider {
     if (filters.query) params.set("searchFilter", filters.query);
     if (filters.gameVersion) params.set("gameVersion", filters.gameVersion);
     if (filters.projectType)
-      params.set(
-        "classId",
-        String(mapClassId(filters.projectType))
-      );
+      params.set("classId", String(mapClassId(filters.projectType)));
+    // CurseForge returns nothing useful without either searchFilter or a
+    // sort. Default to popularity so the wizard shows the same "top packs"
+    // view the real curseforge.com shows on an empty search.
+    if (!filters.query) {
+      params.set("sortField", "2"); // Popularity
+      params.set("sortOrder", "desc");
+    }
     params.set("pageSize", String(filters.limit ?? 20));
     params.set("index", String(filters.offset ?? 0));
     const res = await call<{ data: any[] }>(

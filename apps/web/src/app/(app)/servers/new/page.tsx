@@ -1,5 +1,5 @@
 "use client";
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import useSWR from "swr";
 import { motion, AnimatePresence } from "framer-motion";
@@ -500,43 +500,67 @@ function PackPickStep({
   const [results, setResults] = useState<ModpackHit[]>([]);
   const [err, setErr] = useState<string | null>(null);
 
-  async function run(): Promise<void> {
-    setBusy(true);
-    setErr(null);
-    try {
-      const qs = new URLSearchParams({
-        query,
-        ...(gameVersion ? { gameVersion } : {}),
-        projectType: "modpack",
-        limit: "20",
-      }).toString();
-      const res = await api.get<any>(`/integrations/${provider}/search?${qs}`);
-      const raw: any[] = Array.isArray(res) ? res : (res.results ?? []);
-      const hits: ModpackHit[] = raw.map((r) => ({
-        id: String(r.id),
-        provider,
-        name: r.name,
-        slug: r.slug,
-        description: r.description,
-        iconUrl: r.iconUrl,
-        author: r.author,
-        downloads: r.downloads,
-        pageUrl: r.pageUrl,
-      }));
-      setResults(hits);
-    } catch (e) {
-      setErr(e instanceof ApiError ? e.message : String(e));
-    } finally {
-      setBusy(false);
-    }
-  }
+  // Fire an initial popular-packs search when the step mounts and any time
+  // the user edits the filter. Debounce typing by 300ms so we don't hammer
+  // the API on every keystroke.
+  useEffect(() => {
+    let cancelled = false;
+    const t = setTimeout(
+      async () => {
+        setBusy(true);
+        setErr(null);
+        try {
+          const qp = new URLSearchParams();
+          if (query) qp.set("query", query);
+          if (gameVersion) qp.set("gameVersion", gameVersion);
+          qp.set("projectType", "modpack");
+          qp.set("limit", "24");
+          const res = await api.get<any>(
+            `/integrations/${provider}/search?${qp.toString()}`
+          );
+          if (cancelled) return;
+          const raw: any[] = Array.isArray(res)
+            ? res
+            : (res.results ?? []);
+          setResults(
+            raw.map((r) => ({
+              id: String(r.id),
+              provider,
+              name: r.name,
+              slug: r.slug,
+              description: r.description,
+              iconUrl: r.iconUrl,
+              author: r.author,
+              downloads: r.downloads,
+              pageUrl: r.pageUrl,
+            }))
+          );
+        } catch (e) {
+          if (!cancelled)
+            setErr(e instanceof ApiError ? e.message : String(e));
+        } finally {
+          if (!cancelled) setBusy(false);
+        }
+      },
+      query || gameVersion ? 300 : 0
+    );
+    return () => {
+      cancelled = true;
+      clearTimeout(t);
+    };
+  }, [provider, query, gameVersion]);
 
   return (
     <div className="tile p-7 space-y-5">
-      <h2 className="heading-md">
-        Search {provider === "modrinth" ? "Modrinth" : "CurseForge"} modpacks
-      </h2>
-      <div className="grid grid-cols-1 md:grid-cols-[1fr_220px_auto] gap-3">
+      <div className="flex items-center justify-between gap-3">
+        <h2 className="heading-md">
+          Browse {provider === "modrinth" ? "Modrinth" : "CurseForge"} modpacks
+        </h2>
+        {busy && (
+          <span className="text-xs text-ink-muted">Searching…</span>
+        )}
+      </div>
+      <div className="grid grid-cols-1 md:grid-cols-[1fr_220px] gap-3">
         <div className="relative">
           <Search
             size={14}
@@ -544,12 +568,10 @@ function PackPickStep({
           />
           <input
             className="input pl-8"
-            placeholder="Search modpacks…"
+            placeholder="Search by name (type to filter)…"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") run();
-            }}
+            autoFocus
           />
         </div>
         <input
@@ -558,13 +580,8 @@ function PackPickStep({
           value={gameVersion}
           onChange={(e) => setGameVersion(e.target.value)}
         />
-        <button className="btn btn-primary" onClick={run} disabled={busy}>
-          {busy ? "Searching…" : "Search"}
-        </button>
       </div>
-      {err && (
-        <div className="chip chip-danger !h-auto !py-2 !px-3">{err}</div>
-      )}
+      {err && <div className="chip chip-danger !h-auto !py-2 !px-3">{err}</div>}
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
         {results.map((r) => {
@@ -618,7 +635,7 @@ function PackPickStep({
         <div className="text-center text-sm text-ink-muted py-8">
           {query
             ? "No results. Try a different search."
-            : "Type a query and hit Search."}
+            : "No packs available."}
         </div>
       )}
     </div>

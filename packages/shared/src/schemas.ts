@@ -133,14 +133,28 @@ export const updateUserSchema = z.object({
 });
 
 export const modrinthSearchSchema = z.object({
-  query: z.string().max(200).optional(),
-  gameVersion: z.string().max(32).optional(),
-  loader: z.string().max(32).optional(),
+  // Treat empty string as absent so an empty query doesn't trip validation.
+  query: z
+    .string()
+    .max(200)
+    .optional()
+    .transform((v) => (v && v.length > 0 ? v : undefined)),
+  gameVersion: z
+    .string()
+    .max(32)
+    .optional()
+    .transform((v) => (v && v.length > 0 ? v : undefined)),
+  loader: z
+    .string()
+    .max(32)
+    .optional()
+    .transform((v) => (v && v.length > 0 ? v : undefined)),
   projectType: z
     .enum(["mod", "modpack", "plugin", "datapack", "resourcepack", "shader"])
     .optional(),
-  limit: z.number().int().min(1).max(50).default(20),
-  offset: z.number().int().min(0).max(1000).default(0),
+  // Query params arrive as strings — coerce so '20' parses as 20.
+  limit: z.coerce.number().int().min(1).max(50).default(20),
+  offset: z.coerce.number().int().min(0).max(1000).default(0),
 });
 
 export const installModrinthSchema = z.object({
