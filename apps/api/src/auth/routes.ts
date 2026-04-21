@@ -1,4 +1,5 @@
 import type { FastifyInstance } from "fastify";
+import { z } from "zod";
 import { loginSchema, setupSchema } from "@cofemine/shared";
 import { prisma } from "../db.js";
 import { hashPassword, verifyPassword } from "./password.js";
@@ -68,12 +69,47 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
 
   app.get("/me", async (req) => {
     const user = requireUser(req);
-    return {
-      id: user.id,
-      email: user.email,
-      username: user.username,
-      role: user.role,
-    };
+    const full = await prisma.user.findUnique({
+      where: { id: user.id },
+      select: {
+        id: true,
+        email: true,
+        username: true,
+        role: true,
+        avatar: true,
+      },
+    });
+    return full;
+  });
+
+  // Self-service updates (avatar, future: displayName, email, password).
+  // Admin-level updates on other users live under /users/:id.
+  app.patch("/me", async (req) => {
+    const user = requireUser(req);
+    const body = z
+      .object({
+        avatar: z
+          .string()
+          .max(300_000, "Avatar too large (max ~300KB base64)")
+          .nullable()
+          .optional(),
+      })
+      .parse(req.body);
+    const data: Record<string, unknown> = {};
+    if ("avatar" in body) data.avatar = body.avatar;
+    const updated = await prisma.user.update({
+      where: { id: user.id },
+      data,
+      select: {
+        id: true,
+        email: true,
+        username: true,
+        role: true,
+        avatar: true,
+      },
+    });
+    await writeAudit(req, { action: "user.self-update", resource: user.id });
+    return updated;
   });
 }
 

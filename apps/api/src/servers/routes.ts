@@ -1,4 +1,5 @@
 import type { FastifyInstance } from "fastify";
+import { z } from "zod";
 import {
   consoleCommandSchema,
   createServerSchema,
@@ -263,6 +264,40 @@ export async function serversRoutes(app: FastifyInstance): Promise<void> {
     const server = await prisma.server.findUniqueOrThrow({ where: { id } });
     const client = await NodeClient.forId(server.nodeId);
     return client.call("GET", `/servers/${id}/players`);
+  });
+
+  // Server icon — 64x64 PNG that itzg exposes to clients via
+  // /data/server-icon.png. We accept a base64 data URL from the browser,
+  // forward it to the agent which writes the file directly.
+  app.post("/:id/icon", async (req) => {
+    const { id } = req.params as { id: string };
+    await assertServerPermission(req, id, "server.edit");
+    const body = z
+      .object({
+        data: z
+          .string()
+          .regex(
+            /^data:image\/png;base64,/,
+            "Expected a base64-encoded PNG data URL"
+          )
+          .max(200_000, "Icon too large (max ~200KB)"),
+      })
+      .parse(req.body);
+    const server = await prisma.server.findUniqueOrThrow({ where: { id } });
+    const client = await NodeClient.forId(server.nodeId);
+    await client.call("POST", `/servers/${id}/icon`, body);
+    await writeAudit(req, { action: "server.icon.set", resource: id });
+    return { ok: true };
+  });
+
+  app.delete("/:id/icon", async (req) => {
+    const { id } = req.params as { id: string };
+    await assertServerPermission(req, id, "server.edit");
+    const server = await prisma.server.findUniqueOrThrow({ where: { id } });
+    const client = await NodeClient.forId(server.nodeId);
+    await client.call("DELETE", `/servers/${id}/icon`);
+    await writeAudit(req, { action: "server.icon.clear", resource: id });
+    return { ok: true };
   });
 
   app.get("/:id/export", async (req) => {

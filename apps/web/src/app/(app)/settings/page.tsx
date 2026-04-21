@@ -1,11 +1,19 @@
 "use client";
-import useSWR from "swr";
-import { fetcher } from "@/lib/api";
+import useSWR, { mutate } from "swr";
+import { api, ApiError, fetcher } from "@/lib/api";
 import { PageHeader } from "@/components/page-header";
 import { AppearancePanel } from "@/components/appearance-switcher";
-import { User, Palette, Info } from "lucide-react";
+import { ImageUpload } from "@/components/image-upload";
+import { User, Palette, Info, ImageIcon } from "lucide-react";
+import { useState } from "react";
 
-type Me = { id: string; email: string; username: string; role: string };
+type Me = {
+  id: string;
+  email: string;
+  username: string;
+  role: string;
+  avatar: string | null;
+};
 
 export default function SettingsPage(): JSX.Element {
   const { data } = useSWR<Me>("/auth/me", fetcher);
@@ -25,6 +33,10 @@ export default function SettingsPage(): JSX.Element {
         </div>
       </Section>
 
+      <Section icon={<ImageIcon size={16} />} title="Avatar">
+        <AvatarEditor current={data?.avatar ?? null} />
+      </Section>
+
       <Section icon={<Palette size={16} />} title="Appearance">
         <AppearancePanel />
       </Section>
@@ -37,6 +49,63 @@ export default function SettingsPage(): JSX.Element {
           model.
         </div>
       </Section>
+    </div>
+  );
+}
+
+function AvatarEditor({ current }: { current: string | null }): JSX.Element {
+  const [value, setValue] = useState<string | null>(current);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const dirty = value !== current;
+
+  async function save(): Promise<void> {
+    setBusy(true);
+    setErr(null);
+    try {
+      await api.patch("/auth/me", { avatar: value });
+      await mutate("/auth/me");
+    } catch (e) {
+      setErr(e instanceof ApiError ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="space-y-4">
+      <ImageUpload
+        value={value}
+        onChange={setValue}
+        targetSize={128}
+        previewSize={96}
+        shape="round"
+        label="Upload avatar"
+        hint="Image will be cropped to a square and stored as a 128×128 PNG."
+      />
+      {err && (
+        <div className="text-sm text-[rgb(var(--danger))]">{err}</div>
+      )}
+      <div className="flex gap-2">
+        <button
+          className="btn btn-primary"
+          onClick={save}
+          disabled={!dirty || busy}
+        >
+          {busy ? "Saving…" : "Save avatar"}
+        </button>
+        {dirty && (
+          <button
+            className="btn btn-ghost"
+            onClick={() => {
+              setValue(current);
+              setErr(null);
+            }}
+          >
+            Cancel
+          </button>
+        )}
+      </div>
     </div>
   );
 }

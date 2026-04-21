@@ -57,7 +57,8 @@
       "Bash(git commit -q -m 'feat: modpack sources, version dropdown, typed properties editor, Lucifer *)",
       "Bash(git commit -q -m 'fix\\(integrations\\): pack search works without query, autoload on mount *)",
       "Bash(git commit -q -m 'feat\\(wizard\\): typed form for itzg env vars, kill the textarea *)",
-      "Bash(git commit -q -m 'feat\\(config\\): complete itzg env + server.properties coverage with type filters *)"
+      "Bash(git commit -q -m 'feat\\(config\\): complete itzg env + server.properties coverage with type filters *)",
+      "Bash(git commit -q -m 'feat: user avatar upload + server icon upload \\(both with canvas resize\\) *)"
     ]
   }
 }

@@ -13,6 +13,7 @@ import { ServerSchedules } from "@/components/server-schedules";
 import { StatusDot } from "@/components/status-dot";
 import { PageHeader } from "@/components/page-header";
 import { getServerMeta, ServerTypeIcon } from "@/components/server-icons";
+import { ImageUpload } from "@/components/image-upload";
 import { cn } from "@/lib/cn";
 import {
   Play,
@@ -300,7 +301,9 @@ function Overview({
 }): JSX.Element {
   const ports = Array.isArray(data.ports) ? (data.ports as any[]) : [];
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+    <div className="space-y-5">
+      <ServerIconEditor serverId={data.id} />
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
       <div className="tile p-6 lg:col-span-2 space-y-5">
         <h3 className="heading-md">Runtime configuration</h3>
         <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-4 text-sm">
@@ -366,7 +369,82 @@ function Overview({
           </p>
         )}
       </div>
+      </div>
     </div>
+  );
+}
+
+/**
+ * Icon uploader for a specific server. Writes a 64x64 PNG to
+ * /data/server-icon.png via the agent; itzg picks it up on next start.
+ */
+function ServerIconEditor({ serverId }: { serverId: string }): JSX.Element {
+  const [value, setValue] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [status, setStatus] = useState<string | null>(null);
+
+  async function save(): Promise<void> {
+    if (!value) return;
+    setBusy(true);
+    setStatus(null);
+    try {
+      await api.post(`/servers/${serverId}/icon`, { data: value });
+      setStatus("Icon saved. Restart the server to apply.");
+    } catch (e) {
+      setStatus(e instanceof ApiError ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function clear(): Promise<void> {
+    setBusy(true);
+    setStatus(null);
+    try {
+      await api.del(`/servers/${serverId}/icon`);
+      setValue(null);
+      setStatus("Icon removed. Restart the server to apply.");
+    } catch (e) {
+      setStatus(e instanceof ApiError ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <section className="tile p-6 space-y-4">
+      <div>
+        <h3 className="heading-md">Server icon</h3>
+        <p className="text-sm text-ink-muted mt-1">
+          Shown next to the MOTD in the in-game server list. Upload any
+          image — we'll crop to a square and save as a 64×64 PNG.
+        </p>
+      </div>
+      <ImageUpload
+        value={value}
+        onChange={setValue}
+        targetSize={64}
+        previewSize={80}
+        shape="square"
+        label="Upload icon"
+        hint="Auto-resized to 64×64 PNG before upload."
+      />
+      <div className="flex gap-2 items-center">
+        <button
+          className="btn btn-primary"
+          onClick={save}
+          disabled={!value || busy}
+        >
+          {busy ? "Saving…" : "Save icon"}
+        </button>
+        <button className="btn btn-ghost" onClick={clear} disabled={busy}>
+          Remove saved icon
+        </button>
+        {status && (
+          <span className="text-xs text-ink-secondary">{status}</span>
+        )}
+      </div>
+    </section>
   );
 }
 

@@ -236,6 +236,28 @@ export async function serversAgentRoutes(app: FastifyInstance): Promise<void> {
     return { ok: true };
   });
 
+  // Icon (64x64 PNG). Writes /data/server-icon.png which itzg exposes
+  // automatically. Expects a base64-encoded PNG data URL.
+  app.post("/servers/:id/icon", async (req) => {
+    const { id } = req.params as { id: string };
+    const body = z
+      .object({ data: z.string().regex(/^data:image\/png;base64,/) })
+      .parse(req.body);
+    const base64 = body.data.slice("data:image/png;base64,".length);
+    const buf = Buffer.from(base64, "base64");
+    const base = dataDirFor(id);
+    await ensureDir(base);
+    await fs.writeFile(path.join(base, "server-icon.png"), buf);
+    return { ok: true, size: buf.length };
+  });
+
+  app.delete("/servers/:id/icon", async (req) => {
+    const { id } = req.params as { id: string };
+    const base = dataDirFor(id);
+    await fs.rm(path.join(base, "server-icon.png"), { force: true });
+    return { ok: true };
+  });
+
   app.get("/servers/:id/properties", async (req) => {
     const { id } = req.params as { id: string };
     const base = dataDirFor(id);

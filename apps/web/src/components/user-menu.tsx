@@ -8,8 +8,15 @@ import { api, fetcher } from "@/lib/api";
 import { LogOut, Settings, Sun, Moon, Monitor } from "lucide-react";
 import { useTheme } from "next-themes";
 import { cn } from "@/lib/cn";
+import { Avatar } from "./avatar";
 
-type Me = { id: string; email: string; username: string; role: string };
+type Me = {
+  id: string;
+  email: string;
+  username: string;
+  role: string;
+  avatar: string | null;
+};
 
 export function UserMenu(): JSX.Element {
   const { data } = useSWR<Me>("/auth/me", fetcher);
@@ -33,8 +40,6 @@ export function UserMenu(): JSX.Element {
     router.push("/login");
   }
 
-  const initials = data?.username.slice(0, 2).toUpperCase() ?? "··";
-
   return (
     <div className="relative" ref={ref}>
       <button
@@ -44,9 +49,7 @@ export function UserMenu(): JSX.Element {
         aria-haspopup="menu"
         aria-expanded={open}
       >
-        <span className="w-6 h-6 rounded-full bg-[rgb(var(--accent))] text-[rgb(var(--accent-ink))] grid place-items-center text-[10px] font-semibold">
-          {initials}
-        </span>
+        <Avatar src={data?.avatar} name={data?.username} size={24} />
         <span className="text-sm font-medium max-w-[120px] truncate">
           {data?.username ?? "…"}
         </span>
@@ -62,9 +65,7 @@ export function UserMenu(): JSX.Element {
             className="absolute right-0 top-[calc(100%+8px)] w-64 surface-raised p-1.5 shadow-[var(--shadow-popover)] z-50"
           >
             <div className="px-3 py-2.5 flex items-center gap-3 border-b border-line mb-1">
-              <span className="w-9 h-9 rounded-full bg-[rgb(var(--accent))] text-[rgb(var(--accent-ink))] grid place-items-center text-sm font-semibold">
-                {initials}
-              </span>
+              <Avatar src={data?.avatar} name={data?.username} size={36} />
               <div className="min-w-0">
                 <div className="text-sm font-semibold truncate">
                   {data?.username}
