@@ -13,6 +13,7 @@ import {
   SERVER_TYPE_META,
   type ServerTypeKey,
 } from "@/components/server-icons";
+import { EnvForm } from "@/components/env-form";
 import { cn } from "@/lib/cn";
 import {
   Check,
@@ -101,7 +102,10 @@ export default function CreateServerPage(): JSX.Element {
   const [nodeId, setNodeId] = useState("");
   const [memoryMb, setMemoryMb] = useState(2048);
   const [hostPort, setHostPort] = useState(25565);
-  const [envText, setEnvText] = useState("DIFFICULTY=normal\nMAX_PLAYERS=20");
+  const [env, setEnv] = useState<Record<string, string>>({
+    DIFFICULTY: "normal",
+    MAX_PLAYERS: "20",
+  });
   const [eula, setEula] = useState(false);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -123,14 +127,6 @@ export default function CreateServerPage(): JSX.Element {
     setBusy(true);
     setErr(null);
     try {
-      const env: Record<string, string> = {};
-      for (const line of envText.split("\n")) {
-        const trimmed = line.trim();
-        if (!trimmed || trimmed.startsWith("#")) continue;
-        const eq = trimmed.indexOf("=");
-        if (eq < 1) continue;
-        env[trimmed.slice(0, eq).trim()] = trimmed.slice(eq + 1).trim();
-      }
       const body: any = {
         name,
         description: description || undefined,
@@ -275,8 +271,8 @@ export default function CreateServerPage(): JSX.Element {
               setMemoryMb={setMemoryMb}
               hostPort={hostPort}
               setHostPort={setHostPort}
-              envText={envText}
-              setEnvText={setEnvText}
+              env={env}
+              setEnv={setEnv}
             />
           )}
           {step === "Review" && (
@@ -287,10 +283,7 @@ export default function CreateServerPage(): JSX.Element {
               memoryMb={memoryMb}
               hostPort={hostPort}
               nodeName={nodes?.find((n) => n.id === nodeId)?.name}
-              envCount={
-                envText.split("\n").filter((l) => l.trim() && !l.startsWith("#"))
-                  .length
-              }
+              envCount={Object.keys(env).length}
               pack={pack}
               eula={eula}
               onEula={setEula}
@@ -654,8 +647,8 @@ function ResourcesStep({
   setMemoryMb,
   hostPort,
   setHostPort,
-  envText,
-  setEnvText,
+  env,
+  setEnv,
 }: {
   nodes: Node[];
   name: string;
@@ -668,71 +661,79 @@ function ResourcesStep({
   setMemoryMb: (v: number) => void;
   hostPort: number;
   setHostPort: (v: number) => void;
-  envText: string;
-  setEnvText: (v: string) => void;
+  env: Record<string, string>;
+  setEnv: (v: Record<string, string>) => void;
 }): JSX.Element {
   return (
-    <div className="tile p-7 space-y-5">
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <Field label="Name">
-          <input
-            className="input"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-          />
-        </Field>
-        <Field label="Description (optional)">
-          <input
-            className="input"
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-          />
-        </Field>
+    <div className="space-y-5">
+      <div className="tile p-7 space-y-5">
+        <h2 className="heading-md">Basics</h2>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <Field label="Name">
+            <input
+              className="input"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+            />
+          </Field>
+          <Field label="Description (optional)">
+            <input
+              className="input"
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+            />
+          </Field>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <Field label="Node">
+            <select
+              className="select"
+              value={nodeId}
+              onChange={(e) => setNodeId(e.target.value)}
+            >
+              <option value="">— select —</option>
+              {nodes.map((n) => (
+                <option key={n.id} value={n.id}>
+                  {n.name} ({n.status})
+                </option>
+              ))}
+            </select>
+          </Field>
+          <Field label="Memory (MB)" hint="container limit">
+            <input
+              className="input"
+              type="number"
+              min={512}
+              max={65536}
+              step={512}
+              value={memoryMb}
+              onChange={(e) => setMemoryMb(Number(e.target.value))}
+            />
+          </Field>
+          <Field label="Host port" hint="container 25565">
+            <input
+              className="input"
+              type="number"
+              min={1}
+              max={65535}
+              value={hostPort}
+              onChange={(e) => setHostPort(Number(e.target.value))}
+            />
+          </Field>
+        </div>
       </div>
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <Field label="Node">
-          <select
-            className="select"
-            value={nodeId}
-            onChange={(e) => setNodeId(e.target.value)}
-          >
-            <option value="">— select —</option>
-            {nodes.map((n) => (
-              <option key={n.id} value={n.id}>
-                {n.name} ({n.status})
-              </option>
-            ))}
-          </select>
-        </Field>
-        <Field label="Memory (MB)" hint="container limit">
-          <input
-            className="input"
-            type="number"
-            min={512}
-            max={65536}
-            step={512}
-            value={memoryMb}
-            onChange={(e) => setMemoryMb(Number(e.target.value))}
-          />
-        </Field>
-        <Field label="Host port" hint="container 25565">
-          <input
-            className="input"
-            type="number"
-            min={1}
-            max={65535}
-            value={hostPort}
-            onChange={(e) => setHostPort(Number(e.target.value))}
-          />
-        </Field>
+
+      <div className="tile p-7 space-y-5">
+        <div>
+          <h2 className="heading-md">Server configuration</h2>
+          <p className="text-sm text-ink-muted mt-1">
+            Proper controls for the itzg runtime env vars — difficulty,
+            gamemode, MOTD, world generation, mobs, JVM tuning. Expand a
+            section to edit its settings.
+          </p>
+        </div>
+        <EnvForm env={env} onChange={setEnv} />
       </div>
-      <Field label="Environment" hint="KEY=VALUE per line">
-        <textarea
-          className="textarea font-mono text-xs h-36"
-          value={envText}
-          onChange={(e) => setEnvText(e.target.value)}
-        />
-      </Field>
     </div>
   );
 }
