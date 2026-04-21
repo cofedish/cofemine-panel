@@ -15,6 +15,7 @@ import {
 } from "@/components/server-icons";
 import { EnvForm } from "@/components/env-form";
 import { ImageUpload } from "@/components/image-upload";
+import { MemorySlider } from "@/components/memory-slider";
 import { cn } from "@/lib/cn";
 import {
   Check,
@@ -706,7 +707,7 @@ function ResourcesStep({
             />
           </Field>
         </div>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <Field label="Node">
             <select
               className="select"
@@ -721,17 +722,6 @@ function ResourcesStep({
               ))}
             </select>
           </Field>
-          <Field label="Memory (MB)" hint="container limit">
-            <input
-              className="input"
-              type="number"
-              min={512}
-              max={65536}
-              step={512}
-              value={memoryMb}
-              onChange={(e) => setMemoryMb(Number(e.target.value))}
-            />
-          </Field>
           <Field label="Host port" hint="container 25565">
             <input
               className="input"
@@ -743,6 +733,20 @@ function ResourcesStep({
             />
           </Field>
         </div>
+        <Field
+          label="Memory"
+          hint="JVM heap limit. Vanilla 2–4 GB, Paper 4–8 GB, modpacks 8–16 GB."
+        >
+          <div className="pt-1">
+            <MemorySlider
+              value={memoryMb}
+              onChange={setMemoryMb}
+              min={512}
+              max={32768}
+              step={512}
+            />
+          </div>
+        </Field>
       </div>
 
       <div className="tile p-7 space-y-5">

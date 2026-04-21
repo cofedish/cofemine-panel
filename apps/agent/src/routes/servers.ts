@@ -7,6 +7,7 @@ import { dataDirFor, ensureDir, safeResolve } from "../paths.js";
 import { getRuntime } from "../runtime/registry.js";
 import { config } from "../config.js";
 import { execInContainer, streamExecOutput } from "../utils/exec.js";
+import { ensureImagePulled } from "../docker-pull.js";
 
 const specSchema = z.object({
   id: z.string(),
@@ -62,6 +63,16 @@ export async function serversAgentRoutes(app: FastifyInstance): Promise<void> {
     await ensureDir(dataDir);
 
     const containerSpec = runtime.createContainerSpec(spec, dataDir);
+    // Fresh hosts don't have the image; Docker daemon does not auto-pull
+    // on create. Pull now (no-op if already present) to avoid the
+    // "no such image" 404 the user would otherwise see on first server.
+    const image = (containerSpec as any).Image as string;
+    if (image) {
+      req.log.info({ image }, "ensuring image is present");
+      await ensureImagePulled(docker, image, (m) =>
+        req.log.info(m)
+      );
+    }
     const container = await docker.createContainer(containerSpec);
     const info = await container.inspect();
     return reply.code(201).send({ containerId: info.Id });
