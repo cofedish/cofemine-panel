@@ -39,6 +39,7 @@ type Kind = "mod" | "modpack" | "plugin" | "datapack";
 type ServerContext = {
   type: string;
   version: string;
+  env: Record<string, string>;
 };
 
 /** Map our abstract server type to a Modrinth/CurseForge loader token. */
@@ -136,6 +137,8 @@ export function ServerContent({ serverId }: { serverId: string }): JSX.Element {
 
       {failures?.failures && failures.failures.length > 0 && (
         <FailuresPanel
+          serverId={serverId}
+          server={server}
           failures={failures.failures}
           onFindOnModrinth={findOnModrinth}
         />
@@ -258,28 +261,89 @@ function InstalledPanel({
 /* =============================== FAILURES =============================== */
 
 function FailuresPanel({
+  serverId,
+  server,
   failures,
   onFindOnModrinth,
 }: {
+  serverId: string;
+  server: ServerContext | undefined;
   failures: Failure[];
   onFindOnModrinth: (query: string) => void;
 }): JSX.Element {
+  const [busy, setBusy] = useState(false);
+  const idsToSkip = failures
+    .map((f) => f.modId)
+    .filter((x): x is number => typeof x === "number");
+
+  async function skipAndRetry(): Promise<void> {
+    if (!server) return;
+    if (idsToSkip.length === 0) {
+      alert(
+        "No CurseForge mod IDs could be parsed from the logs. Use 'Find on Modrinth' per mod instead."
+      );
+      return;
+    }
+    if (
+      !confirm(
+        `Add ${idsToSkip.length} mod ID${idsToSkip.length === 1 ? "" : "s"} to CF_EXCLUDE_MODS and rebuild the container?\n\nThe pack will install without the failing mods. The world and /data are preserved.`
+      )
+    ) {
+      return;
+    }
+    setBusy(true);
+    try {
+      const existing = (server.env.CF_EXCLUDE_MODS ?? "")
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean);
+      const merged = Array.from(
+        new Set([...existing, ...idsToSkip.map(String)])
+      ).join(",");
+      await api.patch(`/servers/${serverId}`, {
+        env: { ...server.env, CF_EXCLUDE_MODS: merged },
+      });
+      await api.post(`/servers/${serverId}/repair`);
+      alert(
+        `Done. ${idsToSkip.length} mod${idsToSkip.length === 1 ? "" : "s"} will be skipped on next start. Press Start to retry the install.`
+      );
+      mutate(`/servers/${serverId}`);
+      mutate(`/servers/${serverId}/install-failures`);
+    } catch (e) {
+      alert(e instanceof ApiError ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <section className="tile p-5 space-y-4 border-[rgb(var(--warning))]/30">
       <div className="flex items-start gap-3">
         <span className="w-8 h-8 rounded-md bg-[rgb(var(--warning-soft))] text-[rgb(var(--warning))] grid place-items-center shrink-0">
           <AlertTriangle size={16} />
         </span>
-        <div>
+        <div className="flex-1">
           <h3 className="heading-md">Failed CurseForge downloads</h3>
           <p className="text-sm text-ink-muted mt-1">
             {failures.length} mod{failures.length === 1 ? "" : "s"} the pack
             couldn't fetch automatically — the mod authors disabled third-
-            party downloads. Try <b>Find on Modrinth</b> for a drop-in
-            replacement, or open the CurseForge page to download manually
-            and upload the JAR to <code>mods/</code> via the Files tab.
+            party downloads. Modpack install currently fails on these;{" "}
+            <b>Skip failures & retry</b> adds them to{" "}
+            <code className="kbd">CF_EXCLUDE_MODS</code> so itzg installs the
+            rest. After that, use <b>Find on Modrinth</b> per mod to drop in
+            open-source replacements.
           </p>
         </div>
+        {idsToSkip.length > 0 && (
+          <button
+            className="btn btn-primary shrink-0"
+            onClick={skipAndRetry}
+            disabled={busy || !server}
+            title="Add these mod IDs to CF_EXCLUDE_MODS and rebuild the container"
+          >
+            {busy ? "Applying…" : "Skip failures & retry"}
+          </button>
+        )}
       </div>
       <ul className="divide-y divide-line">
         {failures.map((f) => (
