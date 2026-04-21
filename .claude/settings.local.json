@@ -66,7 +66,8 @@
       "Bash(git commit -q -m 'fix\\(api\\): inject CF_API_KEY into CurseForge server env *)",
       "Bash(git commit -q -m 'fix\\(ui\\): drawer no longer covers top-nav + cleaner Mods/Plugins tab *)",
       "Bash(git commit -q -m 'fix: naked .btn-primary / .btn-subtle rendered as bare rects + icon previews and display *)",
-      "Bash(git commit -q -m 'feat\\(servers\\): auto-heal missing CF_API_KEY on start + Repair button *)"
+      "Bash(git commit -q -m 'feat\\(servers\\): auto-heal missing CF_API_KEY on start + Repair button *)",
+      "Bash(git commit -q -m 'feat\\(content\\): installed mods/plugins/datapacks viewer, CF-failure tracking, installed badge *)"
     ]
   }
 }

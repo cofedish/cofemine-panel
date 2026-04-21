@@ -304,6 +304,40 @@ export async function serversRoutes(app: FastifyInstance): Promise<void> {
     return client.call("GET", `/servers/${id}/players`);
   });
 
+  app.get("/:id/installed-content", async (req) => {
+    const { id } = req.params as { id: string };
+    await assertServerPermission(req, id, "server.view");
+    const server = await prisma.server.findUniqueOrThrow({ where: { id } });
+    const client = await NodeClient.forId(server.nodeId);
+    return client.call("GET", `/servers/${id}/installed-content`);
+  });
+
+  app.delete("/:id/installed-content", async (req) => {
+    const { id } = req.params as { id: string };
+    await assertServerPermission(req, id, "server.edit");
+    const q = req.query as { type?: string; name?: string };
+    const server = await prisma.server.findUniqueOrThrow({ where: { id } });
+    const client = await NodeClient.forId(server.nodeId);
+    await client.call(
+      "DELETE",
+      `/servers/${id}/installed-content?type=${encodeURIComponent(q.type ?? "")}&name=${encodeURIComponent(q.name ?? "")}`
+    );
+    await writeAudit(req, {
+      action: "server.content.delete",
+      resource: id,
+      metadata: { type: q.type, name: q.name },
+    });
+    return { ok: true };
+  });
+
+  app.get("/:id/install-failures", async (req) => {
+    const { id } = req.params as { id: string };
+    await assertServerPermission(req, id, "server.view");
+    const server = await prisma.server.findUniqueOrThrow({ where: { id } });
+    const client = await NodeClient.forId(server.nodeId);
+    return client.call("GET", `/servers/${id}/install-failures`);
+  });
+
   app.get("/:id/icon", async (req, reply) => {
     const { id } = req.params as { id: string };
     await assertServerPermission(req, id, "server.view");

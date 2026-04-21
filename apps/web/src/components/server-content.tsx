@@ -1,9 +1,18 @@
 "use client";
-import { useEffect, useState } from "react";
-import useSWR from "swr";
+import { useEffect, useMemo, useState } from "react";
+import useSWR, { mutate } from "swr";
 import { api, ApiError, fetcher } from "@/lib/api";
 import { cn } from "@/lib/cn";
-import { Search, Download, Package, Check } from "lucide-react";
+import {
+  Search,
+  Download,
+  Package,
+  Check,
+  Trash2,
+  AlertTriangle,
+  ExternalLink,
+  RefreshCw,
+} from "lucide-react";
 import { ModrinthMark, CurseForgeMark } from "./brand-icons";
 
 type Summary = {
@@ -21,15 +30,258 @@ type Summary = {
 type Integrations = {
   providers: {
     modrinth: { enabled: boolean };
-    curseforge: { enabled: boolean; fallback: string };
+    curseforge: { enabled: boolean };
   };
 };
 
 type Kind = "mod" | "modpack" | "plugin" | "datapack";
 
+type InstalledFile = { name: string; size: number; mtime: string };
+type InstalledContent = {
+  mods: InstalledFile[];
+  plugins: InstalledFile[];
+  datapacks: InstalledFile[];
+};
+
+type Failure = {
+  fileName: string;
+  modName: string;
+  lastRetry: number;
+  modId?: number;
+  fileId?: number;
+  url?: string;
+};
+
 export function ServerContent({ serverId }: { serverId: string }): JSX.Element {
+  const { data: installed } = useSWR<InstalledContent>(
+    `/servers/${serverId}/installed-content`,
+    fetcher,
+    { refreshInterval: 10000 }
+  );
+  const { data: failures } = useSWR<{ failures: Failure[] }>(
+    `/servers/${serverId}/install-failures`,
+    fetcher,
+    { refreshInterval: 20000, shouldRetryOnError: false }
+  );
+  const [initialQuery, setInitialQuery] = useState<string | null>(null);
+  const [jumpToSearch, setJumpToSearch] = useState(0);
+
+  function findOnModrinth(query: string): void {
+    setInitialQuery(query);
+    setJumpToSearch((n) => n + 1);
+    setTimeout(() => {
+      document
+        .getElementById("content-search")
+        ?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 40);
+  }
+
+  return (
+    <div className="space-y-6">
+      <InstalledPanel installed={installed} serverId={serverId} />
+
+      {failures?.failures && failures.failures.length > 0 && (
+        <FailuresPanel
+          failures={failures.failures}
+          onFindOnModrinth={findOnModrinth}
+        />
+      )}
+
+      <BrowsePanel
+        serverId={serverId}
+        installed={installed}
+        initialQuery={initialQuery}
+        jumpVersion={jumpToSearch}
+      />
+    </div>
+  );
+}
+
+/* =============================== INSTALLED =============================== */
+
+function InstalledPanel({
+  installed,
+  serverId,
+}: {
+  installed: InstalledContent | undefined;
+  serverId: string;
+}): JSX.Element {
+  const [tab, setTab] = useState<"mods" | "plugins" | "datapacks">("mods");
+  const groups: Record<"mods" | "plugins" | "datapacks", InstalledFile[]> = {
+    mods: installed?.mods ?? [],
+    plugins: installed?.plugins ?? [],
+    datapacks: installed?.datapacks ?? [],
+  };
+  const visible = groups[tab];
+
+  async function remove(file: InstalledFile): Promise<void> {
+    if (!confirm(`Delete ${file.name}?`)) return;
+    try {
+      await api.del(
+        `/servers/${serverId}/installed-content?type=${tab}&name=${encodeURIComponent(file.name)}`
+      );
+      mutate(`/servers/${serverId}/installed-content`);
+    } catch (e) {
+      alert(e instanceof ApiError ? e.message : String(e));
+    }
+  }
+
+  return (
+    <section className="tile p-5 space-y-4">
+      <div className="flex items-center justify-between">
+        <h3 className="heading-md">Installed on this server</h3>
+        <button
+          className="btn btn-ghost !py-1 !px-2"
+          onClick={() => mutate(`/servers/${serverId}/installed-content`)}
+          aria-label="Refresh"
+          title="Refresh"
+        >
+          <RefreshCw size={14} />
+        </button>
+      </div>
+
+      <div className="flex gap-1 border-b border-line">
+        {(["mods", "plugins", "datapacks"] as const).map((t) => {
+          const count = groups[t].length;
+          const active = t === tab;
+          return (
+            <button
+              key={t}
+              onClick={() => setTab(t)}
+              className={cn(
+                "relative px-3 py-2 text-sm capitalize transition-colors",
+                active ? "text-ink font-medium" : "text-ink-secondary hover:text-ink"
+              )}
+            >
+              {t}
+              <span className="ml-1.5 text-[10px] text-ink-muted">
+                {count}
+              </span>
+              {active && (
+                <span className="absolute -bottom-px left-2 right-2 h-0.5 bg-[rgb(var(--accent))] rounded-full" />
+              )}
+            </button>
+          );
+        })}
+      </div>
+
+      {visible.length === 0 ? (
+        <div className="text-sm text-ink-muted py-6 text-center">
+          {installed === undefined
+            ? "Loading…"
+            : `No ${tab} installed yet.`}
+        </div>
+      ) : (
+        <ul className="divide-y divide-line">
+          {visible.map((f) => (
+            <li
+              key={f.name}
+              className="py-2.5 flex items-center gap-3 text-sm"
+            >
+              <Package size={14} className="text-ink-muted shrink-0" />
+              <span className="flex-1 truncate font-mono text-xs">
+                {f.name}
+              </span>
+              <span className="text-xs text-ink-muted tabular-nums w-16 text-right">
+                {formatSize(f.size)}
+              </span>
+              <button
+                className="btn-icon btn-ghost !h-7 !w-7"
+                onClick={() => remove(f)}
+                aria-label="Delete"
+              >
+                <Trash2 size={13} />
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
+
+/* =============================== FAILURES =============================== */
+
+function FailuresPanel({
+  failures,
+  onFindOnModrinth,
+}: {
+  failures: Failure[];
+  onFindOnModrinth: (query: string) => void;
+}): JSX.Element {
+  return (
+    <section className="tile p-5 space-y-4 border-[rgb(var(--warning))]/30">
+      <div className="flex items-start gap-3">
+        <span className="w-8 h-8 rounded-md bg-[rgb(var(--warning-soft))] text-[rgb(var(--warning))] grid place-items-center shrink-0">
+          <AlertTriangle size={16} />
+        </span>
+        <div>
+          <h3 className="heading-md">Failed CurseForge downloads</h3>
+          <p className="text-sm text-ink-muted mt-1">
+            {failures.length} mod{failures.length === 1 ? "" : "s"} the pack
+            couldn't fetch automatically — the mod authors disabled third-
+            party downloads. Try <b>Find on Modrinth</b> for a drop-in
+            replacement, or open the CurseForge page to download manually
+            and upload the JAR to <code>mods/</code> via the Files tab.
+          </p>
+        </div>
+      </div>
+      <ul className="divide-y divide-line">
+        {failures.map((f) => (
+          <li
+            key={`${f.modName}|${f.fileName}`}
+            className="py-3 flex items-center gap-3 text-sm flex-wrap"
+          >
+            <Package size={14} className="text-ink-muted shrink-0" />
+            <div className="flex-1 min-w-[240px]">
+              <div className="font-medium">{f.modName}</div>
+              <div className="text-xs text-ink-muted font-mono truncate">
+                {f.fileName}
+              </div>
+            </div>
+            <button
+              className="btn btn-subtle !py-1.5 !px-3 text-xs"
+              onClick={() => onFindOnModrinth(f.modName)}
+            >
+              <ModrinthMark size={12} /> Find on Modrinth
+            </button>
+            {f.modId && (
+              <a
+                className="btn btn-ghost !py-1.5 !px-3 text-xs"
+                href={`https://www.curseforge.com/minecraft/mc-mods/?search=${encodeURIComponent(
+                  f.modName
+                )}`}
+                target="_blank"
+                rel="noreferrer"
+              >
+                <CurseForgeMark size={12} /> CurseForge{" "}
+                <ExternalLink size={10} />
+              </a>
+            )}
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+/* ================================ BROWSE ================================ */
+
+function BrowsePanel({
+  serverId,
+  installed,
+  initialQuery,
+  jumpVersion,
+}: {
+  serverId: string;
+  installed: InstalledContent | undefined;
+  initialQuery: string | null;
+  jumpVersion: number;
+}): JSX.Element {
   const { data: integ } = useSWR<Integrations>("/integrations", fetcher);
-  const [provider, setProvider] = useState<"modrinth" | "curseforge">("modrinth");
+  const [provider, setProvider] = useState<"modrinth" | "curseforge">(
+    "modrinth"
+  );
   const [query, setQuery] = useState("");
   const [gameVersion, setGameVersion] = useState("");
   const [loader, setLoader] = useState("");
@@ -42,7 +294,24 @@ export function ServerContent({ serverId }: { serverId: string }): JSX.Element {
 
   const cfDisabled = integ ? !integ.providers.curseforge.enabled : true;
 
-  // Auto-search: run on provider/query/filter change with debounce.
+  // Accept pushes from FailuresPanel: seed query + force Modrinth provider.
+  useEffect(() => {
+    if (initialQuery == null) return;
+    setProvider("modrinth");
+    setQuery(initialQuery);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [jumpVersion]);
+
+  // Installed-slugs we compare against to stamp "Installed" on search cards.
+  const installedSlugs = useMemo(() => {
+    const list = [
+      ...(installed?.mods ?? []),
+      ...(installed?.plugins ?? []),
+      ...(installed?.datapacks ?? []),
+    ];
+    return list.map((f) => slugFromFilename(f.name));
+  }, [installed]);
+
   useEffect(() => {
     if (provider === "curseforge" && cfDisabled) {
       setResults([]);
@@ -98,6 +367,7 @@ export function ServerContent({ serverId }: { serverId: string }): JSX.Element {
           ? `${r.name} installed. Restart the server to apply.`
           : `${r.name} installed. Restart the server to load it.`
       );
+      mutate(`/servers/${serverId}/installed-content`);
     } catch (e) {
       setErr(e instanceof ApiError ? e.message : String(e));
     } finally {
@@ -106,8 +376,8 @@ export function ServerContent({ serverId }: { serverId: string }): JSX.Element {
   }
 
   return (
-    <div className="space-y-5">
-      {/* Provider switch */}
+    <section id="content-search" className="space-y-4 scroll-mt-24">
+      <h3 className="heading-md">Browse & install</h3>
       <div className="flex gap-2">
         <ProviderPill
           name="Modrinth"
@@ -126,7 +396,6 @@ export function ServerContent({ serverId }: { serverId: string }): JSX.Element {
         />
       </div>
 
-      {/* Filters — live, no explicit button */}
       <div className="tile p-4 grid grid-cols-1 md:grid-cols-[1fr_160px_160px_140px] gap-3">
         <div className="relative">
           <Search
@@ -170,7 +439,6 @@ export function ServerContent({ serverId }: { serverId: string }): JSX.Element {
         </select>
       </div>
 
-      {/* Status line */}
       <div className="flex items-center justify-between min-h-[20px] text-sm">
         <span className="text-ink-muted">
           {busy
@@ -181,7 +449,6 @@ export function ServerContent({ serverId }: { serverId: string }): JSX.Element {
         {err && <span className="text-[rgb(var(--danger))]">{err}</span>}
       </div>
 
-      {/* Results */}
       {cfDisabled && provider === "curseforge" ? (
         <div className="tile p-8 text-center">
           <p className="text-sm text-ink-secondary max-w-md mx-auto">
@@ -193,14 +460,18 @@ export function ServerContent({ serverId }: { serverId: string }): JSX.Element {
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-          {results.map((r) => (
-            <ResultCard
-              key={`${r.provider}:${r.id}`}
-              r={r}
-              installing={installingId === r.id}
-              onInstall={() => install(r)}
-            />
-          ))}
+          {results.map((r) => {
+            const isInstalled = resultIsInstalled(r, installedSlugs);
+            return (
+              <ResultCard
+                key={`${r.provider}:${r.id}`}
+                r={r}
+                installed={isInstalled}
+                installing={installingId === r.id}
+                onInstall={() => install(r)}
+              />
+            );
+          })}
           {!busy && results.length === 0 && (
             <div className="md:col-span-2 tile p-8 text-center text-ink-muted text-sm">
               {query
@@ -210,16 +481,18 @@ export function ServerContent({ serverId }: { serverId: string }): JSX.Element {
           )}
         </div>
       )}
-    </div>
+    </section>
   );
 }
 
 function ResultCard({
   r,
+  installed,
   installing,
   onInstall,
 }: {
   r: Summary;
+  installed: boolean;
   installing: boolean;
   onInstall: () => void;
 }): JSX.Element {
@@ -240,6 +513,11 @@ function ResultCard({
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2">
           <div className="font-medium truncate">{r.name}</div>
+          {installed && (
+            <span className="chip chip-success">
+              <Check size={10} /> Installed
+            </span>
+          )}
         </div>
         <p className="text-xs text-ink-secondary mt-0.5 line-clamp-2">
           {r.description}
@@ -255,11 +533,23 @@ function ResultCard({
         </div>
       </div>
       <button
-        className="btn btn-subtle self-start"
+        className={cn(
+          "btn self-start",
+          installed ? "btn-ghost" : "btn-subtle"
+        )}
         onClick={onInstall}
-        disabled={installing}
+        disabled={installing || installed}
+        title={installed ? "Already installed" : undefined}
       >
-        {installing ? "Installing…" : <>Install</>}
+        {installed ? (
+          <>
+            <Check size={14} /> Installed
+          </>
+        ) : installing ? (
+          "Installing…"
+        ) : (
+          "Install"
+        )}
       </button>
     </div>
   );
@@ -299,4 +589,40 @@ function ProviderPill({
       {active && <Check size={12} />}
     </button>
   );
+}
+
+/* =============================== HELPERS =============================== */
+
+function formatSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+}
+
+/**
+ * Strip version suffix + extension + loader markers from a jar filename to
+ * get a rough slug we can match against project slugs returned by search.
+ *   "jei-1.21.1-neoforge-19.27.0.340.jar" -> "jei"
+ *   "sodium-fabric-0.5.11+mc1.21.1.jar"   -> "sodium"
+ */
+function slugFromFilename(name: string): string {
+  let s = name.toLowerCase();
+  s = s.replace(/\.(jar|zip)$/, "");
+  s = s.replace(/[_\s]+/g, "-");
+  // cut at the first run-of-digits — that's usually the version marker
+  const m = s.match(/^([a-z][a-z-]*?)(?=-\d|-v\d|-mc\d|-neo|-forge|-fabric|-quilt|$)/);
+  return m?.[1] ?? s;
+}
+
+function resultIsInstalled(r: Summary, installedSlugs: string[]): boolean {
+  const cand = [r.slug?.toLowerCase(), r.name.toLowerCase().replace(/\s+/g, "-")]
+    .filter(Boolean) as string[];
+  if (cand.length === 0) return false;
+  for (const c of cand) {
+    for (const s of installedSlugs) {
+      if (!c || !s) continue;
+      if (c === s || c.includes(s) || s.includes(c)) return true;
+    }
+  }
+  return false;
 }

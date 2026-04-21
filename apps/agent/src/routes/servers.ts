@@ -317,6 +317,60 @@ export async function serversAgentRoutes(app: FastifyInstance): Promise<void> {
     return { ok: true };
   });
 
+  /**
+   * List content installed into /data/mods, /data/plugins and
+   * /data/world/datapacks. Useful for the "already installed" badge on
+   * search results and the Installed panel on the server detail page.
+   */
+  app.get("/servers/:id/installed-content", async (req) => {
+    const { id } = req.params as { id: string };
+    const base = dataDirFor(id);
+    const [mods, plugins, datapacks] = await Promise.all([
+      listJarDir(base, "mods"),
+      listJarDir(base, "plugins"),
+      listJarDir(base, "world/datapacks"),
+    ]);
+    return { mods, plugins, datapacks };
+  });
+
+  app.delete("/servers/:id/installed-content", async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const q = req.query as { type?: string; name?: string };
+    if (!q.type || !q.name)
+      return reply.code(400).send({ error: "type and name required" });
+    const dirMap: Record<string, string> = {
+      mods: "mods",
+      plugins: "plugins",
+      datapacks: "world/datapacks",
+    };
+    const subdir = dirMap[q.type];
+    if (!subdir) return reply.code(400).send({ error: "unknown type" });
+    const base = dataDirFor(id);
+    const file = safeResolve(base, `${subdir}/${q.name}`);
+    await fs.rm(file, { force: true });
+    return { ok: true };
+  });
+
+  /**
+   * Parse recent container logs for CurseForge 403 "Retry" failures —
+   * mods where the pack points at a file the author has disabled for
+   * third-party downloads. Deduped by mod; last retry count kept.
+   */
+  app.get("/servers/:id/install-failures", async (req) => {
+    const { id } = req.params as { id: string };
+    const container = await findContainer(id);
+    if (!container) return { failures: [] };
+    const rawLogs = (await container.logs({
+      follow: false,
+      stdout: true,
+      stderr: true,
+      tail: 3000,
+      timestamps: false,
+    })) as unknown as Buffer;
+    const text = demuxLogBuffer(rawLogs);
+    return { failures: parseCfFailures(text) };
+  });
+
   app.get("/servers/:id/properties", async (req) => {
     const { id } = req.params as { id: string };
     const base = dataDirFor(id);
@@ -339,6 +393,94 @@ export async function serversAgentRoutes(app: FastifyInstance): Promise<void> {
   });
 
   void streamExecOutput; // re-export anchor
+}
+
+/**
+ * Read one directory of JAR/ZIP content (mods/plugins/datapacks). Returns
+ * an empty list if the directory doesn't exist.
+ */
+async function listJarDir(
+  base: string,
+  subdir: string
+): Promise<Array<{ name: string; size: number; mtime: string }>> {
+  const dir = path.join(base, subdir);
+  try {
+    const entries = await fs.readdir(dir, { withFileTypes: true });
+    const files = await Promise.all(
+      entries
+        .filter((e) => e.isFile())
+        .map(async (e) => {
+          const stat = await fs.stat(path.join(dir, e.name));
+          return {
+            name: e.name,
+            size: stat.size,
+            mtime: stat.mtime.toISOString(),
+          };
+        })
+    );
+    return files.sort((a, b) => a.name.localeCompare(b.name));
+  } catch {
+    return [];
+  }
+}
+
+/** Demux Docker's multiplexed log stream into a single utf-8 string. */
+function demuxLogBuffer(buf: Buffer): string {
+  const parts: string[] = [];
+  let offset = 0;
+  while (offset + 8 <= buf.length) {
+    const size = buf.readUInt32BE(offset + 4);
+    parts.push(buf.slice(offset + 8, offset + 8 + size).toString("utf8"));
+    offset += 8 + size;
+  }
+  return parts.join("");
+}
+
+/**
+ * Pull all CurseForge-download failures from itzg's init log. Dedups by
+ * mod name and captures the CurseForge mod ID / file ID when visible in
+ * the URL (so the UI can link directly to the pack page).
+ */
+function parseCfFailures(text: string): Array<{
+  fileName: string;
+  modName: string;
+  lastRetry: number;
+  modId?: number;
+  fileId?: number;
+  url?: string;
+}> {
+  const re =
+    /Retry #(\d+) download of (\S+?) @ ([^:]+):[^\n]*?(?:HTTP request of (\S+))?[^\n]*?403 Forbidden/g;
+  const dedup = new Map<string, {
+    fileName: string;
+    modName: string;
+    lastRetry: number;
+    modId?: number;
+    fileId?: number;
+    url?: string;
+  }>();
+  for (const m of text.matchAll(re)) {
+    const retry = Number(m[1]);
+    const fileName = m[2] ?? "";
+    const modName = (m[3] ?? "").trim();
+    const url = m[4];
+    const idMatch = url?.match(/\/mods\/(\d+)\/files\/(\d+)/);
+    const key = `${modName}|${fileName}`;
+    const prev = dedup.get(key);
+    if (!prev || retry > prev.lastRetry) {
+      dedup.set(key, {
+        fileName,
+        modName,
+        lastRetry: retry,
+        modId: idMatch ? Number(idMatch[1]) : prev?.modId,
+        fileId: idMatch ? Number(idMatch[2]) : prev?.fileId,
+        url: url ?? prev?.url,
+      });
+    }
+  }
+  return [...dedup.values()].sort((a, b) =>
+    a.modName.localeCompare(b.modName)
+  );
 }
 
 function parseProperties(raw: string): Record<string, string> {
