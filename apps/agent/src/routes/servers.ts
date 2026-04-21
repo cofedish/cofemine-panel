@@ -1,7 +1,9 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
-import { promises as fs } from "node:fs";
+import { promises as fs, createReadStream } from "node:fs";
+import crypto from "node:crypto";
 import path from "node:path";
+import { request } from "undici";
 import { docker, ensureNetwork } from "../docker.js";
 import { dataDirFor, ensureDir, safeResolve } from "../paths.js";
 import { getRuntime } from "../runtime/registry.js";
@@ -319,18 +321,55 @@ export async function serversAgentRoutes(app: FastifyInstance): Promise<void> {
 
   /**
    * List content installed into /data/mods, /data/plugins and
-   * /data/world/datapacks. Useful for the "already installed" badge on
-   * search results and the Installed panel on the server detail page.
+   * /data/world/datapacks. Each entry is enriched via Modrinth's
+   * /version_files hash lookup: given the SHA1 of a jar, Modrinth can
+   * tell us the project (title / icon / author). Works for any mod that
+   * was originally uploaded to Modrinth, regardless of how it ended up
+   * on disk (CF AUTO install, manual upload, modpack include).
    */
   app.get("/servers/:id/installed-content", async (req) => {
     const { id } = req.params as { id: string };
     const base = dataDirFor(id);
     const [mods, plugins, datapacks] = await Promise.all([
-      listJarDir(base, "mods"),
-      listJarDir(base, "plugins"),
-      listJarDir(base, "world/datapacks"),
+      listHashedJarDir(base, "mods"),
+      listHashedJarDir(base, "plugins"),
+      listHashedJarDir(base, "world/datapacks"),
     ]);
-    return { mods, plugins, datapacks };
+
+    const allHashes = [...mods, ...plugins, ...datapacks]
+      .map((f) => f.sha1)
+      .filter((h): h is string => typeof h === "string");
+
+    const { versions, projects } = await modrinthLookupByHash(
+      allHashes,
+      req.log
+    );
+
+    const enrich = (f: HashedFile): EnrichedFile => {
+      const v = f.sha1 ? versions[f.sha1] : undefined;
+      const p = v?.project_id ? projects[v.project_id] : undefined;
+      return {
+        name: f.name,
+        size: f.size,
+        mtime: f.mtime,
+        modrinth: p
+          ? {
+              slug: p.slug as string,
+              title: p.title as string,
+              description: p.description as string | undefined,
+              icon: p.icon_url as string | null,
+              versionNumber: v?.version_number as string | undefined,
+              pageUrl: `https://modrinth.com/${p.project_type ?? "mod"}/${p.slug}`,
+            }
+          : undefined,
+      };
+    };
+
+    return {
+      mods: mods.map(enrich),
+      plugins: plugins.map(enrich),
+      datapacks: datapacks.map(enrich),
+    };
   });
 
   app.delete("/servers/:id/installed-content", async (req, reply) => {
@@ -395,32 +434,119 @@ export async function serversAgentRoutes(app: FastifyInstance): Promise<void> {
   void streamExecOutput; // re-export anchor
 }
 
+type HashedFile = {
+  name: string;
+  size: number;
+  mtime: string;
+  sha1?: string;
+};
+
+type EnrichedFile = {
+  name: string;
+  size: number;
+  mtime: string;
+  modrinth?: {
+    slug: string;
+    title: string;
+    description?: string;
+    icon?: string | null;
+    versionNumber?: string;
+    pageUrl: string;
+  };
+};
+
 /**
- * Read one directory of JAR/ZIP content (mods/plugins/datapacks). Returns
- * an empty list if the directory doesn't exist.
+ * Read one dir of JAR/ZIP content, streaming-SHA1 each file so we can
+ * look it up on Modrinth. Returns an empty list when the dir is absent.
+ * Non-jar/zip files are skipped to avoid hashing large worlds by accident.
  */
-async function listJarDir(
+async function listHashedJarDir(
   base: string,
   subdir: string
-): Promise<Array<{ name: string; size: number; mtime: string }>> {
+): Promise<HashedFile[]> {
   const dir = path.join(base, subdir);
   try {
     const entries = await fs.readdir(dir, { withFileTypes: true });
     const files = await Promise.all(
       entries
-        .filter((e) => e.isFile())
-        .map(async (e) => {
-          const stat = await fs.stat(path.join(dir, e.name));
+        .filter(
+          (e) =>
+            e.isFile() &&
+            (e.name.endsWith(".jar") || e.name.endsWith(".zip"))
+        )
+        .map(async (e): Promise<HashedFile> => {
+          const full = path.join(dir, e.name);
+          const [stat, sha1] = await Promise.all([
+            fs.stat(full),
+            streamSha1(full).catch(() => undefined),
+          ]);
           return {
             name: e.name,
             size: stat.size,
             mtime: stat.mtime.toISOString(),
+            sha1,
           };
         })
     );
     return files.sort((a, b) => a.name.localeCompare(b.name));
   } catch {
     return [];
+  }
+}
+
+function streamSha1(file: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const hash = crypto.createHash("sha1");
+    const s = createReadStream(file);
+    s.on("data", (chunk) => hash.update(chunk));
+    s.on("error", reject);
+    s.on("end", () => resolve(hash.digest("hex")));
+  });
+}
+
+/**
+ * Ask Modrinth to resolve a batch of SHA1 hashes to project metadata.
+ * Two calls:
+ *   POST /v2/version_files { hashes, algorithm: "sha1" }
+ *   GET  /v2/projects?ids=[...]
+ * Safe to call with an empty hash list — returns empty maps. Never
+ * throws; on failure the UI just falls back to raw filenames.
+ */
+async function modrinthLookupByHash(
+  hashes: string[],
+  log?: { warn: (obj: unknown, msg?: string) => void }
+): Promise<{
+  versions: Record<string, any>;
+  projects: Record<string, any>;
+}> {
+  if (hashes.length === 0) return { versions: {}, projects: {} };
+  const ua =
+    "cofemine-panel/0.1 (+https://github.com/cofemine/panel)";
+  try {
+    const vr = await request("https://api.modrinth.com/v2/version_files", {
+      method: "POST",
+      headers: { "content-type": "application/json", "user-agent": ua },
+      body: JSON.stringify({ hashes, algorithm: "sha1" }),
+    });
+    if (vr.statusCode >= 400) return { versions: {}, projects: {} };
+    const versions = (await vr.body.json()) as Record<string, any>;
+    const projectIds = new Set<string>();
+    for (const v of Object.values(versions)) {
+      if (v?.project_id) projectIds.add(v.project_id as string);
+    }
+    if (projectIds.size === 0) return { versions, projects: {} };
+    const idsJson = JSON.stringify([...projectIds]);
+    const pr = await request(
+      `https://api.modrinth.com/v2/projects?ids=${encodeURIComponent(idsJson)}`,
+      { headers: { "user-agent": ua } }
+    );
+    if (pr.statusCode >= 400) return { versions, projects: {} };
+    const projectsList = (await pr.body.json()) as any[];
+    const projects = Object.fromEntries(projectsList.map((p) => [p.id, p]));
+    return { versions, projects };
+  } catch (err) {
+    log?.warn({ err }, "modrinth hash lookup failed");
+    return { versions: {}, projects: {} };
   }
 }
 

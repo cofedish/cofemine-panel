@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useMemo, useState } from "react";
 import useSWR, { mutate } from "swr";
+import { motion } from "framer-motion";
 import { api, ApiError, fetcher } from "@/lib/api";
 import { cn } from "@/lib/cn";
 import {
@@ -14,6 +15,8 @@ import {
   RefreshCw,
 } from "lucide-react";
 import { ModrinthMark, CurseForgeMark } from "./brand-icons";
+
+/* ================================ TYPES ================================ */
 
 type Summary = {
   id: string;
@@ -42,52 +45,25 @@ type ServerContext = {
   env: Record<string, string>;
 };
 
-/** Map our abstract server type to a Modrinth/CurseForge loader token. */
-function typeToLoader(t: string): string {
-  switch (t) {
-    case "PAPER":
-    case "PURPUR":
-    case "MOHIST":
-      return "paper";
-    case "FABRIC":
-      return "fabric";
-    case "FORGE":
-      return "forge";
-    case "NEOFORGE":
-      return "neoforge";
-    case "QUILT":
-      return "quilt";
-    default:
-      return "";
-  }
-}
+type ModrinthMeta = {
+  slug: string;
+  title: string;
+  description?: string;
+  icon?: string | null;
+  versionNumber?: string;
+  pageUrl: string;
+};
 
-/**
- * Pull a sensible Modrinth search query out of a noisy mod label like
- *   "DnT Ocean Monument Overhaul"
- *   "Create: Sophisticated Backpacks Compat"
- *   "Subtle Effects (NeoForge)"
- * Drops loader hints, vendor prefixes before a colon (keeps the informative
- * side), parentheses, and common noise words.
- */
-function cleanModNameForSearch(raw: string): string {
-  let s = raw;
-  // strip [Neo/Forge] / (Fabric) / NEOFORGE markers
-  s = s.replace(/\[[^\]]*?(forge|fabric|quilt|neoforge|neo)[^\]]*?\]/gi, "");
-  s = s.replace(/\([^)]*?(forge|fabric|quilt|neoforge|neo)[^)]*?\)/gi, "");
-  s = s.replace(/\b(neoforge|neoforged|neo|forge|fabric|quilt)\b/gi, "");
-  // "Vendor: Actual name" → keep the RHS (usually the mod)
-  if (s.includes(":")) {
-    const parts = s.split(":");
-    if (parts.length >= 2 && parts[1]!.trim().length > 2) {
-      s = parts.slice(1).join(":");
-    }
-  }
-  s = s.replace(/\s+/g, " ").trim();
-  return s;
-}
+/** One jar in /data/mods (or plugins/datapacks), optionally enriched via
+ *  Modrinth's SHA1 hash lookup. `modrinth` is undefined when hash isn't
+ *  known to Modrinth (CF-only mod, in-pack jar, etc.). */
+type InstalledFile = {
+  name: string;
+  size: number;
+  mtime: string;
+  modrinth?: ModrinthMeta;
+};
 
-type InstalledFile = { name: string; size: number; mtime: string };
 type InstalledContent = {
   mods: InstalledFile[];
   plugins: InstalledFile[];
@@ -103,6 +79,10 @@ type Failure = {
   url?: string;
 };
 
+type InnerTab = "installed" | "browse";
+
+/* ============================= ROOT COMPONENT ============================ */
+
 export function ServerContent({ serverId }: { serverId: string }): JSX.Element {
   const { data: server } = useSWR<ServerContext>(
     `/servers/${serverId}`,
@@ -111,30 +91,36 @@ export function ServerContent({ serverId }: { serverId: string }): JSX.Element {
   const { data: installed } = useSWR<InstalledContent>(
     `/servers/${serverId}/installed-content`,
     fetcher,
-    { refreshInterval: 10000 }
+    { refreshInterval: 15000 }
   );
   const { data: failures } = useSWR<{ failures: Failure[] }>(
     `/servers/${serverId}/install-failures`,
     fetcher,
     { refreshInterval: 20000, shouldRetryOnError: false }
   );
+
+  const [tab, setTab] = useState<InnerTab>("installed");
   const [initialQuery, setInitialQuery] = useState<string | null>(null);
-  const [jumpToSearch, setJumpToSearch] = useState(0);
+  const [jumpVersion, setJumpVersion] = useState(0);
+
+  const totalInstalled =
+    (installed?.mods?.length ?? 0) +
+    (installed?.plugins?.length ?? 0) +
+    (installed?.datapacks?.length ?? 0);
 
   function findOnModrinth(query: string): void {
     setInitialQuery(cleanModNameForSearch(query));
-    setJumpToSearch((n) => n + 1);
+    setJumpVersion((n) => n + 1);
+    setTab("browse");
     setTimeout(() => {
       document
         .getElementById("content-search")
         ?.scrollIntoView({ behavior: "smooth", block: "start" });
-    }, 40);
+    }, 60);
   }
 
   return (
     <div className="space-y-6">
-      <InstalledPanel installed={installed} serverId={serverId} />
-
       {failures?.failures && failures.failures.length > 0 && (
         <FailuresPanel
           serverId={serverId}
@@ -144,14 +130,70 @@ export function ServerContent({ serverId }: { serverId: string }): JSX.Element {
         />
       )}
 
-      <BrowsePanel
-        serverId={serverId}
-        installed={installed}
-        server={server}
-        initialQuery={initialQuery}
-        jumpVersion={jumpToSearch}
-      />
+      {/* Sliding-underline tab switcher */}
+      <div className="flex gap-1 border-b border-line">
+        <TabButton
+          active={tab === "installed"}
+          onClick={() => setTab("installed")}
+          label="Installed"
+          count={totalInstalled}
+        />
+        <TabButton
+          active={tab === "browse"}
+          onClick={() => setTab("browse")}
+          label="Browse & install"
+        />
+      </div>
+
+      {tab === "installed" ? (
+        <InstalledPanel installed={installed} serverId={serverId} />
+      ) : (
+        <BrowsePanel
+          serverId={serverId}
+          installed={installed}
+          server={server}
+          initialQuery={initialQuery}
+          jumpVersion={jumpVersion}
+        />
+      )}
     </div>
+  );
+}
+
+function TabButton({
+  active,
+  onClick,
+  label,
+  count,
+}: {
+  active: boolean;
+  onClick: () => void;
+  label: string;
+  count?: number;
+}): JSX.Element {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        "relative px-4 py-2.5 text-sm transition-colors inline-flex items-center gap-2",
+        active ? "text-ink font-medium" : "text-ink-secondary hover:text-ink"
+      )}
+    >
+      {label}
+      {typeof count === "number" && (
+        <span className="text-[10px] text-ink-muted tabular-nums">
+          {count}
+        </span>
+      )}
+      {active && (
+        <motion.span
+          layoutId="content-tab"
+          className="absolute -bottom-px left-2 right-2 h-0.5 bg-[rgb(var(--accent))] rounded-full"
+          transition={{ type: "spring", duration: 0.3 }}
+        />
+      )}
+    </button>
   );
 }
 
@@ -164,19 +206,20 @@ function InstalledPanel({
   installed: InstalledContent | undefined;
   serverId: string;
 }): JSX.Element {
-  const [tab, setTab] = useState<"mods" | "plugins" | "datapacks">("mods");
+  const [sub, setSub] = useState<"mods" | "plugins" | "datapacks">("mods");
   const groups: Record<"mods" | "plugins" | "datapacks", InstalledFile[]> = {
     mods: installed?.mods ?? [],
     plugins: installed?.plugins ?? [],
     datapacks: installed?.datapacks ?? [],
   };
-  const visible = groups[tab];
+  const visible = groups[sub];
+  const [query, setQuery] = useState("");
 
   async function remove(file: InstalledFile): Promise<void> {
     if (!confirm(`Delete ${file.name}?`)) return;
     try {
       await api.del(
-        `/servers/${serverId}/installed-content?type=${tab}&name=${encodeURIComponent(file.name)}`
+        `/servers/${serverId}/installed-content?type=${sub}&name=${encodeURIComponent(file.name)}`
       );
       mutate(`/servers/${serverId}/installed-content`);
     } catch (e) {
@@ -184,77 +227,158 @@ function InstalledPanel({
     }
   }
 
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return visible;
+    return visible.filter(
+      (f) =>
+        f.name.toLowerCase().includes(q) ||
+        f.modrinth?.title?.toLowerCase().includes(q) ||
+        f.modrinth?.slug?.toLowerCase().includes(q)
+    );
+  }, [visible, query]);
+
   return (
-    <section className="tile p-5 space-y-4">
-      <div className="flex items-center justify-between">
-        <h3 className="heading-md">Installed on this server</h3>
-        <button
-          className="btn btn-ghost !py-1 !px-2"
-          onClick={() => mutate(`/servers/${serverId}/installed-content`)}
-          aria-label="Refresh"
-          title="Refresh"
-        >
-          <RefreshCw size={14} />
-        </button>
+    <section className="space-y-4">
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <div className="flex gap-1">
+          {(["mods", "plugins", "datapacks"] as const).map((t) => {
+            const count = groups[t].length;
+            const active = t === sub;
+            return (
+              <button
+                key={t}
+                onClick={() => setSub(t)}
+                className={cn(
+                  "inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm border transition-colors capitalize",
+                  active
+                    ? "bg-[rgb(var(--accent-soft))] border-[rgb(var(--accent))]/40 text-[rgb(var(--accent))]"
+                    : "border-line text-ink-secondary hover:bg-surface-2"
+                )}
+              >
+                {t}
+                <span className="text-[10px] opacity-70 tabular-nums">
+                  {count}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+        <div className="flex items-center gap-2">
+          <div className="relative">
+            <Search
+              size={13}
+              className="absolute left-2.5 top-1/2 -translate-y-1/2 text-ink-muted"
+            />
+            <input
+              className="input !py-1.5 pl-7 text-xs w-44"
+              placeholder="Filter…"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+            />
+          </div>
+          <button
+            className="btn btn-ghost !py-1.5 !px-2"
+            onClick={() => mutate(`/servers/${serverId}/installed-content`)}
+            aria-label="Refresh"
+            title="Refresh"
+          >
+            <RefreshCw size={14} />
+          </button>
+        </div>
       </div>
 
-      <div className="flex gap-1 border-b border-line">
-        {(["mods", "plugins", "datapacks"] as const).map((t) => {
-          const count = groups[t].length;
-          const active = t === tab;
-          return (
-            <button
-              key={t}
-              onClick={() => setTab(t)}
-              className={cn(
-                "relative px-3 py-2 text-sm capitalize transition-colors",
-                active ? "text-ink font-medium" : "text-ink-secondary hover:text-ink"
-              )}
-            >
-              {t}
-              <span className="ml-1.5 text-[10px] text-ink-muted">
-                {count}
-              </span>
-              {active && (
-                <span className="absolute -bottom-px left-2 right-2 h-0.5 bg-[rgb(var(--accent))] rounded-full" />
-              )}
-            </button>
-          );
-        })}
-      </div>
-
-      {visible.length === 0 ? (
-        <div className="text-sm text-ink-muted py-6 text-center">
+      {filtered.length === 0 ? (
+        <div className="tile p-10 text-center text-ink-muted">
           {installed === undefined
             ? "Loading…"
-            : `No ${tab} installed yet.`}
+            : query
+              ? `No ${sub} match "${query}".`
+              : `No ${sub} installed yet.`}
         </div>
       ) : (
-        <ul className="divide-y divide-line">
-          {visible.map((f) => (
-            <li
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          {filtered.map((f) => (
+            <InstalledCard
               key={f.name}
-              className="py-2.5 flex items-center gap-3 text-sm"
-            >
-              <Package size={14} className="text-ink-muted shrink-0" />
-              <span className="flex-1 truncate font-mono text-xs">
-                {f.name}
-              </span>
-              <span className="text-xs text-ink-muted tabular-nums w-16 text-right">
-                {formatSize(f.size)}
-              </span>
-              <button
-                className="btn-icon btn-ghost !h-7 !w-7"
-                onClick={() => remove(f)}
-                aria-label="Delete"
-              >
-                <Trash2 size={13} />
-              </button>
-            </li>
+              file={f}
+              onDelete={() => remove(f)}
+            />
           ))}
-        </ul>
+        </div>
       )}
     </section>
+  );
+}
+
+function InstalledCard({
+  file,
+  onDelete,
+}: {
+  file: InstalledFile;
+  onDelete: () => void;
+}): JSX.Element {
+  const title = file.modrinth?.title ?? prettifyFilename(file.name);
+  const subtitle = file.modrinth?.description;
+  return (
+    <div className="tile p-3.5 flex gap-3 items-start">
+      {file.modrinth?.icon ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={file.modrinth.icon}
+          alt=""
+          className="w-12 h-12 rounded-md object-cover flex-shrink-0 bg-surface-2"
+          draggable={false}
+        />
+      ) : (
+        <span className="w-12 h-12 rounded-md bg-surface-2 text-ink-secondary grid place-items-center flex-shrink-0">
+          <Package size={20} />
+        </span>
+      )}
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-2">
+          <div className="font-medium truncate">{title}</div>
+          {file.modrinth && (
+            <span className="chip chip-accent">
+              <ModrinthMark size={10} /> Modrinth
+            </span>
+          )}
+        </div>
+        {subtitle ? (
+          <p className="text-xs text-ink-secondary mt-0.5 line-clamp-2">
+            {subtitle}
+          </p>
+        ) : (
+          <p className="text-xs text-ink-muted mt-0.5 font-mono truncate">
+            {file.name}
+          </p>
+        )}
+        <div className="text-[11px] text-ink-muted mt-1.5 flex items-center gap-3">
+          {file.modrinth?.versionNumber && (
+            <span className="font-mono">{file.modrinth.versionNumber}</span>
+          )}
+          <span className="tabular-nums">{formatSize(file.size)}</span>
+          {file.modrinth?.pageUrl && (
+            <a
+              className="link inline-flex items-center gap-1"
+              href={file.modrinth.pageUrl}
+              target="_blank"
+              rel="noreferrer"
+            >
+              page <ExternalLink size={10} />
+            </a>
+          )}
+        </div>
+      </div>
+      <button
+        className="btn-icon btn-ghost !h-8 !w-8 shrink-0"
+        onClick={onDelete}
+        aria-label="Delete"
+        title="Delete"
+      >
+        <Trash2 size={14} />
+      </button>
+    </div>
   );
 }
 
@@ -318,17 +442,16 @@ function FailuresPanel({
 
   return (
     <section className="tile p-5 space-y-4 border-[rgb(var(--warning))]/30">
-      <div className="flex items-start gap-3">
+      <div className="flex items-start gap-3 flex-wrap">
         <span className="w-8 h-8 rounded-md bg-[rgb(var(--warning-soft))] text-[rgb(var(--warning))] grid place-items-center shrink-0">
           <AlertTriangle size={16} />
         </span>
-        <div className="flex-1">
+        <div className="flex-1 min-w-[280px]">
           <h3 className="heading-md">Failed CurseForge downloads</h3>
           <p className="text-sm text-ink-muted mt-1">
             {failures.length} mod{failures.length === 1 ? "" : "s"} the pack
-            couldn't fetch automatically — the mod authors disabled third-
-            party downloads. Modpack install currently fails on these;{" "}
-            <b>Skip failures & retry</b> adds them to{" "}
+            couldn't fetch automatically — the mod authors disabled third-party
+            downloads. <b>Skip failures & retry</b> adds them to{" "}
             <code className="kbd">CF_EXCLUDE_MODS</code> so itzg installs the
             rest. After that, use <b>Find on Modrinth</b> per mod to drop in
             open-source replacements.
@@ -336,7 +459,7 @@ function FailuresPanel({
         </div>
         {idsToSkip.length > 0 && (
           <button
-            className="btn btn-primary shrink-0"
+            className="btn-primary shrink-0"
             onClick={skipAndRetry}
             disabled={busy || !server}
             title="Add these mod IDs to CF_EXCLUDE_MODS and rebuild the container"
@@ -359,14 +482,14 @@ function FailuresPanel({
               </div>
             </div>
             <button
-              className="btn btn-subtle !py-1.5 !px-3 text-xs"
+              className="btn-subtle !py-1.5 !px-3 text-xs"
               onClick={() => onFindOnModrinth(f.modName)}
             >
               <ModrinthMark size={12} /> Find on Modrinth
             </button>
             {f.modId && (
               <a
-                className="btn btn-ghost !py-1.5 !px-3 text-xs"
+                className="btn-ghost !py-1.5 !px-3 text-xs"
                 href={`https://www.curseforge.com/minecraft/mc-mods/?search=${encodeURIComponent(
                   f.modName
                 )}`}
@@ -404,9 +527,6 @@ function BrowsePanel({
     "modrinth"
   );
   const [query, setQuery] = useState("");
-  // Default MC version + loader to the server's context so users don't
-  // have to retype "1.21.1 / neoforge" on every search. Empty string
-  // still means "any" — the inputs stay user-editable.
   const [gameVersion, setGameVersion] = useState("");
   const [loader, setLoader] = useState("");
   const [versionPinned, setVersionPinned] = useState(false);
@@ -437,14 +557,22 @@ function BrowsePanel({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [jumpVersion]);
 
-  // Installed-slugs we compare against to stamp "Installed" on search cards.
-  const installedSlugs = useMemo(() => {
-    const list = [
+  // Build a strict, normalised set of installed keys. We match search
+  // results against this with exact equality only — the previous
+  // substring fallback produced false positives like "create" marking
+  // every Create-family mod as installed.
+  const installedKeys = useMemo(() => {
+    const set = new Set<string>();
+    const files = [
       ...(installed?.mods ?? []),
       ...(installed?.plugins ?? []),
       ...(installed?.datapacks ?? []),
     ];
-    return list.map((f) => slugFromFilename(f.name));
+    for (const f of files) {
+      if (f.modrinth?.slug) set.add(normKey(f.modrinth.slug));
+      set.add(normKey(slugFromFilename(f.name)));
+    }
+    return set;
   }, [installed]);
 
   useEffect(() => {
@@ -512,7 +640,6 @@ function BrowsePanel({
 
   return (
     <section id="content-search" className="space-y-4 scroll-mt-24">
-      <h3 className="heading-md">Browse & install</h3>
       <div className="flex gap-2">
         <ProviderPill
           name="Modrinth"
@@ -596,7 +723,7 @@ function BrowsePanel({
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           {results.map((r) => {
-            const isInstalled = resultIsInstalled(r, installedSlugs);
+            const isInstalled = resultIsInstalled(r, installedKeys);
             return (
               <ResultCard
                 key={`${r.provider}:${r.id}`}
@@ -668,10 +795,7 @@ function ResultCard({
         </div>
       </div>
       <button
-        className={cn(
-          "btn self-start",
-          installed ? "btn-ghost" : "btn-subtle"
-        )}
+        className={cn("btn self-start", installed ? "btn-ghost" : "btn-subtle")}
         onClick={onInstall}
         disabled={installing || installed}
         title={installed ? "Already installed" : undefined}
@@ -728,36 +852,84 @@ function ProviderPill({
 
 /* =============================== HELPERS =============================== */
 
+function typeToLoader(t: string): string {
+  switch (t) {
+    case "PAPER":
+    case "PURPUR":
+    case "MOHIST":
+      return "paper";
+    case "FABRIC":
+      return "fabric";
+    case "FORGE":
+      return "forge";
+    case "NEOFORGE":
+      return "neoforge";
+    case "QUILT":
+      return "quilt";
+    default:
+      return "";
+  }
+}
+
+function cleanModNameForSearch(raw: string): string {
+  let s = raw;
+  s = s.replace(/\[[^\]]*?(forge|fabric|quilt|neoforge|neo)[^\]]*?\]/gi, "");
+  s = s.replace(/\([^)]*?(forge|fabric|quilt|neoforge|neo)[^)]*?\)/gi, "");
+  s = s.replace(/\b(neoforge|neoforged|neo|forge|fabric|quilt)\b/gi, "");
+  if (s.includes(":")) {
+    const parts = s.split(":");
+    if (parts.length >= 2 && parts[1]!.trim().length > 2) {
+      s = parts.slice(1).join(":");
+    }
+  }
+  s = s.replace(/\s+/g, " ").trim();
+  return s;
+}
+
 function formatSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 }
 
-/**
- * Strip version suffix + extension + loader markers from a jar filename to
- * get a rough slug we can match against project slugs returned by search.
- *   "jei-1.21.1-neoforge-19.27.0.340.jar" -> "jei"
- *   "sodium-fabric-0.5.11+mc1.21.1.jar"   -> "sodium"
- */
 function slugFromFilename(name: string): string {
   let s = name.toLowerCase();
   s = s.replace(/\.(jar|zip)$/, "");
   s = s.replace(/[_\s]+/g, "-");
-  // cut at the first run-of-digits — that's usually the version marker
-  const m = s.match(/^([a-z][a-z-]*?)(?=-\d|-v\d|-mc\d|-neo|-forge|-fabric|-quilt|$)/);
+  const m = s.match(
+    /^([a-z][a-z-]*?)(?=-\d|-v\d|-mc\d|-neo|-forge|-fabric|-quilt|$)/
+  );
   return m?.[1] ?? s;
 }
 
-function resultIsInstalled(r: Summary, installedSlugs: string[]): boolean {
-  const cand = [r.slug?.toLowerCase(), r.name.toLowerCase().replace(/\s+/g, "-")]
-    .filter(Boolean) as string[];
-  if (cand.length === 0) return false;
-  for (const c of cand) {
-    for (const s of installedSlugs) {
-      if (!c || !s) continue;
-      if (c === s || c.includes(s) || s.includes(c)) return true;
-    }
+function normKey(s: string): string {
+  return s.toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+/**
+ * True when a search result matches a file already in installedKeys.
+ * Strict: exact equality on the normalised key (alphanumerics only).
+ * No substring match — "create" should NOT mark "Create: Backpack Pixel"
+ * as installed.
+ */
+function resultIsInstalled(r: Summary, installedKeys: Set<string>): boolean {
+  const cands = new Set<string>();
+  if (r.slug) cands.add(normKey(r.slug));
+  if (r.name) cands.add(normKey(r.name));
+  const parts = r.name?.split(":") ?? [];
+  if (parts.length > 1) cands.add(normKey(parts.slice(1).join(":")));
+  for (const c of cands) {
+    if (c && installedKeys.has(c)) return true;
   }
   return false;
+}
+
+/** Turn "SubtleEffects-neoforge-1.21.1-1.13.2-hotfix.1.jar" into
+ *  "SubtleEffects" when we don't have a Modrinth match to lean on. */
+function prettifyFilename(name: string): string {
+  let s = name.replace(/\.(jar|zip)$/i, "");
+  s = s.replace(/[_]/g, " ");
+  const cut = s.search(/-\d|-v\d|-mc\d|-neo|-forge|-fabric|-quilt/i);
+  if (cut > 0) s = s.slice(0, cut);
+  return s.replace(/-/g, " ").trim() || name;
 }
