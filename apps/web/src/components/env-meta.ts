@@ -126,8 +126,6 @@ export const ENV_DEFS: EnvDef[] = [
   { key: "ALLOW_NETHER", label: "Allow Nether", type: "boolean", default: true, group: "gameplay" },
   { key: "FORCE_GAMEMODE", label: "Force gamemode on join", type: "boolean", default: false, group: "gameplay" },
   { key: "ENABLE_COMMAND_BLOCK", label: "Enable command blocks", type: "boolean", default: false, group: "gameplay" },
-  { key: "ICON", label: "Server icon URL", help: "64x64 PNG shown next to MOTD in the server list.", type: "string", group: "gameplay" },
-  { key: "OVERRIDE_ICON", label: "Override existing icon", type: "boolean", default: false, group: "gameplay" },
   { key: "PAUSE_WHEN_EMPTY_SECONDS", label: "Pause when empty (seconds)", help: "Server pauses if no players for N seconds. 0 disables.", type: "number", min: 0, max: 86400, default: 0, group: "gameplay" },
 
   /* ============================== WORLD =============================== */

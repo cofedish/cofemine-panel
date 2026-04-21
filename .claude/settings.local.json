@@ -58,7 +58,9 @@
       "Bash(git commit -q -m 'fix\\(integrations\\): pack search works without query, autoload on mount *)",
       "Bash(git commit -q -m 'feat\\(wizard\\): typed form for itzg env vars, kill the textarea *)",
       "Bash(git commit -q -m 'feat\\(config\\): complete itzg env + server.properties coverage with type filters *)",
-      "Bash(git commit -q -m 'feat: user avatar upload + server icon upload \\(both with canvas resize\\) *)"
+      "Bash(git commit -q -m 'feat: user avatar upload + server icon upload \\(both with canvas resize\\) *)",
+      "Bash(avatar)",
+      "Bash(git commit -q -m 'fix: dedicated icon upload in wizard + avatars in admin table *)"
     ]
   }
 }

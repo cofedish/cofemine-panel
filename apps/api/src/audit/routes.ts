@@ -15,7 +15,11 @@ export async function auditRoutes(app: FastifyInstance): Promise<void> {
           orderBy: { createdAt: "desc" },
           take: limit,
           skip: offset,
-          include: { user: { select: { username: true, email: true } } },
+          include: {
+            user: {
+              select: { username: true, email: true, avatar: true },
+            },
+          },
         }),
         prisma.auditEvent.count(),
       ]);

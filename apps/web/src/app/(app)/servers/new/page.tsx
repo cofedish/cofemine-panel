@@ -14,6 +14,7 @@ import {
   type ServerTypeKey,
 } from "@/components/server-icons";
 import { EnvForm } from "@/components/env-form";
+import { ImageUpload } from "@/components/image-upload";
 import { cn } from "@/lib/cn";
 import {
   Check,
@@ -106,6 +107,9 @@ export default function CreateServerPage(): JSX.Element {
     DIFFICULTY: "normal",
     MAX_PLAYERS: "20",
   });
+  /** Optional server-icon PNG uploaded through ImageUpload. Uploaded to
+   *  /servers/:id/icon *after* server creation (no id to target before). */
+  const [iconDataUrl, setIconDataUrl] = useState<string | null>(null);
   const [eula, setEula] = useState(false);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -149,6 +153,15 @@ export default function CreateServerPage(): JSX.Element {
         body.version = "LATEST";
       }
       const res = await api.post<{ id: string }>("/servers", body);
+      // Icon upload happens separately — the server needs to exist first
+      // so we have a /servers/:id to POST to. Non-fatal if it fails.
+      if (iconDataUrl) {
+        try {
+          await api.post(`/servers/${res.id}/icon`, { data: iconDataUrl });
+        } catch (e) {
+          console.warn("Failed to upload icon after create:", e);
+        }
+      }
       router.push(`/servers/${res.id}`);
     } catch (e) {
       setErr(e instanceof ApiError ? e.message : String(e));
@@ -274,6 +287,8 @@ export default function CreateServerPage(): JSX.Element {
               env={env}
               setEnv={setEnv}
               currentType={effectiveType}
+              iconDataUrl={iconDataUrl}
+              setIconDataUrl={setIconDataUrl}
             />
           )}
           {step === "Review" && (
@@ -651,6 +666,8 @@ function ResourcesStep({
   env,
   setEnv,
   currentType,
+  iconDataUrl,
+  setIconDataUrl,
 }: {
   nodes: Node[];
   name: string;
@@ -666,6 +683,8 @@ function ResourcesStep({
   env: Record<string, string>;
   setEnv: (v: Record<string, string>) => void;
   currentType: string;
+  iconDataUrl: string | null;
+  setIconDataUrl: (v: string | null) => void;
 }): JSX.Element {
   return (
     <div className="space-y-5">
@@ -724,6 +743,26 @@ function ResourcesStep({
             />
           </Field>
         </div>
+      </div>
+
+      <div className="tile p-7 space-y-5">
+        <div>
+          <h2 className="heading-md">Server icon</h2>
+          <p className="text-sm text-ink-muted mt-1">
+            Optional. Shown next to the MOTD in the in-game server list.
+            Upload any image — we'll crop to a square and save as a 64×64
+            PNG after the server is created.
+          </p>
+        </div>
+        <ImageUpload
+          value={iconDataUrl}
+          onChange={setIconDataUrl}
+          targetSize={64}
+          previewSize={80}
+          shape="square"
+          label="Upload icon"
+          hint="Auto-resized to 64×64 PNG. itzg picks it up automatically on first start."
+        />
       </div>
 
       <div className="tile p-7 space-y-5">

@@ -17,6 +17,7 @@ export async function usersRoutes(app: FastifyInstance): Promise<void> {
           email: true,
           username: true,
           role: true,
+          avatar: true,
           createdAt: true,
         },
         orderBy: { createdAt: "asc" },

@@ -8,6 +8,7 @@ import { cn } from "@/lib/cn";
 import { PageHeader } from "@/components/page-header";
 import { Drawer } from "@/components/drawer";
 import { Stagger, StaggerItem } from "@/components/motion";
+import { Avatar } from "@/components/avatar";
 import { UserPlus, ClipboardList, Trash2 } from "lucide-react";
 
 type User = {
@@ -15,6 +16,7 @@ type User = {
   email: string;
   username: string;
   role: string;
+  avatar: string | null;
   createdAt: string;
 };
 
@@ -25,7 +27,11 @@ type AuditEvent = {
   metadata: unknown;
   ip: string | null;
   createdAt: string;
-  user: { username: string; email: string } | null;
+  user: {
+    username: string;
+    email: string;
+    avatar: string | null;
+  } | null;
 };
 
 const TABS = [
@@ -115,9 +121,7 @@ function UsersTab(): JSX.Element {
                 <tr key={u.id} className="hover:bg-[rgb(var(--bg-hover))]">
                   <td className="px-5 py-3">
                     <div className="flex items-center gap-3">
-                      <span className="w-8 h-8 rounded-full bg-[rgb(var(--accent))] text-[rgb(var(--accent-ink))] grid place-items-center text-[11px] font-semibold uppercase">
-                        {u.username.slice(0, 2)}
-                      </span>
+                      <Avatar src={u.avatar} name={u.username} size={32} />
                       <span className="font-medium">{u.username}</span>
                     </div>
                   </td>
@@ -295,9 +299,12 @@ function ActivityTab(): JSX.Element {
             {data.items.map((e) => (
               <StaggerItem key={e.id}>
                 <li className="px-5 py-3 flex items-start gap-4 hover:bg-[rgb(var(--bg-hover))]">
-                  <div className="w-8 h-8 rounded-full bg-surface-2 text-ink-secondary grid place-items-center text-[10px] font-semibold uppercase shrink-0">
-                    {e.user?.username?.slice(0, 2) ?? "··"}
-                  </div>
+                  <Avatar
+                    src={e.user?.avatar}
+                    name={e.user?.username ?? "system"}
+                    size={32}
+                    className="shrink-0"
+                  />
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 flex-wrap">
                       <span className="font-medium text-sm">
