@@ -44,7 +44,7 @@ export function Drawer({
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             transition={{ duration: 0.16 }}
-            className="fixed inset-0 bg-black/30 backdrop-blur-[2px] z-50"
+            className="fixed inset-0 bg-black/30 backdrop-blur-[2px] z-30"
             onClick={onClose}
           />
           <motion.aside
@@ -54,7 +54,9 @@ export function Drawer({
             exit={{ x: width }}
             transition={{ type: "spring", damping: 26, stiffness: 260 }}
             style={{ width }}
-            className="fixed right-0 top-0 bottom-0 bg-[rgb(var(--bg-surface-1))] border-l border-line z-50 flex flex-col shadow-[var(--shadow-lg)]"
+            // Top nav (h-14) stays visible on top (z-40). Drawer sits
+            // below it so the brand/nav/user menu remain reachable.
+            className="fixed right-0 top-14 bottom-0 bg-[rgb(var(--bg-surface-1))] border-l border-t border-line z-30 flex flex-col shadow-[var(--shadow-lg)]"
           >
             <header className="flex items-start gap-3 p-5 border-b border-line">
               <div className="flex-1 min-w-0">
