@@ -30,14 +30,20 @@ services:
     restart: always
     environment:
       AGENT_TOKEN: ${AGENT_TOKEN}
-      AGENT_DATA_ROOT: "/var/lib/cofemine/servers"
-      AGENT_BACKUP_ROOT: "/var/lib/cofemine/backups"
+      AGENT_DATA_ROOT: ${DATA_ROOT:-/var/lib/cofemine/servers}
+      AGENT_BACKUP_ROOT: ${BACKUP_ROOT:-/var/lib/cofemine/backups}
       AGENT_DOCKER_NETWORK: "cofemine_mcnet"
       AGENT_LABEL_PREFIX: "cofemine"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-      - mc_data:/var/lib/cofemine/servers
-      - mc_backups:/var/lib/cofemine/backups
+      # Bind the SAME host paths into the agent as it will later hand to
+      # Minecraft containers in their `Binds`. Docker interprets Bind
+      # sources as host paths; if we used named volumes here, the agent
+      # and the MC containers would resolve /var/lib/cofemine/servers to
+      # two different locations on the host and the agent would never see
+      # mods/plugins/icons written by itzg.
+      - ${DATA_ROOT:-/var/lib/cofemine/servers}:${DATA_ROOT:-/var/lib/cofemine/servers}
+      - ${BACKUP_ROOT:-/var/lib/cofemine/backups}:${BACKUP_ROOT:-/var/lib/cofemine/backups}
     networks: [cofemine_internal, cofemine_mcnet]
     logging:
       driver: json-file
@@ -85,8 +91,9 @@ services:
 
 volumes:
   db_data:
-  mc_data:
-  mc_backups:
+  # mc_data / mc_backups are now bind-mounts to DATA_ROOT / BACKUP_ROOT,
+  # not named volumes, so the agent and MC containers see the same host
+  # paths. See the agent service definition.
 
 networks:
   cofemine_internal:

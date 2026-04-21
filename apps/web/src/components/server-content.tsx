@@ -36,6 +36,56 @@ type Integrations = {
 
 type Kind = "mod" | "modpack" | "plugin" | "datapack";
 
+type ServerContext = {
+  type: string;
+  version: string;
+};
+
+/** Map our abstract server type to a Modrinth/CurseForge loader token. */
+function typeToLoader(t: string): string {
+  switch (t) {
+    case "PAPER":
+    case "PURPUR":
+    case "MOHIST":
+      return "paper";
+    case "FABRIC":
+      return "fabric";
+    case "FORGE":
+      return "forge";
+    case "NEOFORGE":
+      return "neoforge";
+    case "QUILT":
+      return "quilt";
+    default:
+      return "";
+  }
+}
+
+/**
+ * Pull a sensible Modrinth search query out of a noisy mod label like
+ *   "DnT Ocean Monument Overhaul"
+ *   "Create: Sophisticated Backpacks Compat"
+ *   "Subtle Effects (NeoForge)"
+ * Drops loader hints, vendor prefixes before a colon (keeps the informative
+ * side), parentheses, and common noise words.
+ */
+function cleanModNameForSearch(raw: string): string {
+  let s = raw;
+  // strip [Neo/Forge] / (Fabric) / NEOFORGE markers
+  s = s.replace(/\[[^\]]*?(forge|fabric|quilt|neoforge|neo)[^\]]*?\]/gi, "");
+  s = s.replace(/\([^)]*?(forge|fabric|quilt|neoforge|neo)[^)]*?\)/gi, "");
+  s = s.replace(/\b(neoforge|neoforged|neo|forge|fabric|quilt)\b/gi, "");
+  // "Vendor: Actual name" → keep the RHS (usually the mod)
+  if (s.includes(":")) {
+    const parts = s.split(":");
+    if (parts.length >= 2 && parts[1]!.trim().length > 2) {
+      s = parts.slice(1).join(":");
+    }
+  }
+  s = s.replace(/\s+/g, " ").trim();
+  return s;
+}
+
 type InstalledFile = { name: string; size: number; mtime: string };
 type InstalledContent = {
   mods: InstalledFile[];
@@ -53,6 +103,10 @@ type Failure = {
 };
 
 export function ServerContent({ serverId }: { serverId: string }): JSX.Element {
+  const { data: server } = useSWR<ServerContext>(
+    `/servers/${serverId}`,
+    fetcher
+  );
   const { data: installed } = useSWR<InstalledContent>(
     `/servers/${serverId}/installed-content`,
     fetcher,
@@ -67,7 +121,7 @@ export function ServerContent({ serverId }: { serverId: string }): JSX.Element {
   const [jumpToSearch, setJumpToSearch] = useState(0);
 
   function findOnModrinth(query: string): void {
-    setInitialQuery(query);
+    setInitialQuery(cleanModNameForSearch(query));
     setJumpToSearch((n) => n + 1);
     setTimeout(() => {
       document
@@ -90,6 +144,7 @@ export function ServerContent({ serverId }: { serverId: string }): JSX.Element {
       <BrowsePanel
         serverId={serverId}
         installed={installed}
+        server={server}
         initialQuery={initialQuery}
         jumpVersion={jumpToSearch}
       />
@@ -270,11 +325,13 @@ function FailuresPanel({
 function BrowsePanel({
   serverId,
   installed,
+  server,
   initialQuery,
   jumpVersion,
 }: {
   serverId: string;
   installed: InstalledContent | undefined;
+  server: ServerContext | undefined;
   initialQuery: string | null;
   jumpVersion: number;
 }): JSX.Element {
@@ -283,8 +340,22 @@ function BrowsePanel({
     "modrinth"
   );
   const [query, setQuery] = useState("");
+  // Default MC version + loader to the server's context so users don't
+  // have to retype "1.21.1 / neoforge" on every search. Empty string
+  // still means "any" — the inputs stay user-editable.
   const [gameVersion, setGameVersion] = useState("");
   const [loader, setLoader] = useState("");
+  const [versionPinned, setVersionPinned] = useState(false);
+  useEffect(() => {
+    if (server && !versionPinned) {
+      if (server.version && server.version !== "LATEST") {
+        setGameVersion(server.version);
+      }
+      const l = typeToLoader(server.type);
+      if (l) setLoader(l);
+      setVersionPinned(true);
+    }
+  }, [server, versionPinned]);
   const [kind, setKind] = useState<Kind>("mod");
   const [results, setResults] = useState<Summary[]>([]);
   const [busy, setBusy] = useState(false);

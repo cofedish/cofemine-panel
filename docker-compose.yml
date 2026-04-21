@@ -29,18 +29,21 @@ services:
       AGENT_PORT: "4100"
       AGENT_HOST: "0.0.0.0"
       AGENT_TOKEN: ${AGENT_TOKEN:?AGENT_TOKEN required}
-      AGENT_DATA_ROOT: "/var/lib/cofemine/servers"
-      AGENT_BACKUP_ROOT: "/var/lib/cofemine/backups"
+      AGENT_DATA_ROOT: ${DATA_ROOT:-/var/lib/cofemine/servers}
+      AGENT_BACKUP_ROOT: ${BACKUP_ROOT:-/var/lib/cofemine/backups}
       AGENT_DOCKER_NETWORK: "cofemine_mcnet"
       AGENT_LABEL_PREFIX: "cofemine"
       DOCKER_SOCKET: "/var/run/docker.sock"
     volumes:
-      # The agent needs the Docker socket so it can start Minecraft containers.
+      # Docker socket so the agent can start Minecraft containers.
       - /var/run/docker.sock:/var/run/docker.sock
-      # Bind-mount the server data/backup roots so MC containers can share
-      # the same filesystem view as the agent.
-      - mc_data:/var/lib/cofemine/servers
-      - mc_backups:/var/lib/cofemine/backups
+      # Bind the SAME host paths into the agent that it will pass to
+      # Minecraft containers as `Binds`. Named volumes here would make
+      # the agent and MC containers resolve /var/lib/cofemine/servers to
+      # different host locations, so the agent would never see mods /
+      # plugins / server-icon.png written by itzg inside the container.
+      - ${DATA_ROOT:-/var/lib/cofemine/servers}:${DATA_ROOT:-/var/lib/cofemine/servers}
+      - ${BACKUP_ROOT:-/var/lib/cofemine/backups}:${BACKUP_ROOT:-/var/lib/cofemine/backups}
     networks:
       - cofemine_internal
       - cofemine_mcnet
@@ -92,8 +95,9 @@ services:
 
 volumes:
   db_data:
-  mc_data:
-  mc_backups:
+  # Server data lives on bind-mounted host paths (DATA_ROOT, BACKUP_ROOT)
+  # rather than named volumes, so the agent and MC containers see the
+  # same filesystem. See the agent service for the bind spec.
 
 networks:
   cofemine_internal:
