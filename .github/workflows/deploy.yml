@@ -87,44 +87,52 @@ jobs:
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.DEPLOY_SSH_KEY }}
           port: ${{ secrets.DEPLOY_PORT || 22 }}
-          script_stop: true
+          script_stop: false
           envs: HARD_RESTART
           script: |
-            set -euo pipefail
+            set -uo pipefail
             cd "${{ secrets.DEPLOY_PATH }}"
             COMPOSE="docker compose -f docker-compose.prod.yml"
 
-            echo "::group::git update"
-            git fetch --prune
-            git reset --hard origin/main
-            echo "::endgroup::"
+            step() { printf "\n========== %s ==========\n" "$*"; }
+            fail() { printf "\n!! FAILED: %s\n" "$*" >&2; exit 1; }
 
-            echo "::group::docker compose pull"
-            $COMPOSE pull
-            echo "::endgroup::"
+            step "git update"
+            git fetch --prune || fail "git fetch"
+            git reset --hard origin/main || fail "git reset"
+
+            step "docker compose pull (with retry)"
+            # GHCR occasionally 503s right after a fresh push; retry up to 3x
+            # with backoff before declaring failure. stderr is *not* hidden.
+            pull_ok=0
+            for attempt in 1 2 3; do
+              echo "-- pull attempt $attempt/3"
+              if $COMPOSE pull 2>&1; then
+                pull_ok=1
+                break
+              fi
+              echo "-- pull attempt $attempt failed, sleeping"
+              sleep $((attempt * 5))
+            done
+            [ "$pull_ok" = "1" ] || fail "docker compose pull (see stderr above)"
 
             if [ "${HARD_RESTART:-false}" = "true" ]; then
-              echo "::group::docker compose down (hard restart — network reset)"
-              $COMPOSE down || true
-              echo "::endgroup::"
-              echo "::group::docker compose up -d"
-              $COMPOSE up -d
-              echo "::endgroup::"
+              step "docker compose down (hard restart — network reset)"
+              $COMPOSE down 2>&1 || echo "(down returned non-zero, continuing)"
+              step "docker compose up -d"
+              $COMPOSE up -d 2>&1 || fail "docker compose up -d"
             else
-              echo "::group::docker compose up -d --force-recreate (preserve networks)"
-              # Recreate containers so new images take effect, but keep the
-              # existing networks so we don't hit the stale-veth bug.
-              $COMPOSE up -d --force-recreate
-              echo "::endgroup::"
+              step "docker compose up -d --force-recreate (preserve networks)"
+              $COMPOSE up -d --force-recreate 2>&1 || fail "docker compose up -d --force-recreate"
             fi
 
-            echo "::group::ps after up"
+            step "ps after up"
             $COMPOSE ps
-            echo "::endgroup::"
 
-            echo "::group::docker image prune"
+            step "docker image prune"
             docker image prune -f || true
-            echo "::endgroup::"
+
+            step "done"
 
       - name: Health check
         uses: appleboy/ssh-action@v1.2.0

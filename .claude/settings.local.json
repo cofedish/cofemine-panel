@@ -51,7 +51,8 @@
       "Bash(xargs -0 sed -i 's/divide-surface-border/divide-line/g')",
       "Bash(git commit -q -m 'feat\\(web\\): coffee-themed light+dark UI with framer-motion *)",
       "Bash(git commit -q -m 'ci\\(deploy\\): default to up -d --force-recreate, keep networks *)",
-      "Bash(git commit -q -m 'feat\\(web\\): full visual redesign — neutral classic + pluggable accents *)"
+      "Bash(git commit -q -m 'feat\\(web\\): full visual redesign — neutral classic + pluggable accents *)",
+      "Bash(git commit -q -m 'ci\\(deploy\\): visible stderr + pull retry, drop GHA-only group markers *)"
     ]
   }
 }
