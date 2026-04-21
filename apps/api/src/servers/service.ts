@@ -1,6 +1,7 @@
 import { prisma } from "../db.js";
 import { NodeClient } from "../nodes/node-client.js";
 import type { CreateServerInput } from "@cofemine/shared";
+import { decryptSecret } from "../crypto.js";
 
 /** Normalize a human name into a container-safe identifier. */
 export function toContainerName(name: string, id: string): string {
@@ -13,20 +14,46 @@ export function toContainerName(name: string, id: string): string {
 }
 
 /**
+ * Fetch the CurseForge API key that the user pasted into Integrations.
+ * itzg expects it as CF_API_KEY env on the container — the key we stored
+ * lives encrypted in IntegrationSetting, so we decrypt and forward it.
+ * Returns null when no key is configured.
+ */
+async function readCurseforgeApiKey(): Promise<string | null> {
+  const row = await prisma.integrationSetting.findUnique({
+    where: { key: "curseforge.apiKey" },
+  });
+  if (!row) return null;
+  try {
+    return decryptSecret(row.value);
+  } catch {
+    return null;
+  }
+}
+
+/**
  * For modpack sources, merge the provider-specific env vars the itzg image
  * expects so it can bootstrap the pack by itself (loader + MC version
  * detection).
  */
-function mergeModpackEnv(input: CreateServerInput): Record<string, string> {
+async function mergeModpackEnv(
+  input: CreateServerInput
+): Promise<Record<string, string>> {
   const env: Record<string, string> = { ...(input.env ?? {}) };
-  if (!input.modpack) return env;
-  if (input.type === "MODRINTH") {
+  if (input.type === "MODRINTH" && input.modpack) {
     // itzg accepts either a slug/id or a full version/file URL.
     env.MODRINTH_PROJECT ??= input.modpack.slug ?? input.modpack.projectId;
   } else if (input.type === "CURSEFORGE") {
     // Prefer slug; fall back to the CurseForge page URL if only URL was known.
-    if (input.modpack.slug) env.CF_SLUG ??= input.modpack.slug;
-    if (input.modpack.url) env.CF_PAGE_URL ??= input.modpack.url;
+    if (input.modpack?.slug) env.CF_SLUG ??= input.modpack.slug;
+    if (input.modpack?.url) env.CF_PAGE_URL ??= input.modpack.url;
+    // Inject the API key from our Integrations store so AUTO_CURSEFORGE
+    // can actually download the pack. Without this, itzg logs
+    // "API key is not set" and refuses to install.
+    if (!env.CF_API_KEY) {
+      const key = await readCurseforgeApiKey();
+      if (key) env.CF_API_KEY = key;
+    }
   }
   return env;
 }
@@ -40,7 +67,7 @@ export async function createServerRecord(input: CreateServerInput) {
       statusCode: 409,
     });
   }
-  const env = mergeModpackEnv(input);
+  const env = await mergeModpackEnv(input);
   return prisma.server.create({
     data: {
       name: input.name,
