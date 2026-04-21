@@ -11,6 +11,7 @@ const ACCENT_PREVIEW: Record<Accent, { label: string; hex: string }> = {
   sky: { label: "Sky", hex: "#0EA5E9" },
   violet: { label: "Violet", hex: "#7C3AED" },
   ruby: { label: "Ruby", hex: "#E11D48" },
+  lucifer: { label: "Lucifer", hex: "#991B1B" },
   caramel: { label: "Caramel", hex: "#B45309" },
 };
 

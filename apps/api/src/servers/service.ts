@@ -12,6 +12,25 @@ export function toContainerName(name: string, id: string): string {
   return `cofemine-mc-${slug}-${id.slice(0, 8)}`;
 }
 
+/**
+ * For modpack sources, merge the provider-specific env vars the itzg image
+ * expects so it can bootstrap the pack by itself (loader + MC version
+ * detection).
+ */
+function mergeModpackEnv(input: CreateServerInput): Record<string, string> {
+  const env: Record<string, string> = { ...(input.env ?? {}) };
+  if (!input.modpack) return env;
+  if (input.type === "MODRINTH") {
+    // itzg accepts either a slug/id or a full version/file URL.
+    env.MODRINTH_PROJECT ??= input.modpack.slug ?? input.modpack.projectId;
+  } else if (input.type === "CURSEFORGE") {
+    // Prefer slug; fall back to the CurseForge page URL if only URL was known.
+    if (input.modpack.slug) env.CF_SLUG ??= input.modpack.slug;
+    if (input.modpack.url) env.CF_PAGE_URL ??= input.modpack.url;
+  }
+  return env;
+}
+
 export async function createServerRecord(input: CreateServerInput) {
   const existsName = await prisma.server.findFirst({
     where: { name: input.name, nodeId: input.nodeId },
@@ -21,17 +40,18 @@ export async function createServerRecord(input: CreateServerInput) {
       statusCode: 409,
     });
   }
+  const env = mergeModpackEnv(input);
   return prisma.server.create({
     data: {
       name: input.name,
       description: input.description ?? null,
       nodeId: input.nodeId,
       type: input.type,
-      version: input.version,
+      version: input.version ?? "LATEST",
       memoryMb: input.memoryMb,
       cpuLimit: input.cpuLimit ?? null,
       ports: input.ports as unknown as object,
-      env: input.env as unknown as object,
+      env: env as unknown as object,
       eulaAccepted: input.eulaAccepted,
       templateId: input.templateId ?? null,
       status: "stopped",

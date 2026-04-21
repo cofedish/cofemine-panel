@@ -12,6 +12,7 @@ import { ServerContent } from "@/components/server-content";
 import { ServerSchedules } from "@/components/server-schedules";
 import { StatusDot } from "@/components/status-dot";
 import { PageHeader } from "@/components/page-header";
+import { getServerMeta, ServerTypeIcon } from "@/components/server-icons";
 import { cn } from "@/lib/cn";
 import {
   Play,
@@ -62,17 +63,6 @@ const TABS = [
 ] as const;
 type Tab = (typeof TABS)[number]["key"];
 
-const HERO: Record<string, { from: string; to: string; glyph: string }> = {
-  VANILLA: { from: "#0b3d1a", to: "#22c55e", glyph: "V" },
-  PAPER: { from: "#0f172a", to: "#94a3b8", glyph: "P" },
-  PURPUR: { from: "#3b0764", to: "#a855f7", glyph: "PU" },
-  FABRIC: { from: "#713f12", to: "#fbbf24", glyph: "F" },
-  FORGE: { from: "#0f172a", to: "#475569", glyph: "FG" },
-  NEOFORGE: { from: "#0c0a09", to: "#f97316", glyph: "NF" },
-  MOHIST: { from: "#18181b", to: "#ef4444", glyph: "M" },
-  QUILT: { from: "#78350f", to: "#f59e0b", glyph: "Q" },
-};
-
 export default function ServerDetailPage(): JSX.Element {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
@@ -94,7 +84,7 @@ export default function ServerDetailPage(): JSX.Element {
   );
 
   if (!data) return <div className="text-ink-muted">Loading…</div>;
-  const hero = HERO[data.type] ?? { from: "#0f172a", to: "#475569", glyph: "·" };
+  const meta = getServerMeta(data.type);
 
   async function lifecycle(
     action: "start" | "stop" | "restart" | "kill"
@@ -181,16 +171,24 @@ export default function ServerDetailPage(): JSX.Element {
       <section
         className="relative overflow-hidden rounded-2xl text-white p-7 min-h-[160px]"
         style={{
-          background: `linear-gradient(135deg, ${hero.from}, ${hero.to})`,
+          background: `linear-gradient(135deg, ${meta.from}, ${meta.to})`,
         }}
       >
         <span className="absolute inset-0 bg-grid-pattern opacity-25" />
-        <span
-          className="absolute right-[-10px] top-[-28px] font-display font-black text-[200px] leading-none opacity-20 select-none"
-          style={{ letterSpacing: "-0.05em" }}
-        >
-          {hero.glyph}
-        </span>
+        <meta.Icon
+          size={220}
+          strokeWidth={1.25}
+          className="absolute -right-6 -bottom-8 opacity-15 pointer-events-none"
+        />
+        <div className="relative flex items-center gap-3 mb-5">
+          <ServerTypeIcon type={data.type} size={38} />
+          <div>
+            <div className="text-[10px] uppercase tracking-widest opacity-75">
+              {meta.label}
+            </div>
+            <div className="text-sm opacity-90">{data.version}</div>
+          </div>
+        </div>
         <div className="relative grid grid-cols-2 md:grid-cols-4 gap-6">
           <HeroStat
             icon={<Users size={14} />}

@@ -18,6 +18,7 @@ import { templatesRoutes } from "./templates/routes.js";
 import { usersRoutes } from "./users/routes.js";
 import { auditRoutes } from "./audit/routes.js";
 import { integrationsRoutes } from "./integrations/routes.js";
+import { metaRoutes } from "./meta/routes.js";
 import { registerConsoleWs } from "./ws/console.js";
 import { startScheduler } from "./schedules/scheduler.js";
 
@@ -86,6 +87,7 @@ async function bootstrap(): Promise<void> {
   await app.register(usersRoutes, { prefix: "/users" });
   await app.register(auditRoutes, { prefix: "/audit" });
   await app.register(integrationsRoutes, { prefix: "/integrations" });
+  await app.register(metaRoutes, { prefix: "/meta" });
   await registerConsoleWs(app);
 
   await startScheduler();

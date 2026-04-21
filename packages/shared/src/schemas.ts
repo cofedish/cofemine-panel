@@ -27,7 +27,7 @@ export const portMappingSchema = z.object({
   protocol: z.enum(["tcp", "udp"]).default("tcp"),
 });
 
-export const createServerSchema = z.object({
+const createServerShape = z.object({
   name: z
     .string()
     .min(2)
@@ -36,7 +36,11 @@ export const createServerSchema = z.object({
   description: z.string().max(500).optional(),
   nodeId: z.string().min(1),
   type: z.enum(SERVER_TYPES),
-  version: z.string().min(1).max(32),
+  /**
+   * MC version. Required for regular types; optional for modpack sources
+   * (MODRINTH / CURSEFORGE) where the runtime detects it from the pack.
+   */
+  version: z.string().max(32).optional().default("LATEST"),
   memoryMb: z.number().int().min(512).max(65536).default(2048),
   cpuLimit: z.number().min(0.1).max(64).optional(),
   ports: z.array(portMappingSchema).min(1).max(8),
@@ -45,10 +49,33 @@ export const createServerSchema = z.object({
     errorMap: () => ({ message: "You must accept the Minecraft EULA" }),
   }),
   templateId: z.string().optional(),
+  /** Modpack pick-up (only meaningful when type is MODRINTH or CURSEFORGE) */
+  modpack: z
+    .object({
+      provider: z.enum(["modrinth", "curseforge"]),
+      projectId: z.string().min(1).max(128),
+      url: z.string().url().optional(),
+      slug: z.string().max(128).optional(),
+    })
+    .optional(),
 });
+
+export const createServerSchema = createServerShape.refine(
+  (v) => {
+    if (v.type === "MODRINTH" || v.type === "CURSEFORGE") {
+      return v.modpack != null;
+    }
+    return !!v.version && v.version.length > 0;
+  },
+  {
+    message:
+      "version is required for plain server types; modpack is required for MODRINTH/CURSEFORGE",
+    path: ["version"],
+  }
+);
 export type CreateServerInput = z.infer<typeof createServerSchema>;
 
-export const updateServerSchema = createServerSchema
+export const updateServerSchema = createServerShape
   .partial()
   .omit({ eulaAccepted: true });
 

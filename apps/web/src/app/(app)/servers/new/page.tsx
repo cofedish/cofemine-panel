@@ -1,94 +1,104 @@
 "use client";
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import useSWR from "swr";
 import { motion, AnimatePresence } from "framer-motion";
 import { api, ApiError, fetcher } from "@/lib/api";
 import { SERVER_TYPES } from "@cofemine/shared";
 import { PageHeader } from "@/components/page-header";
+import {
+  getServerMeta,
+  ServerTypeHero,
+  ServerTypeIcon,
+  SERVER_TYPE_META,
+  type ServerTypeKey,
+} from "@/components/server-icons";
 import { cn } from "@/lib/cn";
-import { Check, ChevronLeft, ChevronRight } from "lucide-react";
+import {
+  Check,
+  ChevronLeft,
+  ChevronRight,
+  Search,
+  Package,
+  Download,
+} from "lucide-react";
 
 type Node = { id: string; name: string; status: string };
-type Template = {
-  id: string;
-  name: string;
-  type: string;
-  version: string;
-  memoryMb: number;
-  env: Record<string, string>;
+type McVersions = {
+  latest: { release: string; snapshot: string };
+  versions: Array<{ id: string; type: string; releaseTime: string }>;
 };
 
-const STEPS = ["Runtime", "Resources", "Review"] as const;
+type Integrations = {
+  providers: {
+    modrinth: { enabled: boolean };
+    curseforge: { enabled: boolean };
+  };
+};
+
+type ModpackHit = {
+  id: string;
+  provider: "modrinth" | "curseforge";
+  name: string;
+  slug?: string;
+  description?: string;
+  iconUrl?: string;
+  author?: string;
+  downloads?: number;
+  pageUrl?: string;
+};
+
+type Source = "plain" | "modrinth" | "curseforge";
+
+const PLAIN_TYPES = SERVER_TYPES.filter(
+  (t) => t !== "MODRINTH" && t !== "CURSEFORGE"
+);
+const STEPS = ["Source", "Pick", "Resources", "Review"] as const;
 type Step = (typeof STEPS)[number];
 
-const TYPE_PRESET: Record<
-  string,
-  { from: string; to: string; desc: string; glyph: string }
-> = {
-  VANILLA: {
-    from: "#0b3d1a",
-    to: "#22c55e",
-    desc: "Mojang's official server — no mods.",
-    glyph: "V",
-  },
-  PAPER: {
-    from: "#0f172a",
-    to: "#94a3b8",
-    desc: "High-performance Bukkit/Spigot fork. Most popular for plugins.",
-    glyph: "P",
-  },
-  PURPUR: {
-    from: "#3b0764",
-    to: "#a855f7",
-    desc: "Paper fork with extra gameplay-tuning features.",
-    glyph: "PU",
-  },
-  FABRIC: {
-    from: "#713f12",
-    to: "#fbbf24",
-    desc: "Lightweight mod loader; fast-moving, modern.",
-    glyph: "F",
-  },
-  FORGE: {
-    from: "#0f172a",
-    to: "#475569",
-    desc: "Classic mod loader; widest mod library.",
-    glyph: "FG",
-  },
-  NEOFORGE: {
-    from: "#0c0a09",
-    to: "#f97316",
-    desc: "Forge fork, actively maintained.",
-    glyph: "NF",
-  },
-  MOHIST: {
-    from: "#18181b",
-    to: "#ef4444",
-    desc: "Forge + Bukkit hybrid — mods and plugins together.",
-    glyph: "M",
-  },
-  QUILT: {
-    from: "#78350f",
-    to: "#f59e0b",
-    desc: "Fabric-compatible fork with extra APIs.",
-    glyph: "Q",
-  },
-};
+/** Small curated fallback if the manifest can't be fetched. */
+const VERSION_FALLBACK = [
+  "1.21.4",
+  "1.21.3",
+  "1.21.1",
+  "1.21",
+  "1.20.6",
+  "1.20.4",
+  "1.20.1",
+  "1.19.4",
+  "1.18.2",
+  "1.17.1",
+  "1.16.5",
+  "1.12.2",
+  "1.8.9",
+];
 
 export default function CreateServerPage(): JSX.Element {
   const router = useRouter();
   const { data: nodes } = useSWR<Node[]>("/nodes", fetcher);
-  const { data: templates } = useSWR<Template[]>("/templates", fetcher);
+  const { data: integ } = useSWR<Integrations>("/integrations", fetcher);
+  const { data: mcVersions } = useSWR<McVersions>(
+    "/meta/mc-versions",
+    fetcher,
+    { revalidateOnFocus: false }
+  );
 
-  const [step, setStep] = useState<Step>("Runtime");
+  const [step, setStep] = useState<Step>("Source");
 
-  const [templateId, setTemplateId] = useState("");
+  // Source selection
+  const [source, setSource] = useState<Source>("plain");
+
+  // Plain-mode fields
+  const [type, setType] = useState<ServerTypeKey>("PAPER");
+  const [version, setVersion] = useState("1.21.1");
+
+  // Modpack selection
+  const [pack, setPack] = useState<ModpackHit | null>(null);
+
+  // Basics / resources
   const [name, setName] = useState("survival");
   const [description, setDescription] = useState("");
   const [nodeId, setNodeId] = useState("");
-  const [type, setType] = useState<(typeof SERVER_TYPES)[number]>("PAPER");
-  const [version, setVersion] = useState("1.21.1");
   const [memoryMb, setMemoryMb] = useState(2048);
   const [hostPort, setHostPort] = useState(25565);
   const [envText, setEnvText] = useState("DIFFICULTY=normal\nMAX_PLAYERS=20");
@@ -96,19 +106,18 @@ export default function CreateServerPage(): JSX.Element {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
-  function applyTemplate(id: string): void {
-    setTemplateId(id);
-    const t = templates?.find((t) => t.id === id);
-    if (!t) return;
-    setType(t.type as any);
-    setVersion(t.version);
-    setMemoryMb(t.memoryMb);
-    setEnvText(
-      Object.entries(t.env ?? {})
-        .map(([k, v]) => `${k}=${v}`)
-        .join("\n")
-    );
-  }
+  const effectiveType: ServerTypeKey =
+    source === "modrinth"
+      ? "MODRINTH"
+      : source === "curseforge"
+        ? "CURSEFORGE"
+        : type;
+
+  const versionOptions = useMemo(() => {
+    if (!mcVersions || mcVersions.versions.length === 0)
+      return VERSION_FALLBACK;
+    return mcVersions.versions.map((v) => v.id);
+  }, [mcVersions]);
 
   async function submit(): Promise<void> {
     setBusy(true);
@@ -122,18 +131,28 @@ export default function CreateServerPage(): JSX.Element {
         if (eq < 1) continue;
         env[trimmed.slice(0, eq).trim()] = trimmed.slice(eq + 1).trim();
       }
-      const res = await api.post<{ id: string }>("/servers", {
+      const body: any = {
         name,
         description: description || undefined,
         nodeId,
-        type,
-        version,
+        type: effectiveType,
         memoryMb: Number(memoryMb),
         ports: [{ host: Number(hostPort), container: 25565, protocol: "tcp" }],
         env,
         eulaAccepted: eula,
-        templateId: templateId || undefined,
-      });
+      };
+      if (source === "plain") {
+        body.version = version;
+      } else {
+        body.modpack = {
+          provider: source,
+          projectId: pack!.id,
+          slug: pack!.slug,
+          url: pack!.pageUrl,
+        };
+        body.version = "LATEST";
+      }
+      const res = await api.post<{ id: string }>("/servers", body);
       router.push(`/servers/${res.id}`);
     } catch (e) {
       setErr(e instanceof ApiError ? e.message : String(e));
@@ -144,25 +163,25 @@ export default function CreateServerPage(): JSX.Element {
 
   const idx = STEPS.indexOf(step);
   const canNext =
-    step === "Runtime"
-      ? !!name && !!type && !!version
-      : step === "Resources"
-        ? !!nodeId && memoryMb >= 512 && hostPort > 0
-        : eula;
+    step === "Source"
+      ? true
+      : step === "Pick"
+        ? source === "plain"
+          ? !!type && !!version
+          : !!pack
+        : step === "Resources"
+          ? !!name && !!nodeId && memoryMb >= 512 && hostPort > 0
+          : eula;
 
   function next(): void {
-    const nextIdx = Math.min(idx + 1, STEPS.length - 1);
-    setStep(STEPS[nextIdx] ?? STEPS[0]!);
+    setStep(STEPS[Math.min(idx + 1, STEPS.length - 1)] ?? STEPS[0]!);
   }
   function prev(): void {
-    const prevIdx = Math.max(idx - 1, 0);
-    setStep(STEPS[prevIdx] ?? STEPS[0]!);
+    setStep(STEPS[Math.max(idx - 1, 0)] ?? STEPS[0]!);
   }
 
-  const preset = TYPE_PRESET[type]!;
-
   return (
-    <div className="space-y-8 max-w-4xl">
+    <div className="space-y-8 max-w-5xl">
       <PageHeader
         breadcrumbs={[
           { label: "Dashboard", href: "/" },
@@ -173,26 +192,20 @@ export default function CreateServerPage(): JSX.Element {
       />
 
       {/* Stepper */}
-      <ol className="flex items-center gap-4">
+      <ol className="flex items-center gap-3 flex-wrap">
         {STEPS.map((s, i) => {
           const done = i < idx;
           const current = i === idx;
           return (
-            <li
-              key={s}
-              className="flex items-center gap-2 text-sm"
-            >
+            <li key={s} className="flex items-center gap-2 text-sm">
               <span
                 className={cn(
                   "w-6 h-6 grid place-items-center rounded-full text-xs font-semibold transition-colors",
-                  done &&
-                    "bg-[rgb(var(--accent))] text-[rgb(var(--accent-ink))]",
+                  done && "bg-[rgb(var(--accent))] text-[rgb(var(--accent-ink))]",
                   current &&
                     !done &&
                     "bg-[rgb(var(--accent-soft))] text-[rgb(var(--accent))] ring-2 ring-[rgb(var(--accent))]/40",
-                  !done &&
-                    !current &&
-                    "bg-surface-2 text-ink-muted"
+                  !done && !current && "bg-surface-2 text-ink-muted"
                 )}
               >
                 {done ? <Check size={13} /> : i + 1}
@@ -207,10 +220,8 @@ export default function CreateServerPage(): JSX.Element {
               {i < STEPS.length - 1 && (
                 <span
                   className={cn(
-                    "w-10 h-px transition-colors",
-                    done
-                      ? "bg-[rgb(var(--accent))]"
-                      : "bg-line"
+                    "w-8 h-px transition-colors",
+                    done ? "bg-[rgb(var(--accent))]" : "bg-line"
                   )}
                 />
               )}
@@ -227,211 +238,64 @@ export default function CreateServerPage(): JSX.Element {
           exit={{ opacity: 0, y: -8 }}
           transition={{ duration: 0.18 }}
         >
-          {step === "Runtime" && (
-            <div className="tile p-7 space-y-6">
-              <h2 className="heading-md">Choose a template (optional)</h2>
-              <select
-                className="select"
-                value={templateId}
-                onChange={(e) => applyTemplate(e.target.value)}
-              >
-                <option value="">— start from scratch —</option>
-                {templates?.map((t) => (
-                  <option key={t.id} value={t.id}>
-                    {t.name} · {t.type} · {t.version}
-                  </option>
-                ))}
-              </select>
-
-              <div className="divider" />
-
-              <div className="space-y-3">
-                <h2 className="heading-md">Server type</h2>
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                  {SERVER_TYPES.map((t) => {
-                    const p = TYPE_PRESET[t]!;
-                    const active = type === t;
-                    return (
-                      <button
-                        key={t}
-                        type="button"
-                        onClick={() => setType(t)}
-                        className={cn(
-                          "relative overflow-hidden rounded-lg border text-left transition-all",
-                          active
-                            ? "border-[rgb(var(--accent))]/60 ring-2 ring-[rgb(var(--accent))]/25"
-                            : "border-line hover:border-line-strong"
-                        )}
-                      >
-                        <div
-                          className="h-20 flex items-center justify-center text-white relative"
-                          style={{
-                            background: `linear-gradient(135deg, ${p.from}, ${p.to})`,
-                          }}
-                        >
-                          <span className="absolute inset-0 bg-grid-pattern opacity-25" />
-                          <span
-                            className="relative font-display font-black text-4xl leading-none opacity-90"
-                            style={{ letterSpacing: "-0.05em" }}
-                          >
-                            {p.glyph}
-                          </span>
-                        </div>
-                        <div className="px-3 py-2 bg-surface-1">
-                          <div className="text-sm font-medium">{t}</div>
-                        </div>
-                      </button>
-                    );
-                  })}
-                </div>
-                <p className="text-sm text-ink-muted">{preset.desc}</p>
-              </div>
-
-              <div className="divider" />
-
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                <Field label="Name">
-                  <input
-                    className="input"
-                    value={name}
-                    onChange={(e) => setName(e.target.value)}
-                    required
-                  />
-                </Field>
-                <Field label="Version" hint="e.g. 1.21.1 or LATEST">
-                  <input
-                    className="input"
-                    value={version}
-                    onChange={(e) => setVersion(e.target.value)}
-                  />
-                </Field>
-                <Field label="Description (optional)">
-                  <input
-                    className="input"
-                    value={description}
-                    onChange={(e) => setDescription(e.target.value)}
-                  />
-                </Field>
-              </div>
-            </div>
+          {step === "Source" && (
+            <SourceStep
+              source={source}
+              onPick={setSource}
+              cfEnabled={!!integ?.providers.curseforge.enabled}
+            />
           )}
-
+          {step === "Pick" &&
+            (source === "plain" ? (
+              <PlainPickStep
+                type={type}
+                onType={setType}
+                version={version}
+                onVersion={setVersion}
+                versions={versionOptions}
+                versionsLoading={!mcVersions}
+              />
+            ) : (
+              <PackPickStep
+                provider={source}
+                pack={pack}
+                onPick={setPack}
+              />
+            ))}
           {step === "Resources" && (
-            <div className="tile p-7 space-y-6">
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                <Field label="Node">
-                  <select
-                    className="select"
-                    value={nodeId}
-                    onChange={(e) => setNodeId(e.target.value)}
-                  >
-                    <option value="">— select —</option>
-                    {nodes?.map((n) => (
-                      <option key={n.id} value={n.id}>
-                        {n.name} ({n.status})
-                      </option>
-                    ))}
-                  </select>
-                </Field>
-                <Field label="Memory (MB)" hint="container limit">
-                  <input
-                    className="input"
-                    type="number"
-                    min={512}
-                    max={65536}
-                    step={512}
-                    value={memoryMb}
-                    onChange={(e) => setMemoryMb(Number(e.target.value))}
-                  />
-                </Field>
-                <Field label="Host port" hint="container 25565">
-                  <input
-                    className="input"
-                    type="number"
-                    min={1}
-                    max={65535}
-                    value={hostPort}
-                    onChange={(e) => setHostPort(Number(e.target.value))}
-                  />
-                </Field>
-              </div>
-              <Field label="Environment" hint="KEY=VALUE per line">
-                <textarea
-                  className="textarea font-mono text-xs h-36"
-                  value={envText}
-                  onChange={(e) => setEnvText(e.target.value)}
-                />
-              </Field>
-            </div>
+            <ResourcesStep
+              nodes={nodes ?? []}
+              name={name}
+              setName={setName}
+              description={description}
+              setDescription={setDescription}
+              nodeId={nodeId}
+              setNodeId={setNodeId}
+              memoryMb={memoryMb}
+              setMemoryMb={setMemoryMb}
+              hostPort={hostPort}
+              setHostPort={setHostPort}
+              envText={envText}
+              setEnvText={setEnvText}
+            />
           )}
-
           {step === "Review" && (
-            <div className="tile p-7 space-y-6">
-              <div
-                className="rounded-xl h-32 overflow-hidden relative text-white flex items-end p-5"
-                style={{
-                  background: `linear-gradient(135deg, ${preset.from}, ${preset.to})`,
-                }}
-              >
-                <span className="absolute inset-0 bg-grid-pattern opacity-25" />
-                <span
-                  className="absolute right-5 top-[-22px] font-display font-black text-[140px] leading-none opacity-25"
-                  style={{ letterSpacing: "-0.05em" }}
-                >
-                  {preset.glyph}
-                </span>
-                <div className="relative">
-                  <div className="text-xs uppercase tracking-widest opacity-80">
-                    {type}
-                  </div>
-                  <div className="font-semibold text-2xl">{name}</div>
-                </div>
-              </div>
-
-              <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-3 text-sm">
-                <ReviewRow label="Version">{version}</ReviewRow>
-                <ReviewRow label="Memory">{memoryMb} MB</ReviewRow>
-                <ReviewRow label="Host port">{hostPort}</ReviewRow>
-                <ReviewRow label="Node">
-                  {nodes?.find((n) => n.id === nodeId)?.name ?? "—"}
-                </ReviewRow>
-                <ReviewRow label="Env vars">
-                  {envText
-                    .split("\n")
-                    .filter((l) => l.trim() && !l.startsWith("#")).length}{" "}
-                  defined
-                </ReviewRow>
-              </dl>
-
-              <div className="divider" />
-
-              <label className="flex items-start gap-3 text-sm">
-                <input
-                  type="checkbox"
-                  checked={eula}
-                  onChange={(e) => setEula(e.target.checked)}
-                  className="mt-1"
-                />
-                <span>
-                  I accept the{" "}
-                  <a
-                    className="link"
-                    href="https://www.minecraft.net/en-us/eula"
-                    target="_blank"
-                    rel="noreferrer"
-                  >
-                    Minecraft EULA
-                  </a>
-                  . Required to run any Minecraft server.
-                </span>
-              </label>
-
-              {err && (
-                <div className="chip chip-danger !h-auto !py-2 !px-3">
-                  {err}
-                </div>
-              )}
-            </div>
+            <ReviewStep
+              type={effectiveType}
+              name={name}
+              version={source === "plain" ? version : "from pack"}
+              memoryMb={memoryMb}
+              hostPort={hostPort}
+              nodeName={nodes?.find((n) => n.id === nodeId)?.name}
+              envCount={
+                envText.split("\n").filter((l) => l.trim() && !l.startsWith("#"))
+                  .length
+              }
+              pack={pack}
+              eula={eula}
+              onEula={setEula}
+              err={err}
+            />
           )}
         </motion.div>
       </AnimatePresence>
@@ -464,6 +328,486 @@ export default function CreateServerPage(): JSX.Element {
           </button>
         )}
       </div>
+    </div>
+  );
+}
+
+/* ============================== STEPS ============================== */
+
+function SourceStep({
+  source,
+  onPick,
+  cfEnabled,
+}: {
+  source: Source;
+  onPick: (s: Source) => void;
+  cfEnabled: boolean;
+}): JSX.Element {
+  const cards: Array<{
+    id: Source;
+    title: string;
+    desc: string;
+    meta: string;
+    type: ServerTypeKey;
+    disabled?: string;
+  }> = [
+    {
+      id: "plain",
+      title: "Plain server",
+      desc: "Pick a server type (Vanilla, Paper, Fabric, Forge…) and a MC version. Fast and minimal.",
+      meta: "8 types",
+      type: "PAPER",
+    },
+    {
+      id: "modrinth",
+      title: "Modrinth modpack",
+      desc: "Search modpacks on modrinth.com. The runtime auto-detects loader + version from the pack.",
+      meta: "auto-detected",
+      type: "MODRINTH",
+    },
+    {
+      id: "curseforge",
+      title: "CurseForge modpack",
+      desc: "Search modpacks on curseforge.com. Requires a CurseForge API key in Integrations.",
+      meta: cfEnabled ? "auto-detected" : "needs API key",
+      type: "CURSEFORGE",
+      disabled: cfEnabled ? undefined : "Configure a CurseForge API key first.",
+    },
+  ];
+  return (
+    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+      {cards.map((c) => {
+        const active = source === c.id;
+        const isDisabled = !!c.disabled;
+        return (
+          <button
+            key={c.id}
+            type="button"
+            onClick={() => !isDisabled && onPick(c.id)}
+            disabled={isDisabled}
+            title={c.disabled}
+            className={cn(
+              "tile text-left overflow-hidden transition-all relative",
+              active
+                ? "ring-2 ring-[rgb(var(--accent))]/50 border-[rgb(var(--accent))]/50"
+                : "hover:border-line-strong",
+              isDisabled && "opacity-50 cursor-not-allowed"
+            )}
+          >
+            <ServerTypeHero type={c.type} height={110} glyphSize={60} />
+            <div className="p-5 space-y-2">
+              <div className="flex items-center justify-between gap-2">
+                <div className="heading-md">{c.title}</div>
+                {active && (
+                  <span className="chip chip-accent">
+                    <Check size={10} /> Selected
+                  </span>
+                )}
+              </div>
+              <p className="text-sm text-ink-secondary">{c.desc}</p>
+              <div className="text-xs text-ink-muted">{c.meta}</div>
+            </div>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+function PlainPickStep({
+  type,
+  onType,
+  version,
+  onVersion,
+  versions,
+  versionsLoading,
+}: {
+  type: ServerTypeKey;
+  onType: (t: ServerTypeKey) => void;
+  version: string;
+  onVersion: (v: string) => void;
+  versions: string[];
+  versionsLoading: boolean;
+}): JSX.Element {
+  const meta = getServerMeta(type);
+  return (
+    <div className="tile p-7 space-y-6">
+      <div className="space-y-3">
+        <h2 className="heading-md">Server type</h2>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          {PLAIN_TYPES.map((t) => {
+            const m = SERVER_TYPE_META[t as ServerTypeKey]!;
+            const active = type === t;
+            return (
+              <button
+                key={t}
+                type="button"
+                onClick={() => onType(t as ServerTypeKey)}
+                className={cn(
+                  "rounded-lg border text-left overflow-hidden transition-all",
+                  active
+                    ? "border-[rgb(var(--accent))]/60 ring-2 ring-[rgb(var(--accent))]/25"
+                    : "border-line hover:border-line-strong"
+                )}
+              >
+                <ServerTypeHero type={t} height={72} glyphSize={30} />
+                <div className="px-3 py-2 bg-surface-1">
+                  <div className="text-sm font-medium">{m.label}</div>
+                </div>
+              </button>
+            );
+          })}
+        </div>
+        <p className="text-sm text-ink-muted">{meta.description}</p>
+      </div>
+
+      <div className="divider" />
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <Field label="Minecraft version" hint="Pulled from Mojang launcher manifest">
+          <select
+            className="select"
+            value={version}
+            onChange={(e) => onVersion(e.target.value)}
+          >
+            {versionsLoading && versions.length === 0 && (
+              <option>Loading…</option>
+            )}
+            {versions.map((v) => (
+              <option key={v} value={v}>
+                {v}
+              </option>
+            ))}
+          </select>
+        </Field>
+      </div>
+    </div>
+  );
+}
+
+function PackPickStep({
+  provider,
+  pack,
+  onPick,
+}: {
+  provider: "modrinth" | "curseforge";
+  pack: ModpackHit | null;
+  onPick: (p: ModpackHit) => void;
+}): JSX.Element {
+  const [query, setQuery] = useState("");
+  const [gameVersion, setGameVersion] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [results, setResults] = useState<ModpackHit[]>([]);
+  const [err, setErr] = useState<string | null>(null);
+
+  async function run(): Promise<void> {
+    setBusy(true);
+    setErr(null);
+    try {
+      const qs = new URLSearchParams({
+        query,
+        ...(gameVersion ? { gameVersion } : {}),
+        projectType: "modpack",
+        limit: "20",
+      }).toString();
+      const res = await api.get<any>(`/integrations/${provider}/search?${qs}`);
+      const raw: any[] = Array.isArray(res) ? res : (res.results ?? []);
+      const hits: ModpackHit[] = raw.map((r) => ({
+        id: String(r.id),
+        provider,
+        name: r.name,
+        slug: r.slug,
+        description: r.description,
+        iconUrl: r.iconUrl,
+        author: r.author,
+        downloads: r.downloads,
+        pageUrl: r.pageUrl,
+      }));
+      setResults(hits);
+    } catch (e) {
+      setErr(e instanceof ApiError ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="tile p-7 space-y-5">
+      <h2 className="heading-md">
+        Search {provider === "modrinth" ? "Modrinth" : "CurseForge"} modpacks
+      </h2>
+      <div className="grid grid-cols-1 md:grid-cols-[1fr_220px_auto] gap-3">
+        <div className="relative">
+          <Search
+            size={14}
+            className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-muted"
+          />
+          <input
+            className="input pl-8"
+            placeholder="Search modpacks…"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") run();
+            }}
+          />
+        </div>
+        <input
+          className="input"
+          placeholder="Minecraft version (optional)"
+          value={gameVersion}
+          onChange={(e) => setGameVersion(e.target.value)}
+        />
+        <button className="btn btn-primary" onClick={run} disabled={busy}>
+          {busy ? "Searching…" : "Search"}
+        </button>
+      </div>
+      {err && (
+        <div className="chip chip-danger !h-auto !py-2 !px-3">{err}</div>
+      )}
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+        {results.map((r) => {
+          const active = pack?.id === r.id;
+          return (
+            <button
+              key={r.id}
+              type="button"
+              onClick={() => onPick(r)}
+              className={cn(
+                "tile text-left p-4 flex gap-3 transition-all",
+                active
+                  ? "ring-2 ring-[rgb(var(--accent))]/50 border-[rgb(var(--accent))]/60"
+                  : "hover:border-line-strong"
+              )}
+            >
+              {r.iconUrl ? (
+                <img
+                  src={r.iconUrl}
+                  alt=""
+                  className="w-12 h-12 rounded-md object-cover shrink-0"
+                />
+              ) : (
+                <span className="w-12 h-12 rounded-md bg-surface-2 text-ink-secondary grid place-items-center shrink-0">
+                  <Package size={20} />
+                </span>
+              )}
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-2">
+                  <div className="font-medium truncate">{r.name}</div>
+                  {active && <Check size={14} className="text-accent" />}
+                </div>
+                <p className="text-xs text-ink-secondary mt-0.5 line-clamp-2">
+                  {r.description}
+                </p>
+                <div className="text-xs text-ink-muted mt-1.5 flex items-center gap-3">
+                  {r.author && <span>by {r.author}</span>}
+                  {r.downloads != null && (
+                    <span className="inline-flex items-center gap-1">
+                      <Download size={10} />
+                      {r.downloads.toLocaleString()}
+                    </span>
+                  )}
+                </div>
+              </div>
+            </button>
+          );
+        })}
+      </div>
+      {results.length === 0 && !busy && (
+        <div className="text-center text-sm text-ink-muted py-8">
+          {query
+            ? "No results. Try a different search."
+            : "Type a query and hit Search."}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ResourcesStep({
+  nodes,
+  name,
+  setName,
+  description,
+  setDescription,
+  nodeId,
+  setNodeId,
+  memoryMb,
+  setMemoryMb,
+  hostPort,
+  setHostPort,
+  envText,
+  setEnvText,
+}: {
+  nodes: Node[];
+  name: string;
+  setName: (v: string) => void;
+  description: string;
+  setDescription: (v: string) => void;
+  nodeId: string;
+  setNodeId: (v: string) => void;
+  memoryMb: number;
+  setMemoryMb: (v: number) => void;
+  hostPort: number;
+  setHostPort: (v: number) => void;
+  envText: string;
+  setEnvText: (v: string) => void;
+}): JSX.Element {
+  return (
+    <div className="tile p-7 space-y-5">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <Field label="Name">
+          <input
+            className="input"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+          />
+        </Field>
+        <Field label="Description (optional)">
+          <input
+            className="input"
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+          />
+        </Field>
+      </div>
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <Field label="Node">
+          <select
+            className="select"
+            value={nodeId}
+            onChange={(e) => setNodeId(e.target.value)}
+          >
+            <option value="">— select —</option>
+            {nodes.map((n) => (
+              <option key={n.id} value={n.id}>
+                {n.name} ({n.status})
+              </option>
+            ))}
+          </select>
+        </Field>
+        <Field label="Memory (MB)" hint="container limit">
+          <input
+            className="input"
+            type="number"
+            min={512}
+            max={65536}
+            step={512}
+            value={memoryMb}
+            onChange={(e) => setMemoryMb(Number(e.target.value))}
+          />
+        </Field>
+        <Field label="Host port" hint="container 25565">
+          <input
+            className="input"
+            type="number"
+            min={1}
+            max={65535}
+            value={hostPort}
+            onChange={(e) => setHostPort(Number(e.target.value))}
+          />
+        </Field>
+      </div>
+      <Field label="Environment" hint="KEY=VALUE per line">
+        <textarea
+          className="textarea font-mono text-xs h-36"
+          value={envText}
+          onChange={(e) => setEnvText(e.target.value)}
+        />
+      </Field>
+    </div>
+  );
+}
+
+function ReviewStep({
+  type,
+  name,
+  version,
+  memoryMb,
+  hostPort,
+  nodeName,
+  envCount,
+  pack,
+  eula,
+  onEula,
+  err,
+}: {
+  type: ServerTypeKey;
+  name: string;
+  version: string;
+  memoryMb: number;
+  hostPort: number;
+  nodeName?: string;
+  envCount: number;
+  pack: ModpackHit | null;
+  eula: boolean;
+  onEula: (v: boolean) => void;
+  err: string | null;
+}): JSX.Element {
+  return (
+    <div className="tile p-7 space-y-6">
+      <div className="rounded-xl overflow-hidden">
+        <ServerTypeHero type={type} height={128} glyphSize={60}>
+          <div className="absolute left-5 bottom-4 text-left">
+            <div className="text-xs uppercase tracking-widest opacity-80">
+              {getServerMeta(type).label}
+            </div>
+            <div className="font-semibold text-2xl">{name}</div>
+          </div>
+        </ServerTypeHero>
+      </div>
+
+      {pack && (
+        <div className="tile !shadow-none p-4 flex items-center gap-3">
+          {pack.iconUrl && (
+            <img
+              src={pack.iconUrl}
+              alt=""
+              className="w-10 h-10 rounded-md object-cover shrink-0"
+            />
+          )}
+          <div className="min-w-0 flex-1">
+            <div className="text-xs uppercase tracking-wider text-ink-muted">
+              Modpack
+            </div>
+            <div className="font-medium truncate">{pack.name}</div>
+          </div>
+        </div>
+      )}
+
+      <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-3 text-sm">
+        <ReviewRow label="Version">{version}</ReviewRow>
+        <ReviewRow label="Memory">{memoryMb} MB</ReviewRow>
+        <ReviewRow label="Host port">{hostPort}</ReviewRow>
+        <ReviewRow label="Node">{nodeName ?? "—"}</ReviewRow>
+        <ReviewRow label="Env vars">{envCount} defined</ReviewRow>
+      </dl>
+
+      <div className="divider" />
+
+      <label className="flex items-start gap-3 text-sm">
+        <input
+          type="checkbox"
+          checked={eula}
+          onChange={(e) => onEula(e.target.checked)}
+          className="mt-1"
+        />
+        <span>
+          I accept the{" "}
+          <a
+            className="link"
+            href="https://www.minecraft.net/en-us/eula"
+            target="_blank"
+            rel="noreferrer"
+          >
+            Minecraft EULA
+          </a>
+          . Required to run any Minecraft server.
+        </span>
+      </label>
+
+      {err && <div className="chip chip-danger !h-auto !py-2 !px-3">{err}</div>}
     </div>
   );
 }
@@ -502,3 +846,6 @@ function ReviewRow({
     </div>
   );
 }
+
+/** Expose for potential future re-use. */
+void ServerTypeIcon;

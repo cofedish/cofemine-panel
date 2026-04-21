@@ -17,6 +17,10 @@ const TYPE_MAP: Record<string, string> = {
   NEOFORGE: "NEOFORGE",
   MOHIST: "MOHIST",
   QUILT: "QUILT",
+  // Modpack sources — itzg figures out loader + MC version from the pack
+  // and sets up mods/ + world accordingly.
+  MODRINTH: "MODRINTH",
+  CURSEFORGE: "AUTO_CURSEFORGE",
 };
 
 export class ItzgRuntimeProvider implements MinecraftRuntimeProvider {

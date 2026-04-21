@@ -3,8 +3,8 @@ import Link from "next/link";
 import useSWR from "swr";
 import { motion } from "framer-motion";
 import { fetcher } from "@/lib/api";
-import { cn } from "@/lib/cn";
 import { StatusDot } from "./status-dot";
+import { ServerTypeHero, getServerMeta } from "./server-icons";
 import { Users, ArrowUpRight, Cpu } from "lucide-react";
 
 export interface ServerSummary {
@@ -20,29 +20,9 @@ export interface ServerSummary {
   lastStartedAt?: string | null;
 }
 
-/** Server-type hero. Each gets a distinct gradient + glyph. */
-const HERO: Record<
-  string,
-  { from: string; to: string; glyph: string; label: string }
-> = {
-  VANILLA: { from: "#0b3d1a", to: "#22c55e", glyph: "V", label: "Vanilla" },
-  PAPER: { from: "#0f172a", to: "#94a3b8", glyph: "P", label: "Paper" },
-  PURPUR: { from: "#3b0764", to: "#a855f7", glyph: "PU", label: "Purpur" },
-  FABRIC: { from: "#713f12", to: "#fbbf24", glyph: "F", label: "Fabric" },
-  FORGE: { from: "#0f172a", to: "#475569", glyph: "FG", label: "Forge" },
-  NEOFORGE: { from: "#0c0a09", to: "#f97316", glyph: "NF", label: "NeoForge" },
-  MOHIST: { from: "#18181b", to: "#ef4444", glyph: "M", label: "Mohist" },
-  QUILT: { from: "#78350f", to: "#f59e0b", glyph: "Q", label: "Quilt" },
-};
-const DEFAULT_HERO = {
-  from: "#0f172a",
-  to: "#475569",
-  glyph: "·",
-  label: "Server",
-};
 
 export function ServerTile({ server }: { server: ServerSummary }): JSX.Element {
-  const hero = HERO[server.type] ?? DEFAULT_HERO;
+  const meta = getServerMeta(server.type);
 
   const { data: players } = useSWR<{ online: number; max: number }>(
     server.status === "running" ? `/servers/${server.id}/players` : null,
@@ -59,31 +39,20 @@ export function ServerTile({ server }: { server: ServerSummary }): JSX.Element {
         href={`/servers/${server.id}`}
         className="tile tile-interactive overflow-hidden block h-full group"
       >
-        {/* Hero — gradient with large glyph + subtle grid pattern */}
-        <div
-          className="relative h-36 flex items-center justify-center text-white overflow-hidden"
-          style={{
-            background: `linear-gradient(135deg, ${hero.from}, ${hero.to})`,
-          }}
-        >
-          <span className="absolute inset-0 bg-grid-pattern opacity-25" />
-          <span
-            className="relative font-display text-[80px] font-black leading-none opacity-90 select-none"
-            style={{ letterSpacing: "-0.05em" }}
-          >
-            {hero.glyph}
-          </span>
+        <ServerTypeHero type={server.type} height={144} glyphSize={80}>
           <span className="absolute top-3 left-3 text-[10px] uppercase tracking-widest font-semibold opacity-80">
-            {hero.label}
+            {meta.label}
           </span>
           <span className="absolute top-3 right-3 flex items-center gap-1.5 bg-black/25 backdrop-blur-sm rounded-full px-2 py-0.5 text-[11px]">
             <StatusDot status={server.status} size={6} />
             <span>{server.status}</span>
           </span>
-          <span className="absolute bottom-3 right-3 text-[10px] font-mono opacity-70">
-            {server.version}
-          </span>
-        </div>
+          {server.version && server.version !== "LATEST" && (
+            <span className="absolute bottom-3 right-3 text-[10px] font-mono opacity-70">
+              {server.version}
+            </span>
+          )}
+        </ServerTypeHero>
 
         {/* Body */}
         <div className="p-5 space-y-4">
