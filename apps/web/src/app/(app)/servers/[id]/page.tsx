@@ -2,6 +2,7 @@
 import { useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import useSWR from "swr";
+import { motion } from "framer-motion";
 import { api, ApiError, fetcher } from "@/lib/api";
 import { ServerConsole } from "@/components/server-console";
 import { ServerFiles } from "@/components/server-files";
@@ -9,7 +10,21 @@ import { ServerBackups } from "@/components/server-backups";
 import { ServerProperties } from "@/components/server-properties";
 import { ServerContent } from "@/components/server-content";
 import { ServerSchedules } from "@/components/server-schedules";
+import { StatusDot } from "@/components/status-dot";
+import { PageHeader } from "@/components/page-header";
 import { cn } from "@/lib/cn";
+import {
+  Play,
+  Square,
+  RotateCw,
+  Zap,
+  Copy,
+  Trash2,
+  Users,
+  Cpu,
+  HardDrive as HardDriveIcon,
+  Clock,
+} from "lucide-react";
 
 type ServerDetail = {
   id: string;
@@ -36,28 +51,30 @@ type Stats = {
 
 type Player = { online: number; max: number; players: string[] };
 
-type Tab =
-  | "overview"
-  | "console"
-  | "files"
-  | "properties"
-  | "backups"
-  | "schedules"
-  | "mods";
-
-const TABS: { key: Tab; label: string }[] = [
+const TABS = [
   { key: "overview", label: "Overview" },
   { key: "console", label: "Console" },
   { key: "files", label: "Files" },
-  { key: "properties", label: "server.properties" },
+  { key: "properties", label: "Properties" },
   { key: "backups", label: "Backups" },
   { key: "schedules", label: "Schedules" },
-  { key: "mods", label: "Mods / Plugins" },
-];
+  { key: "content", label: "Mods & Plugins" },
+] as const;
+type Tab = (typeof TABS)[number]["key"];
+
+const HERO: Record<string, { from: string; to: string; glyph: string }> = {
+  VANILLA: { from: "#0b3d1a", to: "#22c55e", glyph: "V" },
+  PAPER: { from: "#0f172a", to: "#94a3b8", glyph: "P" },
+  PURPUR: { from: "#3b0764", to: "#a855f7", glyph: "PU" },
+  FABRIC: { from: "#713f12", to: "#fbbf24", glyph: "F" },
+  FORGE: { from: "#0f172a", to: "#475569", glyph: "FG" },
+  NEOFORGE: { from: "#0c0a09", to: "#f97316", glyph: "NF" },
+  MOHIST: { from: "#18181b", to: "#ef4444", glyph: "M" },
+  QUILT: { from: "#78350f", to: "#f59e0b", glyph: "Q" },
+};
 
 export default function ServerDetailPage(): JSX.Element {
-  const params = useParams<{ id: string }>();
-  const id = params.id;
+  const { id } = useParams<{ id: string }>();
   const router = useRouter();
   const [tab, setTab] = useState<Tab>("overview");
   const { data, mutate } = useSWR<ServerDetail>(
@@ -77,8 +94,11 @@ export default function ServerDetailPage(): JSX.Element {
   );
 
   if (!data) return <div className="text-ink-muted">Loading…</div>;
+  const hero = HERO[data.type] ?? { from: "#0f172a", to: "#475569", glyph: "·" };
 
-  async function lifecycle(action: "start" | "stop" | "restart" | "kill"): Promise<void> {
+  async function lifecycle(
+    action: "start" | "stop" | "restart" | "kill"
+  ): Promise<void> {
     try {
       await api.post(`/servers/${id}/${action}`);
       mutate();
@@ -86,18 +106,6 @@ export default function ServerDetailPage(): JSX.Element {
       alert(err instanceof ApiError ? err.message : String(err));
     }
   }
-
-  async function remove(): Promise<void> {
-    if (!data) return;
-    if (!confirm(`Delete server "${data.name}"? This is irreversible.`)) return;
-    try {
-      await api.del(`/servers/${id}`);
-      router.push("/servers");
-    } catch (err) {
-      alert(err instanceof ApiError ? err.message : String(err));
-    }
-  }
-
   async function clone(): Promise<void> {
     try {
       const res = await api.post<{ id: string }>(`/servers/${id}/clone`);
@@ -106,134 +114,258 @@ export default function ServerDetailPage(): JSX.Element {
       alert(err instanceof ApiError ? err.message : String(err));
     }
   }
+  async function remove(): Promise<void> {
+    if (!data) return;
+    if (!confirm(`Delete server "${data.name}"? This is irreversible.`)) return;
+    try {
+      await api.del(`/servers/${id}`);
+      router.push("/");
+    } catch (err) {
+      alert(err instanceof ApiError ? err.message : String(err));
+    }
+  }
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <div className="flex items-center gap-3">
-            <h1 className="text-2xl font-semibold">{data.name}</h1>
-            <StatusBadge status={data.status} />
-          </div>
-          <div className="text-sm text-ink-secondary mt-1">
-            {data.type} · {data.version} · {data.node.name}
-          </div>
-        </div>
-        <div className="flex items-center gap-2">
-          <button className="btn-ghost" onClick={() => lifecycle("start")}>
-            Start
-          </button>
-          <button className="btn-ghost" onClick={() => lifecycle("stop")}>
-            Stop
-          </button>
-          <button className="btn-ghost" onClick={() => lifecycle("restart")}>
-            Restart
-          </button>
-          <button className="btn-ghost" onClick={() => lifecycle("kill")}>
-            Kill
-          </button>
-          <button className="btn-ghost" onClick={clone}>
-            Clone
-          </button>
-          <button className="btn-danger" onClick={remove}>
-            Delete
-          </button>
-        </div>
-      </div>
+    <div className="space-y-8">
+      <PageHeader
+        breadcrumbs={[
+          { label: "Dashboard", href: "/" },
+          { label: data.name },
+        ]}
+        title={data.name}
+        description={data.description || undefined}
+        badge={
+          <span className="chip chip-muted flex items-center gap-1.5">
+            <StatusDot status={data.status} size={6} />
+            {data.status}
+          </span>
+        }
+        actions={
+          <>
+            <button
+              className="btn btn-ghost"
+              onClick={() => lifecycle("start")}
+            >
+              <Play size={15} /> Start
+            </button>
+            <button
+              className="btn btn-ghost"
+              onClick={() => lifecycle("stop")}
+            >
+              <Square size={15} /> Stop
+            </button>
+            <button
+              className="btn btn-ghost"
+              onClick={() => lifecycle("restart")}
+            >
+              <RotateCw size={15} /> Restart
+            </button>
+            <button
+              className="btn btn-ghost"
+              onClick={() => lifecycle("kill")}
+              title="Kill"
+            >
+              <Zap size={15} />
+            </button>
+            <button className="btn btn-ghost" onClick={clone} title="Clone">
+              <Copy size={15} />
+            </button>
+            <button className="btn btn-danger" onClick={remove}>
+              <Trash2 size={15} />
+            </button>
+          </>
+        }
+      />
 
-      <div className="border-b border-line flex gap-1">
+      {/* Hero banner with live stats overlaid */}
+      <section
+        className="relative overflow-hidden rounded-2xl text-white p-7 min-h-[160px]"
+        style={{
+          background: `linear-gradient(135deg, ${hero.from}, ${hero.to})`,
+        }}
+      >
+        <span className="absolute inset-0 bg-grid-pattern opacity-25" />
+        <span
+          className="absolute right-[-10px] top-[-28px] font-display font-black text-[200px] leading-none opacity-20 select-none"
+          style={{ letterSpacing: "-0.05em" }}
+        >
+          {hero.glyph}
+        </span>
+        <div className="relative grid grid-cols-2 md:grid-cols-4 gap-6">
+          <HeroStat
+            icon={<Users size={14} />}
+            label="Players"
+            value={
+              players
+                ? `${players.online}/${players.max}`
+                : data.status === "running"
+                  ? "…"
+                  : "—"
+            }
+          />
+          <HeroStat
+            icon={<Cpu size={14} />}
+            label="CPU"
+            value={
+              stats?.cpuPercent != null ? `${stats.cpuPercent}%` : "—"
+            }
+          />
+          <HeroStat
+            icon={<HardDriveIcon size={14} />}
+            label="Memory"
+            value={
+              stats?.memoryBytes != null
+                ? `${(stats.memoryBytes / 1024 / 1024).toFixed(0)} MB`
+                : `${data.memoryMb} MB limit`
+            }
+          />
+          <HeroStat
+            icon={<Clock size={14} />}
+            label="Last start"
+            value={
+              data.lastStartedAt
+                ? new Date(data.lastStartedAt).toLocaleString()
+                : "never"
+            }
+          />
+        </div>
+      </section>
+
+      {/* Tabs */}
+      <div className="border-b border-line flex gap-1 overflow-x-auto">
         {TABS.map((t) => (
           <button
             key={t.key}
-            className={cn(
-              "px-4 py-2 text-sm rounded-t-md border-b-2",
-              tab === t.key
-                ? "border-accent text-ink bg-surface-2"
-                : "border-transparent text-ink-secondary hover:text-ink"
-            )}
             onClick={() => setTab(t.key)}
+            className={cn(
+              "relative px-4 py-3 text-sm whitespace-nowrap transition-colors",
+              tab === t.key
+                ? "text-ink font-medium"
+                : "text-ink-secondary hover:text-ink"
+            )}
           >
             {t.label}
+            {tab === t.key && (
+              <motion.span
+                layoutId="server-tab"
+                className="absolute -bottom-px left-2 right-2 h-0.5 bg-[rgb(var(--accent))] rounded-full"
+                transition={{ type: "spring", duration: 0.3 }}
+              />
+            )}
           </button>
         ))}
       </div>
 
       <div>
         {tab === "overview" && (
-          <OverviewTab data={data} stats={stats ?? null} players={players ?? null} />
+          <Overview data={data} players={players ?? null} />
         )}
         {tab === "console" && <ServerConsole serverId={id} />}
         {tab === "files" && <ServerFiles serverId={id} />}
         {tab === "properties" && <ServerProperties serverId={id} />}
         {tab === "backups" && <ServerBackups serverId={id} />}
         {tab === "schedules" && <ServerSchedules serverId={id} />}
-        {tab === "mods" && <ServerContent serverId={id} />}
+        {tab === "content" && <ServerContent serverId={id} />}
       </div>
     </div>
   );
 }
 
-function StatusBadge({ status }: { status: string }): JSX.Element {
-  const style: Record<string, string> = {
-    running: "bg-accent-soft text-accent",
-    starting: "bg-amber-500/20 text-amber-300",
-    stopping: "bg-amber-500/20 text-amber-300",
-    stopped: "bg-surface-2 text-ink-secondary",
-    crashed: "bg-danger/20 text-danger",
-  };
+function HeroStat({
+  icon,
+  label,
+  value,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  value: React.ReactNode;
+}): JSX.Element {
   return (
-    <span className={cn("badge", style[status] ?? "bg-surface-2 text-ink-secondary")}>
-      {status}
-    </span>
+    <div>
+      <div className="flex items-center gap-1.5 text-[11px] uppercase tracking-widest opacity-80">
+        {icon}
+        {label}
+      </div>
+      <div className="mt-1 text-2xl font-semibold tracking-tight tabular-nums truncate">
+        {value}
+      </div>
+    </div>
   );
 }
 
-function OverviewTab({
+function Overview({
   data,
-  stats,
   players,
 }: {
   data: ServerDetail;
-  stats: Stats | null;
   players: Player | null;
 }): JSX.Element {
   const ports = Array.isArray(data.ports) ? (data.ports as any[]) : [];
   return (
-    <div className="grid grid-cols-3 gap-4">
-      <div className="card p-5 space-y-3 col-span-2">
-        <h3 className="font-medium">Runtime</h3>
-        <dl className="grid grid-cols-2 gap-3 text-sm">
-          <Row label="Type">{data.type}</Row>
+    <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+      <div className="tile p-6 lg:col-span-2 space-y-5">
+        <h3 className="heading-md">Runtime configuration</h3>
+        <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-4 text-sm">
+          <Row label="Server type">{data.type}</Row>
           <Row label="Version">{data.version}</Row>
           <Row label="Memory limit">{data.memoryMb} MB</Row>
-          <Row label="CPU limit">{data.cpuLimit ?? "—"}</Row>
+          <Row label="CPU limit">{data.cpuLimit ?? "unlimited"}</Row>
           <Row label="Node">{data.node.name}</Row>
-          <Row label="Last start">
-            {data.lastStartedAt
-              ? new Date(data.lastStartedAt).toLocaleString()
+          <Row label="Ports">
+            {ports.length > 0
+              ? ports
+                  .map((p) => `${p.host}→${p.container}/${p.protocol}`)
+                  .join(", ")
               : "—"}
           </Row>
-          <Row label="Ports">
-            {ports
-              .map((p) => `${p.host}→${p.container}/${p.protocol}`)
-              .join(", ") || "—"}
+          <Row label="Env vars" full>
+            {Object.keys(data.env ?? {}).length === 0 ? (
+              <span className="text-ink-muted italic">none</span>
+            ) : (
+              <div className="flex flex-wrap gap-1.5 mt-1">
+                {Object.entries(data.env).map(([k, v]) => (
+                  <span
+                    key={k}
+                    className="chip chip-muted font-mono text-[11px]"
+                  >
+                    {k}={String(v).slice(0, 20)}
+                    {String(v).length > 20 ? "…" : ""}
+                  </span>
+                ))}
+              </div>
+            )}
           </Row>
-          <Row label="Env">{Object.keys(data.env ?? {}).length} vars</Row>
         </dl>
       </div>
-      <div className="card p-5 space-y-3">
-        <h3 className="font-medium">Live stats</h3>
-        <Row label="CPU">{stats?.cpuPercent != null ? `${stats.cpuPercent}%` : "—"}</Row>
-        <Row label="Memory">
-          {stats?.memoryBytes != null
-            ? `${(stats.memoryBytes / 1024 / 1024).toFixed(0)} MB / ${((stats.memoryLimitBytes ?? 0) / 1024 / 1024).toFixed(0)} MB`
-            : "—"}
-        </Row>
-        <Row label="Players">
-          {players ? `${players.online} / ${players.max}` : "—"}
-        </Row>
-        {players && players.players.length > 0 && (
-          <div className="text-xs text-ink-secondary">{players.players.join(", ")}</div>
+
+      <div className="tile p-6 space-y-4">
+        <h3 className="heading-md">Players online</h3>
+        {players ? (
+          <>
+            <div className="text-5xl font-semibold tabular-nums">
+              {players.online}
+              <span className="text-2xl text-ink-muted">/{players.max}</span>
+            </div>
+            <div className="divider" />
+            {players.players.length > 0 ? (
+              <div className="flex flex-wrap gap-1.5">
+                {players.players.map((p) => (
+                  <span key={p} className="chip chip-accent">
+                    {p}
+                  </span>
+                ))}
+              </div>
+            ) : (
+              <p className="text-sm text-ink-muted">
+                No players online right now.
+              </p>
+            )}
+          </>
+        ) : (
+          <p className="text-sm text-ink-muted">
+            Player list is fetched from the server via RCON. Start the server to
+            see players here.
+          </p>
         )}
       </div>
     </div>
@@ -243,14 +375,18 @@ function OverviewTab({
 function Row({
   label,
   children,
+  full,
 }: {
   label: string;
   children: React.ReactNode;
+  full?: boolean;
 }): JSX.Element {
   return (
-    <div className="flex items-center justify-between gap-3 text-sm">
-      <dt className="text-ink-muted">{label}</dt>
-      <dd className="text-ink truncate">{children}</dd>
+    <div className={full ? "sm:col-span-2" : undefined}>
+      <dt className="text-xs uppercase tracking-wider text-ink-muted">
+        {label}
+      </dt>
+      <dd className="mt-1 text-ink">{children}</dd>
     </div>
   );
 }

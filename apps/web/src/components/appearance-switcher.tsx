@@ -9,6 +9,7 @@ import { cn } from "@/lib/cn";
 const ACCENT_PREVIEW: Record<Accent, { label: string; hex: string }> = {
   emerald: { label: "Emerald", hex: "#059669" },
   sky: { label: "Sky", hex: "#0EA5E9" },
+  violet: { label: "Violet", hex: "#7C3AED" },
   ruby: { label: "Ruby", hex: "#E11D48" },
   caramel: { label: "Caramel", hex: "#B45309" },
 };

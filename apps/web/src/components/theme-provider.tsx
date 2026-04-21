@@ -8,7 +8,7 @@ import {
   type ReactNode,
 } from "react";
 
-export const ACCENTS = ["emerald", "sky", "ruby", "caramel"] as const;
+export const ACCENTS = ["emerald", "sky", "violet", "ruby", "caramel"] as const;
 export type Accent = (typeof ACCENTS)[number];
 const ACCENT_STORAGE = "cofemine-accent";
 

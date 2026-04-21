@@ -1,11 +1,12 @@
 "use client";
 import { useState } from "react";
 import useSWR, { mutate } from "swr";
-import { motion, AnimatePresence } from "framer-motion";
+import { motion } from "framer-motion";
 import { api, ApiError, fetcher } from "@/lib/api";
+import { PageHeader } from "@/components/page-header";
 import { Stagger, StaggerItem } from "@/components/motion";
-import { ChevronDown, Check, Plug, Package, Key } from "lucide-react";
-import { cn } from "@/lib/cn";
+import { Drawer } from "@/components/drawer";
+import { Check, Package, Key, ExternalLink, Sparkles } from "lucide-react";
 
 type Integrations = {
   providers: {
@@ -19,157 +20,159 @@ interface IntegrationDef {
   name: string;
   tagline: string;
   description: string;
-  tone: { from: string; to: string };
-  badge: { text: string; variant: "accent" | "muted" | "warning" | "success" };
-  requiresKey: boolean;
+  tone: { from: string; to: string; mark: string };
+  website: string;
 }
+
+const DEFS: IntegrationDef[] = [
+  {
+    key: "modrinth",
+    name: "Modrinth",
+    tagline: "Open mod platform",
+    description:
+      "Search mods, modpacks, plugins and datapacks from modrinth.com. Installation is fully automatic — pick a version, the agent downloads it.",
+    tone: { from: "#064e3b", to: "#10b981", mark: "M" },
+    website: "https://modrinth.com",
+  },
+  {
+    key: "curseforge",
+    name: "CurseForge",
+    tagline: "Mod catalog (API key)",
+    description:
+      "Search and install mods or modpacks from curseforge.com. Requires a personal API key. Without one, the panel falls back to manual ZIP upload.",
+    tone: { from: "#7c2d12", to: "#f59e0b", mark: "CF" },
+    website: "https://console.curseforge.com/",
+  },
+];
 
 export default function IntegrationsPage(): JSX.Element {
   const { data } = useSWR<Integrations>("/integrations", fetcher);
-  const [openKey, setOpenKey] = useState<string | null>(null);
-
-  const defs: IntegrationDef[] = [
-    {
-      key: "modrinth",
-      name: "Modrinth",
-      tagline: "Open mod platform",
-      description:
-        "Search mods, modpacks, plugins and datapacks from modrinth.com. Installation is fully automatic — pick a version, the agent downloads it.",
-      tone: { from: "#064e3b", to: "#10b981" },
-      badge: data?.providers.modrinth.enabled
-        ? { text: "Enabled", variant: "success" }
-        : { text: "Disabled", variant: "muted" },
-      requiresKey: false,
-    },
-    {
-      key: "curseforge",
-      name: "CurseForge",
-      tagline: "Mod catalog (API key)",
-      description:
-        "Search and install mods or modpacks from curseforge.com. Requires a personal API key. Without one, the panel falls back to manual ZIP upload via the File manager.",
-      tone: { from: "#7c2d12", to: "#f59e0b" },
-      badge: data?.providers.curseforge.enabled
-        ? { text: "Enabled", variant: "success" }
-        : { text: "Needs API key", variant: "warning" },
-      requiresKey: true,
-    },
-  ];
+  const [openKey, setOpenKey] = useState<"modrinth" | "curseforge" | null>(
+    null
+  );
 
   return (
     <div className="space-y-8">
-      <header>
-        <h1 className="heading-xl">Integrations</h1>
-        <p className="text-ink-secondary mt-2">
-          Connect external content sources. Providers expose a unified search
-          and install flow across all your servers.
-        </p>
-      </header>
+      <PageHeader
+        title="Integrations"
+        description="Connect external content sources. Providers expose a unified search and install flow across all your servers."
+      />
 
       <Stagger className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
-        {defs.map((def) => (
+        {DEFS.map((def) => (
           <StaggerItem key={def.key}>
             <IntegrationCard
               def={def}
-              expanded={openKey === def.key}
-              onToggle={() =>
-                setOpenKey((k) => (k === def.key ? null : def.key))
-              }
+              enabled={!!data?.providers[def.key]?.enabled}
+              onOpen={() => setOpenKey(def.key)}
             />
           </StaggerItem>
         ))}
+        <StaggerItem>
+          <ComingSoonCard />
+        </StaggerItem>
       </Stagger>
+
+      <Drawer
+        open={openKey === "modrinth"}
+        onClose={() => setOpenKey(null)}
+        title="Modrinth"
+        description="Public API. No configuration required."
+      >
+        <ModrinthDetails />
+      </Drawer>
+      <Drawer
+        open={openKey === "curseforge"}
+        onClose={() => setOpenKey(null)}
+        title="CurseForge"
+        description="Manage your API key. The panel encrypts it with SECRETS_KEY before storing."
+      >
+        <CurseForgeDetails />
+      </Drawer>
     </div>
   );
 }
 
-const BADGE_CLASS: Record<string, string> = {
-  accent: "badge badge-accent",
-  muted: "badge badge-muted",
-  warning: "badge badge-warning",
-  success: "badge badge-success",
-};
-
 function IntegrationCard({
   def,
-  expanded,
-  onToggle,
+  enabled,
+  onOpen,
 }: {
   def: IntegrationDef;
-  expanded: boolean;
-  onToggle: () => void;
+  enabled: boolean;
+  onOpen: () => void;
 }): JSX.Element {
   return (
-    <motion.div
-      className="card overflow-hidden h-full flex flex-col"
+    <motion.button
+      type="button"
+      onClick={onOpen}
       whileHover={{ y: -3 }}
       transition={{ duration: 0.18 }}
+      className="tile tile-interactive overflow-hidden h-full flex flex-col text-left"
     >
       <div
-        className="relative h-24 grid place-items-center text-white"
+        className="relative h-24 grid place-items-center text-white overflow-hidden"
         style={{
           background: `linear-gradient(135deg, ${def.tone.from}, ${def.tone.to})`,
         }}
       >
-        <span className="absolute inset-0 bg-grid opacity-30" />
-        <span className="relative w-14 h-14 rounded-2xl bg-white/20 backdrop-blur-sm grid place-items-center shadow-lg ring-1 ring-white/30">
-          <Plug size={26} />
+        <span className="absolute inset-0 bg-grid-pattern opacity-30" />
+        <span
+          className="relative font-display font-black text-[60px] opacity-85 leading-none"
+          style={{ letterSpacing: "-0.05em" }}
+        >
+          {def.tone.mark}
         </span>
       </div>
 
       <div className="p-5 flex-1 flex flex-col">
         <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0">
-            <div className="font-semibold text-base">{def.name}</div>
+          <div>
+            <div className="heading-md">{def.name}</div>
             <div className="text-xs text-ink-muted mt-0.5">{def.tagline}</div>
           </div>
-          <span className={BADGE_CLASS[def.badge.variant]}>
-            {def.badge.variant === "success" && (
-              <Check size={10} className="mr-1" />
-            )}
-            {def.badge.text}
+          <span
+            className={`chip ${enabled ? "chip-success" : "chip-warning"}`}
+          >
+            {enabled && <Check size={10} />} {enabled ? "Enabled" : "Setup"}
           </span>
         </div>
         <p className="text-sm text-ink-secondary mt-3 flex-1">
           {def.description}
         </p>
-
-        <button
-          onClick={onToggle}
-          className="mt-5 inline-flex items-center justify-center gap-1.5 text-accent text-sm font-medium hover:underline"
-        >
-          {expanded ? "Collapse" : "Details"}
-          <ChevronDown
-            size={14}
-            className={cn(
-              "transition-transform duration-200",
-              expanded && "rotate-180"
-            )}
-          />
-        </button>
+        <div className="mt-5 flex items-center justify-between text-sm">
+          <span className="link inline-flex items-center gap-1">
+            Configure
+            <ExternalLink size={12} className="opacity-60" />
+          </span>
+        </div>
       </div>
+    </motion.button>
+  );
+}
 
-      <AnimatePresence initial={false}>
-        {expanded && (
-          <motion.div
-            initial={{ height: 0, opacity: 0 }}
-            animate={{ height: "auto", opacity: 1 }}
-            exit={{ height: 0, opacity: 0 }}
-            className="border-t border-line overflow-hidden"
-          >
-            <div className="p-5 space-y-4 bg-surface-2/50">
-              {def.key === "modrinth" ? <ModrinthDetails /> : null}
-              {def.key === "curseforge" ? <CurseForgeDetails /> : null}
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-    </motion.div>
+function ComingSoonCard(): JSX.Element {
+  return (
+    <div className="tile p-5 flex flex-col gap-4 bg-surface-2/50 border-dashed">
+      <div className="w-10 h-10 rounded-lg bg-[rgb(var(--accent-soft))] text-[rgb(var(--accent))] grid place-items-center">
+        <Sparkles size={18} />
+      </div>
+      <div>
+        <div className="heading-md">More providers</div>
+        <p className="text-sm text-ink-muted mt-1">
+          Ploopy, Spigot, Bukkit and git-based sources are on the roadmap. The
+          provider interface is stable — drop in an implementation and it
+          appears here.
+        </p>
+      </div>
+      <span className="chip chip-muted mt-auto w-fit">Planned</span>
+    </div>
   );
 }
 
 function ModrinthDetails(): JSX.Element {
   return (
-    <>
+    <div className="space-y-5">
       <Row
         icon={<Package size={14} />}
         label="Project types"
@@ -180,11 +183,20 @@ function ModrinthDetails(): JSX.Element {
         label="Authentication"
         value="None — public API"
       />
-      <p className="text-xs text-ink-muted">
-        Modpacks are applied via the runtime's <code>MODRINTH_PROJECT</code>{" "}
-        env, then the server refetches them on next start.
+      <div className="divider" />
+      <p className="text-sm text-ink-secondary leading-relaxed">
+        Modpacks are applied via the runtime's <code className="kbd">MODRINTH_PROJECT</code>{" "}
+        env var. The server refetches the pack on next start — no manual unzip.
       </p>
-    </>
+      <a
+        href="https://modrinth.com"
+        target="_blank"
+        rel="noreferrer"
+        className="link text-sm inline-flex items-center gap-1"
+      >
+        Visit modrinth.com <ExternalLink size={12} />
+      </a>
+    </div>
   );
 }
 
@@ -193,6 +205,7 @@ function CurseForgeDetails(): JSX.Element {
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
   const { data } = useSWR<Integrations>("/integrations", fetcher);
+  const enabled = data?.providers.curseforge.enabled;
 
   async function save(): Promise<void> {
     setBusy(true);
@@ -215,48 +228,68 @@ function CurseForgeDetails(): JSX.Element {
   }
 
   return (
-    <>
+    <div className="space-y-5">
+      <div className="flex items-center gap-2">
+        <span
+          className={`chip ${enabled ? "chip-success" : "chip-warning"} !h-6 px-2.5`}
+        >
+          {enabled && <Check size={10} />}
+          {enabled ? "Configured" : "Not configured"}
+        </span>
+      </div>
+      <Row
+        icon={<Package size={14} />}
+        label="Project types"
+        value="mods, modpacks, plugins"
+      />
       <Row
         icon={<Key size={14} />}
-        label="API key"
-        value={
-          data?.providers.curseforge.enabled ? "Configured" : "Not configured"
-        }
+        label="Authentication"
+        value="API key required"
       />
-      <div className="flex gap-2">
+      <div className="divider" />
+      <div className="space-y-2">
+        <label className="text-xs font-medium text-ink-secondary">
+          API key
+        </label>
         <input
-          className="input"
-          placeholder="Paste API key"
+          className="input font-mono"
+          placeholder="$2a$10$..."
           value={apiKey}
           onChange={(e) => setApiKey(e.target.value)}
+          type="password"
         />
-        <button
-          className="btn-primary"
-          disabled={!apiKey || busy}
-          onClick={save}
-        >
-          Save
-        </button>
-        {data?.providers.curseforge.enabled && (
-          <button className="btn-ghost" onClick={clear}>
-            Clear
+        <div className="flex gap-2">
+          <button
+            className="btn btn-primary"
+            disabled={!apiKey || busy}
+            onClick={save}
+          >
+            Save
           </button>
+          {enabled && (
+            <button className="btn btn-ghost" onClick={clear}>
+              Remove
+            </button>
+          )}
+        </div>
+        {msg && (
+          <div className="text-xs text-ink-secondary mt-1">{msg}</div>
         )}
       </div>
-      {msg && <div className="text-xs text-ink-secondary">{msg}</div>}
       <p className="text-xs text-ink-muted">
         Get a key at{" "}
         <a
-          className="text-accent underline"
+          className="link"
           href="https://console.curseforge.com/"
           target="_blank"
           rel="noreferrer"
         >
           console.curseforge.com
         </a>
-        .
+        . It's encrypted server-side before being stored.
       </p>
-    </>
+    </div>
   );
 }
 

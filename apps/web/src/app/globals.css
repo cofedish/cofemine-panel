@@ -3,86 +3,92 @@
 @tailwind utilities;
 
 /*
- * Cofemine Panel design tokens.
+ * Cofemine Panel — design tokens, rewritten from scratch.
  *
- * Separation of concerns:
- *   - Neutrals (surface / ink / border) depend ONLY on color-scheme mode
- *     (light vs dark). They do not change when the user picks an accent.
- *   - Accent tokens depend ONLY on the active accent theme, and stack on
- *     top of either mode.
+ * Two-layer token system:
+ *   Layer 1 — Neutrals (surface / ink / border / shadows)
+ *     depend only on color-scheme mode (light vs dark).
+ *   Layer 2 — Accents (accent / accent-hover / accent-soft)
+ *     live in separate `.accent-<name>` classes that stack on top
+ *     of light OR dark.
  *
- * Applied as classes on <html>:
- *   <html class="light accent-emerald">
- *   <html class="dark  accent-sky">
- *
- * Tailwind consumes these through `rgb(var(--x) / <alpha-value>)`.
+ * Applied on <html>, e.g.  <html class="light accent-emerald">
+ * Tailwind consumes the variables via `rgb(var(--x) / <alpha-value>)`.
  */
 
 /* ======================================================================
-   1. Neutral palette — only depends on light vs dark
+   1. Neutrals — mode only
    ====================================================================== */
 
 :root,
 .light {
-  --bg-base: 250 250 251; /* off-white */
+  --bg-base: 250 250 251;        /* off-white */
   --bg-surface-1: 255 255 255;
-  --bg-surface-2: 244 245 248;
-  --bg-surface-3: 232 234 239;
-  --border: 226 229 235;
-  --border-strong: 201 206 217;
+  --bg-surface-2: 246 247 250;
+  --bg-surface-3: 233 236 242;
+  --bg-hover: 241 243 248;
 
-  --fg-primary: 15 23 42; /* near-black */
+  --border: 228 231 238;
+  --border-strong: 205 210 221;
+
+  --fg-primary: 17 24 39;
   --fg-secondary: 71 85 105;
   --fg-muted: 130 142 163;
 
-  --danger: 220 50 47;
+  --danger: 220 38 38;
   --danger-soft: 254 226 226;
   --success: 22 163 74;
   --success-soft: 220 252 231;
   --warning: 217 119 6;
   --warning-soft: 254 243 199;
 
-  --shadow-1: 0 1px 2px rgb(15 23 42 / 0.05),
+  --shadow-xs: 0 1px 1px rgb(15 23 42 / 0.04);
+  --shadow-sm: 0 1px 2px rgb(15 23 42 / 0.05),
     0 1px 3px rgb(15 23 42 / 0.05);
-  --shadow-2: 0 4px 14px -4px rgb(15 23 42 / 0.08),
-    0 14px 30px -18px rgb(15 23 42 / 0.08);
-  --shadow-lift: 0 18px 36px -20px rgb(15 23 42 / 0.2);
+  --shadow-md: 0 4px 12px -2px rgb(15 23 42 / 0.08),
+    0 12px 24px -8px rgb(15 23 42 / 0.05);
+  --shadow-lg: 0 12px 32px -8px rgb(15 23 42 / 0.12),
+    0 24px 48px -16px rgb(15 23 42 / 0.08);
+  --shadow-popover: 0 8px 24px -6px rgb(15 23 42 / 0.12),
+    0 2px 6px -1px rgb(15 23 42 / 0.08);
 
   color-scheme: light;
 }
 
 .dark {
-  --bg-base: 10 13 20;
-  --bg-surface-1: 17 22 32;
-  --bg-surface-2: 24 30 43;
-  --bg-surface-3: 36 45 62;
-  --border: 36 45 62;
-  --border-strong: 58 72 95;
+  --bg-base: 9 11 17;
+  --bg-surface-1: 15 18 27;
+  --bg-surface-2: 22 27 39;
+  --bg-surface-3: 31 38 54;
+  --bg-hover: 26 32 47;
+
+  --border: 36 44 62;
+  --border-strong: 58 70 95;
 
   --fg-primary: 241 245 249;
   --fg-secondary: 186 197 215;
-  --fg-muted: 127 141 164;
+  --fg-muted: 124 138 160;
 
-  --danger: 239 108 104;
-  --danger-soft: 66 27 28;
+  --danger: 248 113 113;
+  --danger-soft: 70 30 30;
   --success: 74 199 123;
-  --success-soft: 23 51 35;
-  --warning: 234 179 8;
-  --warning-soft: 56 39 12;
+  --success-soft: 22 53 36;
+  --warning: 250 204 21;
+  --warning-soft: 58 41 10;
 
-  --shadow-1: 0 1px 2px rgb(0 0 0 / 0.4), 0 1px 3px rgb(0 0 0 / 0.3);
-  --shadow-2: 0 10px 24px -10px rgb(0 0 0 / 0.55),
-    0 20px 40px -20px rgb(0 0 0 / 0.4);
-  --shadow-lift: 0 22px 44px -20px rgb(0 0 0 / 0.6);
+  --shadow-xs: 0 1px 1px rgb(0 0 0 / 0.3);
+  --shadow-sm: 0 1px 2px rgb(0 0 0 / 0.4);
+  --shadow-md: 0 8px 20px -6px rgb(0 0 0 / 0.5);
+  --shadow-lg: 0 20px 40px -10px rgb(0 0 0 / 0.6);
+  --shadow-popover: 0 12px 32px -10px rgb(0 0 0 / 0.65);
 
   color-scheme: dark;
 }
 
 /* ======================================================================
-   2. Accent palettes — stack on top of light OR dark
+   2. Accents — stack on top of any mode
    ====================================================================== */
 
-/* default accent (emerald) if no accent class is set */
 :root,
 .accent-emerald {
   --accent: 5 150 105;
@@ -92,11 +98,10 @@
   --ring: 5 150 105;
 }
 .dark.accent-emerald,
-.dark .accent-emerald,
-.dark:not(.accent-sky):not(.accent-ruby):not(.accent-caramel) {
+.dark:not(.accent-sky):not(.accent-ruby):not(.accent-caramel):not(.accent-violet) {
   --accent: 16 185 129;
   --accent-hover: 52 211 153;
-  --accent-soft: 13 52 40;
+  --accent-soft: 9 48 35;
   --ring: 16 185 129;
 }
 
@@ -107,11 +112,10 @@
   --accent-ink: 255 255 255;
   --ring: 14 165 233;
 }
-.dark.accent-sky,
-.dark .accent-sky {
+.dark.accent-sky {
   --accent: 56 189 248;
   --accent-hover: 125 211 252;
-  --accent-soft: 12 38 60;
+  --accent-soft: 10 37 61;
   --ring: 56 189 248;
 }
 
@@ -122,12 +126,25 @@
   --accent-ink: 255 255 255;
   --ring: 225 29 72;
 }
-.dark.accent-ruby,
-.dark .accent-ruby {
+.dark.accent-ruby {
   --accent: 244 114 142;
   --accent-hover: 251 147 171;
-  --accent-soft: 68 22 34;
+  --accent-soft: 66 20 32;
   --ring: 244 114 142;
+}
+
+.accent-violet {
+  --accent: 124 58 237;
+  --accent-hover: 109 40 217;
+  --accent-soft: 237 233 254;
+  --accent-ink: 255 255 255;
+  --ring: 124 58 237;
+}
+.dark.accent-violet {
+  --accent: 167 139 250;
+  --accent-hover: 196 181 253;
+  --accent-soft: 42 23 89;
+  --ring: 167 139 250;
 }
 
 .accent-caramel {
@@ -137,16 +154,15 @@
   --accent-ink: 255 255 255;
   --ring: 180 83 9;
 }
-.dark.accent-caramel,
-.dark .accent-caramel {
+.dark.accent-caramel {
   --accent: 234 179 8;
   --accent-hover: 250 204 21;
-  --accent-soft: 62 44 14;
+  --accent-soft: 58 40 12;
   --ring: 234 179 8;
 }
 
 /* ======================================================================
-   3. Base styles
+   3. Base
    ====================================================================== */
 
 * {
@@ -182,166 +198,229 @@ body {
   background: transparent;
 }
 
+/* Gentle ambient glow in the background for the light mode, so the page
+ * doesn't feel flat. Barely visible — placed in a corner. */
+.light body::before {
+  content: "";
+  position: fixed;
+  inset: -10% -10% auto auto;
+  height: 60vh;
+  width: 60vh;
+  background: radial-gradient(
+    circle at 70% 30%,
+    rgb(var(--accent) / 0.08),
+    transparent 60%
+  );
+  pointer-events: none;
+  z-index: 0;
+}
+
 /* ======================================================================
-   4. Component primitives
+   4. Components
    ====================================================================== */
 
-.card {
-  background: rgb(var(--bg-surface-1));
-  border: 1px solid rgb(var(--border));
-  border-radius: 1rem;
-  box-shadow: var(--shadow-1);
-  transition:
-    border-color 200ms ease,
-    box-shadow 300ms ease,
-    transform 300ms ease;
+@layer components {
+  .surface {
+    background: rgb(var(--bg-surface-1));
+    border: 1px solid rgb(var(--border));
+    border-radius: 1rem;
+  }
+
+  .surface-raised {
+    background: rgb(var(--bg-surface-1));
+    border: 1px solid rgb(var(--border));
+    border-radius: 1rem;
+    box-shadow: var(--shadow-sm);
+  }
+
+  .tile {
+    background: rgb(var(--bg-surface-1));
+    border: 1px solid rgb(var(--border));
+    border-radius: 1rem;
+    box-shadow: var(--shadow-sm);
+    transition:
+      border-color 200ms ease,
+      box-shadow 250ms ease,
+      transform 250ms ease;
+  }
+  .tile-interactive:hover {
+    border-color: rgb(var(--border-strong));
+    box-shadow: var(--shadow-md);
+    transform: translateY(-2px);
+  }
+
+  .input,
+  .textarea,
+  .select {
+    background: rgb(var(--bg-surface-1));
+    border: 1px solid rgb(var(--border));
+    border-radius: 0.625rem;
+    padding: 0.55rem 0.9rem;
+    font-size: 0.875rem;
+    color: rgb(var(--fg-primary));
+    width: 100%;
+    outline: none;
+    transition:
+      border-color 150ms ease,
+      box-shadow 150ms ease;
+  }
+  .input::placeholder,
+  .textarea::placeholder {
+    color: rgb(var(--fg-muted));
+  }
+  .input:focus,
+  .textarea:focus,
+  .select:focus {
+    border-color: rgb(var(--accent) / 0.6);
+    box-shadow: 0 0 0 3px rgb(var(--accent) / 0.18);
+  }
+
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    padding: 0.55rem 1rem;
+    border-radius: 0.625rem;
+    font-size: 0.875rem;
+    font-weight: 500;
+    transition:
+      background-color 160ms ease,
+      color 160ms ease,
+      border-color 160ms ease,
+      box-shadow 200ms ease,
+      transform 120ms ease;
+    cursor: pointer;
+    white-space: nowrap;
+    user-select: none;
+    border: 1px solid transparent;
+  }
+  .btn:active { transform: translateY(1px); }
+  .btn:disabled { opacity: 0.45; cursor: not-allowed; transform: none; }
+
+  .btn-primary {
+    background: rgb(var(--accent));
+    color: rgb(var(--accent-ink));
+    box-shadow:
+      inset 0 1px 0 rgb(255 255 255 / 0.1),
+      0 1px 2px rgb(var(--accent) / 0.25);
+  }
+  .btn-primary:hover:not(:disabled) {
+    background: rgb(var(--accent-hover));
+    box-shadow:
+      inset 0 1px 0 rgb(255 255 255 / 0.12),
+      0 8px 18px -6px rgb(var(--accent) / 0.45);
+  }
+
+  .btn-ghost {
+    background: transparent;
+    border-color: rgb(var(--border));
+    color: rgb(var(--fg-primary));
+  }
+  .btn-ghost:hover:not(:disabled) {
+    background: rgb(var(--bg-hover));
+    border-color: rgb(var(--border-strong));
+  }
+
+  .btn-subtle {
+    background: rgb(var(--bg-surface-2));
+    border-color: transparent;
+    color: rgb(var(--fg-primary));
+  }
+  .btn-subtle:hover:not(:disabled) {
+    background: rgb(var(--bg-surface-3));
+  }
+
+  .btn-danger {
+    background: rgb(var(--danger) / 0.9);
+    color: #fff;
+  }
+  .btn-danger:hover:not(:disabled) { background: rgb(var(--danger)); }
+
+  .btn-icon {
+    width: 2.25rem;
+    height: 2.25rem;
+    padding: 0;
+    display: inline-grid;
+    place-items: center;
+  }
+
+  .chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    padding: 0.2rem 0.7rem;
+    border-radius: 9999px;
+    font-size: 0.72rem;
+    font-weight: 500;
+    letter-spacing: 0.01em;
+    line-height: 1;
+    height: 22px;
+  }
+  .chip-accent { background: rgb(var(--accent-soft)); color: rgb(var(--accent)); }
+  .chip-muted {
+    background: rgb(var(--bg-surface-2));
+    color: rgb(var(--fg-secondary));
+    border: 1px solid rgb(var(--border));
+  }
+  .chip-success { background: rgb(var(--success-soft)); color: rgb(var(--success)); }
+  .chip-danger { background: rgb(var(--danger-soft)); color: rgb(var(--danger)); }
+  .chip-warning { background: rgb(var(--warning-soft)); color: rgb(var(--warning)); }
+
+  .divider { height: 1px; background: rgb(var(--border)); }
+
+  .dot {
+    display: inline-block;
+    width: 0.5rem;
+    height: 0.5rem;
+    border-radius: 9999px;
+    background: currentColor;
+  }
+
+  .kbd {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 1.25rem;
+    height: 1.25rem;
+    padding: 0 0.35rem;
+    border: 1px solid rgb(var(--border));
+    border-radius: 0.35rem;
+    background: rgb(var(--bg-surface-2));
+    color: rgb(var(--fg-muted));
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
+      monospace;
+    font-size: 0.7rem;
+    font-weight: 500;
+  }
+
+  .link {
+    color: rgb(var(--accent));
+    text-decoration: none;
+    transition: color 140ms ease;
+  }
+  .link:hover { color: rgb(var(--accent-hover)); text-decoration: underline; }
 }
 
-.card-interactive {
-  cursor: pointer;
-}
-.card-interactive:hover {
-  border-color: rgb(var(--border-strong));
-  box-shadow: var(--shadow-2);
-  transform: translateY(-2px);
-}
+/* ======================================================================
+   5. Utility extensions
+   ====================================================================== */
 
-.input,
-.textarea,
-.select {
-  background: rgb(var(--bg-surface-1));
-  border: 1px solid rgb(var(--border));
-  border-radius: 0.625rem;
-  padding: 0.55rem 0.9rem;
-  font-size: 0.875rem;
-  color: rgb(var(--fg-primary));
-  width: 100%;
-  outline: none;
-  transition:
-    border-color 150ms ease,
-    box-shadow 150ms ease,
-    background-color 150ms ease;
-}
-.input::placeholder,
-.textarea::placeholder {
-  color: rgb(var(--fg-muted));
-}
-.input:focus,
-.textarea:focus,
-.select:focus {
-  border-color: rgb(var(--accent) / 0.6);
-  box-shadow: 0 0 0 3px rgb(var(--accent) / 0.18);
-}
-
-.btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.5rem;
-  padding: 0.55rem 1rem;
-  border-radius: 0.625rem;
-  font-size: 0.875rem;
-  font-weight: 500;
-  transition:
-    background-color 160ms ease,
-    color 160ms ease,
-    border-color 160ms ease,
-    box-shadow 200ms ease,
-    transform 120ms ease;
-  cursor: pointer;
-  white-space: nowrap;
-  user-select: none;
-  border: 1px solid transparent;
-}
-.btn:active {
-  transform: translateY(1px);
-}
-.btn:disabled {
-  opacity: 0.45;
-  cursor: not-allowed;
-  transform: none;
-}
-
-.btn-primary {
-  background: rgb(var(--accent));
-  color: rgb(var(--accent-ink));
-  box-shadow:
-    inset 0 1px 0 rgb(255 255 255 / 0.12),
-    0 1px 2px rgb(var(--accent) / 0.25);
-}
-.btn-primary:hover:not(:disabled) {
-  background: rgb(var(--accent-hover));
-  box-shadow:
-    inset 0 1px 0 rgb(255 255 255 / 0.14),
-    0 6px 18px -6px rgb(var(--accent) / 0.45);
-}
-
-.btn-ghost {
-  background: transparent;
-  border-color: rgb(var(--border));
-  color: rgb(var(--fg-primary));
-}
-.btn-ghost:hover:not(:disabled) {
-  background: rgb(var(--bg-surface-2));
-  border-color: rgb(var(--border-strong));
-}
-
-.btn-danger {
-  background: rgb(var(--danger) / 0.9);
-  color: #fff;
-}
-.btn-danger:hover:not(:disabled) {
-  background: rgb(var(--danger));
-}
-
-.badge {
-  display: inline-flex;
-  align-items: center;
-  padding: 0.125rem 0.6rem;
-  border-radius: 9999px;
-  font-size: 0.72rem;
-  font-weight: 500;
-  letter-spacing: 0.01em;
-}
-.badge-accent {
-  background: rgb(var(--accent-soft));
-  color: rgb(var(--accent));
-}
-.badge-muted {
-  background: rgb(var(--bg-surface-2));
-  color: rgb(var(--fg-secondary));
-  border: 1px solid rgb(var(--border));
-}
-.badge-success {
-  background: rgb(var(--success-soft));
-  color: rgb(var(--success));
-}
-.badge-danger {
-  background: rgb(var(--danger-soft));
-  color: rgb(var(--danger));
-}
-.badge-warning {
-  background: rgb(var(--warning-soft));
-  color: rgb(var(--warning));
-}
-
-.divider {
-  height: 1px;
-  background: rgb(var(--border));
-  margin: 0.5rem 0;
-}
-
-.text-muted {
-  color: rgb(var(--fg-muted));
-}
-.text-secondary {
-  color: rgb(var(--fg-secondary));
+.text-muted { color: rgb(var(--fg-muted)); }
+.text-secondary { color: rgb(var(--fg-secondary)); }
+.bg-grid-pattern {
+  background-image: radial-gradient(
+    rgb(255 255 255 / 0.3) 1px,
+    transparent 1px
+  );
+  background-size: 24px 24px;
 }
 
 .heading-xl {
-  font-size: 1.75rem;
-  line-height: 1.15;
+  font-size: clamp(1.75rem, 2vw + 1rem, 2.25rem);
+  line-height: 1.1;
   font-weight: 600;
-  letter-spacing: -0.015em;
+  letter-spacing: -0.02em;
 }
 .heading-lg {
   font-size: 1.25rem;
@@ -349,24 +428,18 @@ body {
   font-weight: 600;
   letter-spacing: -0.01em;
 }
-
-/* A soft radial glow used on hero areas and tile art. */
-.tile-glow {
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  background: radial-gradient(
-    circle at 30% 20%,
-    rgb(var(--accent) / 0.22),
-    transparent 60%
-  );
+.heading-md {
+  font-size: 0.95rem;
+  font-weight: 600;
+  letter-spacing: -0.005em;
 }
 
-/* Dotted grid background that reads "block" without pixel art. */
-.bg-grid {
-  background-image: radial-gradient(
-    rgb(var(--fg-muted) / 0.12) 1px,
-    transparent 1px
-  );
-  background-size: 24px 24px;
+/* Reduced-motion friendly animations */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    transition-duration: 0.001ms !important;
+  }
 }

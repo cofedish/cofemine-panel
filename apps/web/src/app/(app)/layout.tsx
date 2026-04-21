@@ -1,6 +1,5 @@
 import type { ReactNode } from "react";
-import { Sidebar } from "@/components/sidebar";
-import { Topbar } from "@/components/topbar";
+import { TopNav } from "@/components/top-nav";
 import { AuthGate } from "@/components/auth-gate";
 import { PageFade } from "@/components/motion";
 
@@ -11,14 +10,17 @@ export default function AppLayout({
 }): JSX.Element {
   return (
     <AuthGate>
-      <div className="flex min-h-screen">
-        <Sidebar />
-        <div className="flex-1 flex flex-col">
-          <Topbar />
-          <main className="flex-1 px-6 py-8 max-w-[1400px] w-full mx-auto">
-            <PageFade>{children}</PageFade>
-          </main>
-        </div>
+      <div className="min-h-screen flex flex-col">
+        <TopNav />
+        <main className="flex-1 w-full max-w-[1400px] mx-auto px-6 py-10">
+          <PageFade>{children}</PageFade>
+        </main>
+        <footer className="border-t border-line py-4">
+          <div className="max-w-[1400px] mx-auto px-6 text-xs text-ink-muted flex items-center justify-between">
+            <span>Cofemine Panel · v0.1.0</span>
+            <span>Self-hosted · Docker-first</span>
+          </div>
+        </footer>
       </div>
     </AuthGate>
   );
