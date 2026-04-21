@@ -61,7 +61,8 @@
       "Bash(git commit -q -m 'feat: user avatar upload + server icon upload \\(both with canvas resize\\) *)",
       "Bash(avatar)",
       "Bash(git commit -q -m 'fix: dedicated icon upload in wizard + avatars in admin table *)",
-      "Bash(git commit -q -m 'fix\\(agent\\): auto-pull image on create + memory slider in wizard *)"
+      "Bash(git commit -q -m 'fix\\(agent\\): auto-pull image on create + memory slider in wizard *)",
+      "Bash(git commit -q -m 'fix\\(api\\): drop content-type: json on bodyless agent calls *)"
     ]
   }
 }

@@ -35,12 +35,17 @@ export class NodeClient {
     body?: unknown
   ): Promise<T> {
     const url = `${this.host.replace(/\/$/, "")}${path}`;
+    // Only set content-type when we actually have a body. Fastify rejects
+    // requests with Content-Type: application/json but empty body with
+    // FST_ERR_CTP_EMPTY_JSON_BODY, which breaks lifecycle endpoints
+    // (start/stop/restart/kill) that take no payload.
+    const headers: Record<string, string> = {
+      authorization: `Bearer ${this.token}`,
+    };
+    if (body !== undefined) headers["content-type"] = "application/json";
     const res = await request(url, {
       method,
-      headers: {
-        "content-type": "application/json",
-        authorization: `Bearer ${this.token}`,
-      },
+      headers,
       body: body === undefined ? undefined : JSON.stringify(body),
     });
     const text = await res.body.text();
