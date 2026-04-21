@@ -1,8 +1,10 @@
 "use client";
 import Link from "next/link";
+import useSWR from "swr";
 import { motion } from "framer-motion";
 import { cn } from "@/lib/cn";
-import { Server as ServerIcon, Cpu, Users, Gauge } from "lucide-react";
+import { fetcher } from "@/lib/api";
+import { Users } from "lucide-react";
 
 export interface ServerSummary {
   id: string;
@@ -17,6 +19,22 @@ export interface ServerSummary {
   lastStartedAt?: string | null;
 }
 
+/**
+ * Per-server-type hero background. No real images — a tastefully stylised
+ * gradient-and-block tile, which stays on-brand regardless of accent choice.
+ */
+const HERO: Record<string, { from: string; to: string; label: string }> = {
+  VANILLA: { from: "#14532d", to: "#22c55e", label: "Vanilla" },
+  PAPER: { from: "#334155", to: "#f8fafc", label: "Paper" },
+  PURPUR: { from: "#4c1d95", to: "#c084fc", label: "Purpur" },
+  FABRIC: { from: "#78350f", to: "#facc15", label: "Fabric" },
+  FORGE: { from: "#0f172a", to: "#64748b", label: "Forge" },
+  NEOFORGE: { from: "#0f172a", to: "#f97316", label: "NeoForge" },
+  MOHIST: { from: "#18181b", to: "#f43f5e", label: "Mohist" },
+  QUILT: { from: "#7c2d12", to: "#f59e0b", label: "Quilt" },
+};
+const DEFAULT_HERO = { from: "#0f172a", to: "#475569", label: "Server" };
+
 const STATUS_BADGE: Record<string, string> = {
   running: "badge badge-success",
   starting: "badge badge-warning",
@@ -27,7 +45,7 @@ const STATUS_BADGE: Record<string, string> = {
 };
 
 const STATUS_DOT: Record<string, string> = {
-  running: "bg-success animate-pulse",
+  running: "bg-success",
   starting: "bg-warning",
   stopping: "bg-warning",
   stopped: "bg-ink-muted",
@@ -36,92 +54,108 @@ const STATUS_DOT: Record<string, string> = {
 };
 
 export function ServerCard({ server }: { server: ServerSummary }): JSX.Element {
+  const hero = HERO[server.type] ?? DEFAULT_HERO;
+
+  // Live players count — polls only when the server is running.
+  const { data: players } = useSWR<{ online: number; max: number }>(
+    server.status === "running" ? `/servers/${server.id}/players` : null,
+    fetcher,
+    { refreshInterval: 20000 }
+  );
+
   const ports = Array.isArray(server.ports) ? (server.ports as any[]) : [];
   const primary = ports[0];
+
   return (
-    <motion.div whileHover={{ y: -3 }} transition={{ duration: 0.18 }}>
+    <motion.div whileHover={{ y: -4 }} transition={{ duration: 0.18 }}>
       <Link
         href={`/servers/${server.id}`}
-        className="card card-interactive p-5 block h-full"
+        className="card card-interactive overflow-hidden block h-full"
       >
-        <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0 flex items-start gap-3">
-            <span className="relative mt-0.5 w-10 h-10 rounded-lg bg-accent-soft text-accent grid place-items-center block-accent shrink-0">
-              <ServerIcon size={18} />
+        {/* Hero */}
+        <div
+          className="relative h-28 p-5 flex items-end text-white overflow-hidden"
+          style={{
+            background: `linear-gradient(135deg, ${hero.from}, ${hero.to})`,
+          }}
+        >
+          <span className="absolute inset-0 bg-grid opacity-30" />
+          <span className="absolute top-3 right-3">
+            <span
+              className={cn(STATUS_BADGE[server.status] ?? STATUS_BADGE.unknown)}
+            >
               <span
                 className={cn(
-                  "absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full ring-2 ring-surface-1",
-                  STATUS_DOT[server.status] ?? STATUS_DOT.unknown
+                  "w-1.5 h-1.5 rounded-full mr-1.5",
+                  STATUS_DOT[server.status] ?? STATUS_DOT.unknown,
+                  server.status === "running" && "animate-pulse"
                 )}
               />
+              {server.status}
             </span>
-            <div className="min-w-0">
-              <div className="font-semibold text-base truncate">
-                {server.name}
-              </div>
-              {server.description && (
-                <div className="text-sm text-ink-muted mt-0.5 line-clamp-2">
-                  {server.description}
-                </div>
-              )}
+          </span>
+          <div className="relative">
+            <div className="text-[11px] uppercase tracking-wider opacity-75">
+              {hero.label}
+            </div>
+            <div className="font-semibold text-xl leading-tight truncate">
+              {server.name}
             </div>
           </div>
-          <span
-            className={cn(STATUS_BADGE[server.status] ?? STATUS_BADGE.unknown)}
-          >
-            {server.status}
-          </span>
         </div>
-        <div className="mt-5 grid grid-cols-3 gap-3">
-          <Info icon={<Cpu size={13} />} label="Runtime">
-            {server.type} · {server.version}
-          </Info>
-          <Info icon={<Gauge size={13} />} label="Memory">
-            {server.memoryMb} MB
-          </Info>
-          <Info icon={<Users size={13} />} label="Port">
-            {primary ? primary.host : "—"}
-          </Info>
-        </div>
-        <div className="mt-4 pt-4 border-t border-line flex items-center justify-between text-xs">
-          <span className="text-ink-muted">
-            Node · <span className="text-ink-secondary">{server.node.name}</span>
-          </span>
-          <span className="text-ink-muted">
-            {server.lastStartedAt
-              ? `Last start ${timeAgo(server.lastStartedAt)}`
-              : "Never started"}
-          </span>
+
+        {/* Body */}
+        <div className="p-5 space-y-4">
+          {server.description ? (
+            <p className="text-sm text-ink-secondary line-clamp-2">
+              {server.description}
+            </p>
+          ) : (
+            <p className="text-sm text-ink-muted italic">No description</p>
+          )}
+          <div className="grid grid-cols-3 gap-3 text-sm">
+            <Stat
+              icon={<Users size={13} />}
+              label="Players"
+              value={
+                players
+                  ? `${players.online}/${players.max}`
+                  : server.status === "running"
+                    ? "…"
+                    : "—"
+              }
+            />
+            <Stat label="Version" value={server.version} />
+            <Stat label="Port" value={primary ? String(primary.host) : "—"} />
+          </div>
+          <div className="pt-3 border-t border-line flex items-center justify-between text-xs">
+            <span className="text-ink-muted">
+              Node · <span className="text-ink-secondary">{server.node.name}</span>
+            </span>
+            <span className="text-accent group-hover:underline">Open →</span>
+          </div>
         </div>
       </Link>
     </motion.div>
   );
 }
 
-function Info({
+function Stat({
   icon,
   label,
-  children,
+  value,
 }: {
-  icon: React.ReactNode;
+  icon?: React.ReactNode;
   label: string;
-  children: React.ReactNode;
+  value: React.ReactNode;
 }): JSX.Element {
   return (
     <div>
-      <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-ink-muted">
+      <div className="flex items-center gap-1 text-[10px] uppercase tracking-wider text-ink-muted">
         {icon}
         {label}
       </div>
-      <div className="text-ink mt-1 text-sm truncate">{children}</div>
+      <div className="text-ink mt-0.5 text-sm font-medium truncate">{value}</div>
     </div>
   );
-}
-
-function timeAgo(iso: string): string {
-  const diff = (Date.now() - new Date(iso).getTime()) / 1000;
-  if (diff < 60) return "just now";
-  if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
-  if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
-  return `${Math.floor(diff / 86400)}d ago`;
 }

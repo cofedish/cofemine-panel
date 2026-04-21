@@ -3,84 +3,151 @@
 @tailwind utilities;
 
 /*
- * Cofemine palette. "Coffee + mine" — a warm coffee-forward theme with a
- * Minecraft block sensibility (generous rounds, soft corners, subtle grid).
+ * Cofemine Panel design tokens.
  *
- * Light mode is latte-on-oat: creams and caramels, soft and airy.
- * Dark mode is espresso: deep roasted tones with a caramel accent.
+ * Separation of concerns:
+ *   - Neutrals (surface / ink / border) depend ONLY on color-scheme mode
+ *     (light vs dark). They do not change when the user picks an accent.
+ *   - Accent tokens depend ONLY on the active accent theme, and stack on
+ *     top of either mode.
  *
- * Colors are exposed as `rgb(r g b)` tuples so Tailwind can apply alpha
- * via `<color>/<alpha-value>`.
+ * Applied as classes on <html>:
+ *   <html class="light accent-emerald">
+ *   <html class="dark  accent-sky">
+ *
+ * Tailwind consumes these through `rgb(var(--x) / <alpha-value>)`.
  */
 
-:root {
-  /* surfaces */
-  --bg-base: 248 242 233;        /* warm cream */
-  --bg-surface-1: 255 252 247;   /* milk foam */
-  --bg-surface-2: 241 232 218;   /* oat latte */
-  --bg-surface-3: 231 218 199;   /* toasted */
-  --border: 223 207 184;         /* kraft paper */
-  --border-strong: 198 176 145;
+/* ======================================================================
+   1. Neutral palette — only depends on light vs dark
+   ====================================================================== */
 
-  /* text */
-  --fg-primary: 44 30 20;        /* espresso bean */
-  --fg-secondary: 97 77 60;      /* roasted */
-  --fg-muted: 142 119 96;        /* cocoa powder */
+:root,
+.light {
+  --bg-base: 250 250 251; /* off-white */
+  --bg-surface-1: 255 255 255;
+  --bg-surface-2: 244 245 248;
+  --bg-surface-3: 232 234 239;
+  --border: 226 229 235;
+  --border-strong: 201 206 217;
 
-  /* accents */
-  --accent: 161 110 64;          /* caramel */
-  --accent-hover: 137 89 48;     /* dark caramel */
-  --accent-soft: 243 224 197;    /* foam */
-  --accent-ink: 255 251 243;
+  --fg-primary: 15 23 42; /* near-black */
+  --fg-secondary: 71 85 105;
+  --fg-muted: 130 142 163;
 
-  /* semantic */
-  --danger: 178 62 56;
-  --danger-soft: 250 224 220;
-  --success: 97 129 76;
-  --success-soft: 224 237 213;
-  --warning: 196 130 44;
+  --danger: 220 50 47;
+  --danger-soft: 254 226 226;
+  --success: 22 163 74;
+  --success-soft: 220 252 231;
+  --warning: 217 119 6;
+  --warning-soft: 254 243 199;
 
-  /* depth */
-  --ring: 161 110 64;
-  --shadow-1: 0 1px 2px rgb(44 30 20 / 0.05), 0 1px 3px rgb(44 30 20 / 0.06);
-  --shadow-2: 0 6px 14px -6px rgb(44 30 20 / 0.12),
-    0 12px 24px -14px rgb(44 30 20 / 0.08);
-  --shadow-lift: 0 18px 36px -20px rgb(44 30 20 / 0.25);
+  --shadow-1: 0 1px 2px rgb(15 23 42 / 0.05),
+    0 1px 3px rgb(15 23 42 / 0.05);
+  --shadow-2: 0 4px 14px -4px rgb(15 23 42 / 0.08),
+    0 14px 30px -18px rgb(15 23 42 / 0.08);
+  --shadow-lift: 0 18px 36px -20px rgb(15 23 42 / 0.2);
 
   color-scheme: light;
 }
 
 .dark {
-  --bg-base: 22 16 10;           /* espresso depth */
-  --bg-surface-1: 32 23 15;      /* bean */
-  --bg-surface-2: 44 32 22;      /* stout */
-  --bg-surface-3: 58 42 29;      /* roasted mahogany */
-  --border: 64 48 34;
-  --border-strong: 90 68 48;
+  --bg-base: 10 13 20;
+  --bg-surface-1: 17 22 32;
+  --bg-surface-2: 24 30 43;
+  --bg-surface-3: 36 45 62;
+  --border: 36 45 62;
+  --border-strong: 58 72 95;
 
-  --fg-primary: 245 239 231;     /* steam */
-  --fg-secondary: 195 172 146;   /* latte foam */
-  --fg-muted: 146 124 102;
+  --fg-primary: 241 245 249;
+  --fg-secondary: 186 197 215;
+  --fg-muted: 127 141 164;
 
-  --accent: 214 165 110;         /* warm caramel glow */
-  --accent-hover: 232 188 138;
-  --accent-soft: 63 45 30;
-  --accent-ink: 22 16 10;
+  --danger: 239 108 104;
+  --danger-soft: 66 27 28;
+  --success: 74 199 123;
+  --success-soft: 23 51 35;
+  --warning: 234 179 8;
+  --warning-soft: 56 39 12;
 
-  --danger: 224 105 97;
-  --danger-soft: 72 32 30;
-  --success: 154 188 132;
-  --success-soft: 41 56 36;
-  --warning: 226 161 74;
-
-  --ring: 214 165 110;
   --shadow-1: 0 1px 2px rgb(0 0 0 / 0.4), 0 1px 3px rgb(0 0 0 / 0.3);
   --shadow-2: 0 10px 24px -10px rgb(0 0 0 / 0.55),
     0 20px 40px -20px rgb(0 0 0 / 0.4);
-  --shadow-lift: 0 22px 42px -20px rgb(0 0 0 / 0.6);
+  --shadow-lift: 0 22px 44px -20px rgb(0 0 0 / 0.6);
 
   color-scheme: dark;
 }
+
+/* ======================================================================
+   2. Accent palettes — stack on top of light OR dark
+   ====================================================================== */
+
+/* default accent (emerald) if no accent class is set */
+:root,
+.accent-emerald {
+  --accent: 5 150 105;
+  --accent-hover: 4 120 87;
+  --accent-soft: 220 252 231;
+  --accent-ink: 255 255 255;
+  --ring: 5 150 105;
+}
+.dark.accent-emerald,
+.dark .accent-emerald,
+.dark:not(.accent-sky):not(.accent-ruby):not(.accent-caramel) {
+  --accent: 16 185 129;
+  --accent-hover: 52 211 153;
+  --accent-soft: 13 52 40;
+  --ring: 16 185 129;
+}
+
+.accent-sky {
+  --accent: 14 165 233;
+  --accent-hover: 2 132 199;
+  --accent-soft: 224 242 254;
+  --accent-ink: 255 255 255;
+  --ring: 14 165 233;
+}
+.dark.accent-sky,
+.dark .accent-sky {
+  --accent: 56 189 248;
+  --accent-hover: 125 211 252;
+  --accent-soft: 12 38 60;
+  --ring: 56 189 248;
+}
+
+.accent-ruby {
+  --accent: 225 29 72;
+  --accent-hover: 190 18 60;
+  --accent-soft: 255 228 230;
+  --accent-ink: 255 255 255;
+  --ring: 225 29 72;
+}
+.dark.accent-ruby,
+.dark .accent-ruby {
+  --accent: 244 114 142;
+  --accent-hover: 251 147 171;
+  --accent-soft: 68 22 34;
+  --ring: 244 114 142;
+}
+
+.accent-caramel {
+  --accent: 180 83 9;
+  --accent-hover: 146 64 14;
+  --accent-soft: 254 243 199;
+  --accent-ink: 255 255 255;
+  --ring: 180 83 9;
+}
+.dark.accent-caramel,
+.dark .accent-caramel {
+  --accent: 234 179 8;
+  --accent-hover: 250 204 21;
+  --accent-soft: 62 44 14;
+  --ring: 234 179 8;
+}
+
+/* ======================================================================
+   3. Base styles
+   ====================================================================== */
 
 * {
   border-color: rgb(var(--border));
@@ -95,38 +162,8 @@ body {
   text-rendering: optimizeLegibility;
 }
 
-/*
- * Subtle background weave — a faint dotted grid that reads "block/pixel"
- * without going full 8-bit. Intentionally very low opacity.
- */
-body::before {
-  content: "";
-  position: fixed;
-  inset: 0;
-  pointer-events: none;
-  z-index: 0;
-  background-image: radial-gradient(
-    rgb(var(--fg-muted) / 0.07) 1px,
-    transparent 1px
-  );
-  background-size: 22px 22px;
-  mask-image: radial-gradient(ellipse at top, black 40%, transparent 85%);
-}
-.dark body::before {
-  background-image: radial-gradient(
-    rgb(var(--accent) / 0.09) 1px,
-    transparent 1px
-  );
-}
-
-#__next,
-body > div[id] {
-  position: relative;
-  z-index: 1;
-}
-
 ::selection {
-  background-color: rgb(var(--accent) / 0.25);
+  background-color: rgb(var(--accent) / 0.22);
   color: rgb(var(--fg-primary));
 }
 
@@ -139,13 +176,15 @@ body > div[id] {
   border-radius: 6px;
 }
 *::-webkit-scrollbar-thumb:hover {
-  background: rgb(var(--accent));
+  background: rgb(var(--accent) / 0.5);
 }
 *::-webkit-scrollbar-track {
   background: transparent;
 }
 
-/* ---------- component primitives ---------- */
+/* ======================================================================
+   4. Component primitives
+   ====================================================================== */
 
 .card {
   background: rgb(var(--bg-surface-1));
@@ -158,8 +197,11 @@ body > div[id] {
     transform 300ms ease;
 }
 
+.card-interactive {
+  cursor: pointer;
+}
 .card-interactive:hover {
-  border-color: rgb(var(--accent) / 0.55);
+  border-color: rgb(var(--border-strong));
   box-shadow: var(--shadow-2);
   transform: translateY(-2px);
 }
@@ -167,7 +209,7 @@ body > div[id] {
 .input,
 .textarea,
 .select {
-  background: rgb(var(--bg-surface-2));
+  background: rgb(var(--bg-surface-1));
   border: 1px solid rgb(var(--border));
   border-radius: 0.625rem;
   padding: 0.55rem 0.9rem;
@@ -189,7 +231,6 @@ body > div[id] {
 .select:focus {
   border-color: rgb(var(--accent) / 0.6);
   box-shadow: 0 0 0 3px rgb(var(--accent) / 0.18);
-  background: rgb(var(--bg-surface-1));
 }
 
 .btn {
@@ -225,13 +266,13 @@ body > div[id] {
   color: rgb(var(--accent-ink));
   box-shadow:
     inset 0 1px 0 rgb(255 255 255 / 0.12),
-    0 1px 2px rgb(var(--accent) / 0.4);
+    0 1px 2px rgb(var(--accent) / 0.25);
 }
 .btn-primary:hover:not(:disabled) {
   background: rgb(var(--accent-hover));
   box-shadow:
     inset 0 1px 0 rgb(255 255 255 / 0.14),
-    0 6px 18px -6px rgb(var(--accent) / 0.5);
+    0 6px 18px -6px rgb(var(--accent) / 0.45);
 }
 
 .btn-ghost {
@@ -263,10 +304,7 @@ body > div[id] {
 }
 .badge-accent {
   background: rgb(var(--accent-soft));
-  color: rgb(var(--accent-hover));
-}
-.dark .badge-accent {
-  color: rgb(var(--accent-hover));
+  color: rgb(var(--accent));
 }
 .badge-muted {
   background: rgb(var(--bg-surface-2));
@@ -282,7 +320,7 @@ body > div[id] {
   color: rgb(var(--danger));
 }
 .badge-warning {
-  background: rgb(var(--warning) / 0.15);
+  background: rgb(var(--warning-soft));
   color: rgb(var(--warning));
 }
 
@@ -292,24 +330,13 @@ body > div[id] {
   margin: 0.5rem 0;
 }
 
-/* Minecraft-ish "block" accent — used for logo and key headers.
- * Three stacked highlights mimic the classic block corners without being
- * literal pixel art. */
-.block-accent {
-  position: relative;
+.text-muted {
+  color: rgb(var(--fg-muted));
 }
-.block-accent::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  border-radius: inherit;
-  box-shadow:
-    inset 0 1px 0 rgb(255 255 255 / 0.12),
-    inset 0 -1px 0 rgb(0 0 0 / 0.25);
+.text-secondary {
+  color: rgb(var(--fg-secondary));
 }
 
-/* Typography helpers */
 .heading-xl {
   font-size: 1.75rem;
   line-height: 1.15;
@@ -322,27 +349,24 @@ body > div[id] {
   font-weight: 600;
   letter-spacing: -0.01em;
 }
-.text-muted {
-  color: rgb(var(--fg-muted));
-}
-.text-secondary {
-  color: rgb(var(--fg-secondary));
+
+/* A soft radial glow used on hero areas and tile art. */
+.tile-glow {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: radial-gradient(
+    circle at 30% 20%,
+    rgb(var(--accent) / 0.22),
+    transparent 60%
+  );
 }
 
-/* Page fade-in — used with framer-motion on top, this is the noscript
- * fallback so content is never invisible. */
-@media (prefers-reduced-motion: no-preference) {
-  .fade-in {
-    animation: fade-in 320ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
-  }
-}
-@keyframes fade-in {
-  from {
-    opacity: 0;
-    transform: translateY(4px);
-  }
-  to {
-    opacity: 1;
-    transform: none;
-  }
+/* Dotted grid background that reads "block" without pixel art. */
+.bg-grid {
+  background-image: radial-gradient(
+    rgb(var(--fg-muted) / 0.12) 1px,
+    transparent 1px
+  );
+  background-size: 24px 24px;
 }

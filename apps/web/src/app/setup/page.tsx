@@ -4,7 +4,7 @@ import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
 import { api, ApiError } from "@/lib/api";
 import { LogoMark, Wordmark } from "@/components/logo";
-import { ThemeToggle } from "@/components/theme-toggle";
+import { ThemeToggle } from "@/components/appearance-switcher";
 
 export default function SetupPage(): JSX.Element {
   const router = useRouter();

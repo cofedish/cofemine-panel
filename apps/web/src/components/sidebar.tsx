@@ -4,12 +4,9 @@ import { usePathname } from "next/navigation";
 import { motion } from "framer-motion";
 import {
   LayoutDashboard,
-  Server,
-  Users,
-  ClipboardList,
-  Layers,
-  Plug,
   HardDrive,
+  Plug,
+  ShieldCheck,
   Settings,
 } from "lucide-react";
 import { cn } from "@/lib/cn";
@@ -17,22 +14,19 @@ import { LogoMark, Wordmark } from "./logo";
 
 const links = [
   { href: "/", label: "Dashboard", icon: LayoutDashboard },
-  { href: "/servers", label: "Servers", icon: Server },
   { href: "/nodes", label: "Nodes", icon: HardDrive },
-  { href: "/templates", label: "Templates", icon: Layers },
-  { href: "/users", label: "Users", icon: Users },
-  { href: "/audit", label: "Audit log", icon: ClipboardList },
   { href: "/integrations", label: "Integrations", icon: Plug },
+  { href: "/administration", label: "Administration", icon: ShieldCheck },
   { href: "/settings", label: "Settings", icon: Settings },
 ];
 
 export function Sidebar(): JSX.Element {
   const pathname = usePathname();
   return (
-    <aside className="w-64 shrink-0 h-screen sticky top-0 flex flex-col bg-surface-1/70 backdrop-blur-xl border-r border-line">
+    <aside className="w-64 shrink-0 h-screen sticky top-0 flex flex-col bg-surface-1 border-r border-line">
       <div className="px-5 py-5 border-b border-line">
-        <Link href="/" className="flex items-center gap-2.5 group">
-          <span className="relative flex items-center justify-center w-9 h-9 rounded-lg bg-accent-soft text-ink block-accent animate-subtle-bob">
+        <Link href="/" className="flex items-center gap-2.5">
+          <span className="w-9 h-9 rounded-lg bg-accent-soft text-ink grid place-items-center">
             <LogoMark size={22} />
           </span>
           <span className="flex flex-col leading-tight">
@@ -81,7 +75,7 @@ export function Sidebar(): JSX.Element {
         })}
       </nav>
       <div className="px-5 py-3 text-[11px] text-ink-muted border-t border-line">
-        v0.1.0 MVP · dark/light
+        v0.1.0 MVP
       </div>
     </aside>
   );

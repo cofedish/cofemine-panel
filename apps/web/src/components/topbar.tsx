@@ -3,7 +3,7 @@ import { useRouter } from "next/navigation";
 import useSWR from "swr";
 import { api, fetcher } from "@/lib/api";
 import { LogOut } from "lucide-react";
-import { ThemeToggle } from "./theme-toggle";
+import { ThemeToggle } from "./appearance-switcher";
 
 type Me = { id: string; email: string; username: string; role: string };
 
