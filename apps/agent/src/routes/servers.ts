@@ -249,6 +249,18 @@ export async function serversAgentRoutes(app: FastifyInstance): Promise<void> {
 
   // Icon (64x64 PNG). Writes /data/server-icon.png which itzg exposes
   // automatically. Expects a base64-encoded PNG data URL.
+  app.get("/servers/:id/icon", async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const base = dataDirFor(id);
+    const p = path.join(base, "server-icon.png");
+    try {
+      const buf = await fs.readFile(p);
+      return { data: `data:image/png;base64,${buf.toString("base64")}` };
+    } catch {
+      return reply.code(404).send({ error: "no icon" });
+    }
+  });
+
   app.post("/servers/:id/icon", async (req) => {
     const { id } = req.params as { id: string };
     const body = z

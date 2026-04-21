@@ -266,6 +266,20 @@ export async function serversRoutes(app: FastifyInstance): Promise<void> {
     return client.call("GET", `/servers/${id}/players`);
   });
 
+  app.get("/:id/icon", async (req, reply) => {
+    const { id } = req.params as { id: string };
+    await assertServerPermission(req, id, "server.view");
+    const server = await prisma.server.findUniqueOrThrow({ where: { id } });
+    const client = await NodeClient.forId(server.nodeId);
+    try {
+      return await client.call<{ data: string }>("GET", `/servers/${id}/icon`);
+    } catch (err: unknown) {
+      const status = (err as { statusCode?: number })?.statusCode;
+      if (status === 404) return reply.code(404).send({ data: null });
+      throw err;
+    }
+  });
+
   // Server icon — 64x64 PNG that itzg exposes to clients via
   // /data/server-icon.png. We accept a base64 data URL from the browser,
   // forward it to the agent which writes the file directly.

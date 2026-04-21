@@ -301,7 +301,15 @@ body {
     box-shadow: 0 0 0 3px rgb(var(--accent) / 0.18);
   }
 
-  .btn {
+  /* Base button shape — applied to .btn and every .btn-* variant so a
+   * single class like className="btn-primary" renders a full button on
+   * its own (not a bare coloured rectangle). */
+  .btn,
+  .btn-primary,
+  .btn-ghost,
+  .btn-subtle,
+  .btn-danger,
+  .btn-icon {
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -320,9 +328,20 @@ body {
     white-space: nowrap;
     user-select: none;
     border: 1px solid transparent;
+    line-height: 1.2;
   }
-  .btn:active { transform: translateY(1px); }
-  .btn:disabled { opacity: 0.45; cursor: not-allowed; transform: none; }
+  .btn:active,
+  .btn-primary:active,
+  .btn-ghost:active,
+  .btn-subtle:active,
+  .btn-danger:active,
+  .btn-icon:active { transform: translateY(1px); }
+  .btn:disabled,
+  .btn-primary:disabled,
+  .btn-ghost:disabled,
+  .btn-subtle:disabled,
+  .btn-danger:disabled,
+  .btn-icon:disabled { opacity: 0.45; cursor: not-allowed; transform: none; }
 
   .btn-primary {
     background: rgb(var(--accent));

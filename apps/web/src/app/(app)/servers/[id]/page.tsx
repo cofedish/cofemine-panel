@@ -1,7 +1,7 @@
 "use client";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useParams, useRouter } from "next/navigation";
-import useSWR from "swr";
+import useSWR, { mutate } from "swr";
 import { motion } from "framer-motion";
 import { api, ApiError, fetcher } from "@/lib/api";
 import { ServerConsole } from "@/components/server-console";
@@ -82,6 +82,11 @@ export default function ServerDetailPage(): JSX.Element {
     id ? `/servers/${id}/players` : null,
     fetcher,
     { refreshInterval: 10000 }
+  );
+  const { data: iconData } = useSWR<{ data: string | null }>(
+    id ? `/servers/${id}/icon` : null,
+    fetcher,
+    { shouldRetryOnError: false, revalidateOnFocus: false }
   );
 
   if (!data) return <div className="text-ink-muted">Loading…</div>;
@@ -182,7 +187,17 @@ export default function ServerDetailPage(): JSX.Element {
           className="absolute -right-6 -bottom-8 opacity-15 pointer-events-none"
         />
         <div className="relative flex items-center gap-3 mb-5">
-          <ServerTypeIcon type={data.type} size={38} />
+          {iconData?.data ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={iconData.data}
+              alt=""
+              className="w-12 h-12 rounded-md border border-white/30 shadow-md"
+              style={{ imageRendering: "pixelated" }}
+            />
+          ) : (
+            <ServerTypeIcon type={data.type} size={38} />
+          )}
           <div>
             <div className="text-[10px] uppercase tracking-widest opacity-75">
               {meta.label}
@@ -379,9 +394,29 @@ function Overview({
  * /data/server-icon.png via the agent; itzg picks it up on next start.
  */
 function ServerIconEditor({ serverId }: { serverId: string }): JSX.Element {
+  // Load the currently-saved icon so the preview isn't empty after a
+  // page refresh. useSWR auto-updates when we POST/DELETE and mutate().
+  const { data: current } = useSWR<{ data: string | null }>(
+    `/servers/${serverId}/icon`,
+    fetcher,
+    { shouldRetryOnError: false }
+  );
   const [value, setValue] = useState<string | null>(null);
+  const [valueDirty, setValueDirty] = useState(false);
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
+
+  // Sync initial value from server when SWR loads (and user hasn't edited).
+  useEffect(() => {
+    if (!valueDirty) {
+      setValue(current?.data ?? null);
+    }
+  }, [current, valueDirty]);
+
+  function onChange(v: string | null): void {
+    setValue(v);
+    setValueDirty(true);
+  }
 
   async function save(): Promise<void> {
     if (!value) return;
@@ -389,7 +424,9 @@ function ServerIconEditor({ serverId }: { serverId: string }): JSX.Element {
     setStatus(null);
     try {
       await api.post(`/servers/${serverId}/icon`, { data: value });
-      setStatus("Icon saved. Restart the server to apply.");
+      setStatus("Icon saved.");
+      setValueDirty(false);
+      await mutate(`/servers/${serverId}/icon`);
     } catch (e) {
       setStatus(e instanceof ApiError ? e.message : String(e));
     } finally {
@@ -403,7 +440,9 @@ function ServerIconEditor({ serverId }: { serverId: string }): JSX.Element {
     try {
       await api.del(`/servers/${serverId}/icon`);
       setValue(null);
-      setStatus("Icon removed. Restart the server to apply.");
+      setValueDirty(false);
+      setStatus("Icon removed.");
+      await mutate(`/servers/${serverId}/icon`);
     } catch (e) {
       setStatus(e instanceof ApiError ? e.message : String(e));
     } finally {
@@ -422,7 +461,7 @@ function ServerIconEditor({ serverId }: { serverId: string }): JSX.Element {
       </div>
       <ImageUpload
         value={value}
-        onChange={setValue}
+        onChange={onChange}
         targetSize={64}
         previewSize={80}
         shape="square"

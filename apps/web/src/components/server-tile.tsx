@@ -5,6 +5,7 @@ import { motion } from "framer-motion";
 import { fetcher } from "@/lib/api";
 import { StatusDot } from "./status-dot";
 import { ServerTypeHero, getServerMeta } from "./server-icons";
+import { cn } from "@/lib/cn";
 import { Users, ArrowUpRight, Cpu } from "lucide-react";
 
 export interface ServerSummary {
@@ -29,6 +30,11 @@ export function ServerTile({ server }: { server: ServerSummary }): JSX.Element {
     fetcher,
     { refreshInterval: 20000 }
   );
+  const { data: icon } = useSWR<{ data: string | null }>(
+    `/servers/${server.id}/icon`,
+    fetcher,
+    { shouldRetryOnError: false, revalidateOnFocus: false }
+  );
 
   const ports = Array.isArray(server.ports) ? (server.ports as any[]) : [];
   const primary = ports[0];
@@ -51,6 +57,19 @@ export function ServerTile({ server }: { server: ServerSummary }): JSX.Element {
             <span className="absolute bottom-3 right-3 text-[10px] font-mono opacity-70">
               {server.version}
             </span>
+          )}
+          {icon?.data && (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={icon.data}
+              alt=""
+              className={cn(
+                "absolute bottom-3 left-3 w-12 h-12 rounded-md border border-white/30 shadow-md",
+                "pixel-art:image-rendering-pixelated"
+              )}
+              style={{ imageRendering: "pixelated" }}
+              draggable={false}
+            />
           )}
         </ServerTypeHero>
 
