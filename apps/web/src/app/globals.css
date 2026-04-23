@@ -157,10 +157,11 @@
   --ring: 153 27 27;
 }
 .dark.accent-lucifer {
-  --accent: 248 113 113;         /* red-400 — brighter hit on black */
-  --accent-hover: 252 165 165;   /* red-300 */
-  --accent-soft: 87 14 24;
-  --ring: 248 113 113;
+  --accent: 176 26 50;           /* deep wine — saturated crimson, not pink */
+  --accent-hover: 205 36 62;     /* a notch brighter for hover */
+  --accent-soft: 72 12 22;
+  --accent-ink: 255 255 255;
+  --ring: 205 36 62;
 }
 /* In dark+lucifer we push the base darker for the velvet feel, but keep
  * the borders clearly visible on pitch-black surfaces. */
