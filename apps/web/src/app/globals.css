@@ -223,16 +223,20 @@ body {
   font-feature-settings: "cv02", "cv03", "cv04", "cv11", "ss01";
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
-  /* Native-app feel: over static text the cursor stays as an arrow
-   * instead of the browser's default I-beam. Elements that legitimately
-   * need another cursor (inputs, links, buttons, textareas) override
-   * this below / via their own UA styles. */
+}
+
+/* Native-app feel: over static text / icons / chrome the cursor stays
+ * as an arrow, never turning into the browser's I-beam. `cursor: auto`
+ * (the UA default on paragraphs, headings, spans, etc.) would let the
+ * browser pick I-beam over text. Forcing `default` on *everything* and
+ * then re-enabling the right cursor on interactive surfaces below is
+ * the reliable way. Users can still select text — `user-select` is a
+ * separate property and stays default. */
+* {
   cursor: default;
 }
 
-/* Explicit I-beam on actual text-input surfaces — body's `cursor: default`
- * would otherwise inherit through and make typing fields read as
- * non-editable. */
+/* Explicit I-beam on actual text-input surfaces. */
 input[type="text"],
 input[type="email"],
 input[type="password"],
@@ -242,18 +246,35 @@ input[type="tel"],
 input[type="number"],
 input:not([type]),
 textarea,
-[contenteditable="true"] {
+[contenteditable="true"],
+[contenteditable="true"] * {
   cursor: text;
 }
 
 /* Clickables always show the hand pointer. */
 a[href],
+a[href] *,
 button:not(:disabled),
+button:not(:disabled) *,
 [role="button"]:not([aria-disabled="true"]),
+[role="button"]:not([aria-disabled="true"]) *,
 label[for],
+label[for] *,
 summary,
+summary *,
 select {
   cursor: pointer;
+}
+
+/* Disabled controls: not-allowed, regardless of nesting. */
+button:disabled,
+button:disabled *,
+[aria-disabled="true"],
+[aria-disabled="true"] *,
+input:disabled,
+textarea:disabled,
+select:disabled {
+  cursor: not-allowed;
 }
 
 ::selection {
