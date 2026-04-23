@@ -17,6 +17,7 @@ import { EnvForm } from "@/components/env-form";
 import { ImageUpload } from "@/components/image-upload";
 import { MemorySlider } from "@/components/memory-slider";
 import { cn } from "@/lib/cn";
+import { useT } from "@/lib/i18n";
 import {
   Check,
   ChevronLeft,
@@ -59,6 +60,19 @@ const PLAIN_TYPES = SERVER_TYPES.filter(
 const STEPS = ["Source", "Pick", "Resources", "Review"] as const;
 type Step = (typeof STEPS)[number];
 
+function stepKey(s: Step): string {
+  switch (s) {
+    case "Source":
+      return "wizard.step.source";
+    case "Pick":
+      return "wizard.step.basics";
+    case "Resources":
+      return "wizard.step.resources";
+    case "Review":
+      return "wizard.step.review";
+  }
+}
+
 /** Small curated fallback if the manifest can't be fetched. */
 const VERSION_FALLBACK = [
   "1.21.4",
@@ -78,6 +92,7 @@ const VERSION_FALLBACK = [
 
 export default function CreateServerPage(): JSX.Element {
   const router = useRouter();
+  const { t } = useT();
   const { data: nodes } = useSWR<Node[]>("/nodes", fetcher);
   const { data: integ } = useSWR<Integrations>("/integrations", fetcher);
   const { data: mcVersions } = useSWR<McVersions>(
@@ -194,11 +209,11 @@ export default function CreateServerPage(): JSX.Element {
     <div className="space-y-8 max-w-5xl">
       <PageHeader
         breadcrumbs={[
-          { label: "Dashboard", href: "/" },
-          { label: "New server" },
+          { label: t("nav.dashboard"), href: "/" },
+          { label: t("wizard.title") },
         ]}
-        title="Create server"
-        description="Servers run as sibling Docker containers using itzg/minecraft-server."
+        title={t("wizard.create")}
+        description=""
       />
 
       {/* Stepper */}
@@ -225,7 +240,7 @@ export default function CreateServerPage(): JSX.Element {
                   current ? "text-ink font-medium" : "text-ink-muted"
                 )}
               >
-                {s}
+                {t(stepKey(s))}
               </span>
               {i < STEPS.length - 1 && (
                 <span
@@ -316,7 +331,7 @@ export default function CreateServerPage(): JSX.Element {
           onClick={() => (idx === 0 ? router.back() : prev())}
           className="btn btn-ghost"
         >
-          <ChevronLeft size={15} /> {idx === 0 ? "Cancel" : "Back"}
+          <ChevronLeft size={15} /> {idx === 0 ? t("common.cancel") : t("wizard.back")}
         </button>
         {step !== "Review" ? (
           <button
@@ -325,7 +340,7 @@ export default function CreateServerPage(): JSX.Element {
             className="btn btn-primary"
             disabled={!canNext}
           >
-            Next <ChevronRight size={15} />
+            {t("wizard.next")} <ChevronRight size={15} />
           </button>
         ) : (
           <button
@@ -334,7 +349,7 @@ export default function CreateServerPage(): JSX.Element {
             className="btn btn-primary"
             disabled={busy || !canNext}
           >
-            {busy ? "Creating…" : "Create server"}
+            {busy ? t("wizard.creating") : t("wizard.create")}
           </button>
         )}
       </div>
@@ -353,6 +368,7 @@ function SourceStep({
   onPick: (s: Source) => void;
   cfEnabled: boolean;
 }): JSX.Element {
+  const { t } = useT();
   const cards: Array<{
     id: Source;
     title: string;
@@ -363,25 +379,27 @@ function SourceStep({
   }> = [
     {
       id: "plain",
-      title: "Plain server",
-      desc: "Pick a server type (Vanilla, Paper, Fabric, Forge…) and a MC version. Fast and minimal.",
-      meta: "8 types",
+      title: t("wizard.source.plain"),
+      desc: t("wizard.source.plainDesc"),
+      meta: t("wizard.source.meta.plain"),
       type: "PAPER",
     },
     {
       id: "modrinth",
-      title: "Modrinth modpack",
-      desc: "Search modpacks on modrinth.com. The runtime auto-detects loader + version from the pack.",
-      meta: "auto-detected",
+      title: t("wizard.source.modrinth"),
+      desc: t("wizard.source.modrinthDesc"),
+      meta: t("wizard.source.meta.modrinth"),
       type: "MODRINTH",
     },
     {
       id: "curseforge",
-      title: "CurseForge modpack",
-      desc: "Search modpacks on curseforge.com. Requires a CurseForge API key in Integrations.",
-      meta: cfEnabled ? "auto-detected" : "needs API key",
+      title: t("wizard.source.curseforge"),
+      desc: t("wizard.source.curseforgeDesc"),
+      meta: cfEnabled
+        ? t("wizard.source.meta.curseforgeOk")
+        : t("wizard.source.meta.curseforgeMissing"),
       type: "CURSEFORGE",
-      disabled: cfEnabled ? undefined : "Configure a CurseForge API key first.",
+      disabled: cfEnabled ? undefined : t("wizard.source.cfDisabledHint"),
     },
   ];
   return (
@@ -410,7 +428,7 @@ function SourceStep({
                 <div className="heading-md">{c.title}</div>
                 {active && (
                   <span className="chip chip-accent">
-                    <Check size={10} /> Selected
+                    <Check size={10} /> {t("wizard.source.selected")}
                   </span>
                 )}
               </div>
@@ -439,11 +457,12 @@ function PlainPickStep({
   versions: string[];
   versionsLoading: boolean;
 }): JSX.Element {
+  const { t } = useT();
   const meta = getServerMeta(type);
   return (
     <div className="tile p-7 space-y-6">
       <div className="space-y-3">
-        <h2 className="heading-md">Server type</h2>
+        <h2 className="heading-md">{t("wizard.type")}</h2>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
           {PLAIN_TYPES.map((t) => {
             const m = SERVER_TYPE_META[t as ServerTypeKey]!;
@@ -474,14 +493,14 @@ function PlainPickStep({
       <div className="divider" />
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <Field label="Minecraft version" hint="Pulled from Mojang launcher manifest">
+        <Field label={t("wizard.version")}>
           <select
             className="select"
             value={version}
             onChange={(e) => onVersion(e.target.value)}
           >
             {versionsLoading && versions.length === 0 && (
-              <option>Loading…</option>
+              <option>{t("common.loading")}</option>
             )}
             {versions.map((v) => (
               <option key={v} value={v}>
@@ -504,6 +523,7 @@ function PackPickStep({
   pack: ModpackHit | null;
   onPick: (p: ModpackHit) => void;
 }): JSX.Element {
+  const { t } = useT();
   const [query, setQuery] = useState("");
   const [gameVersion, setGameVersion] = useState("");
   const [busy, setBusy] = useState(false);
@@ -564,10 +584,13 @@ function PackPickStep({
     <div className="tile p-7 space-y-5">
       <div className="flex items-center justify-between gap-3">
         <h2 className="heading-md">
-          Browse {provider === "modrinth" ? "Modrinth" : "CurseForge"} modpacks
+          {provider === "modrinth" ? "Modrinth" : "CurseForge"} ·{" "}
+          {t("wizard.source")}
         </h2>
         {busy && (
-          <span className="text-xs text-ink-muted">Searching…</span>
+          <span className="text-xs text-ink-muted">
+            {t("content.browse.searching")}
+          </span>
         )}
       </div>
       <div className="grid grid-cols-1 md:grid-cols-[1fr_220px] gap-3">
@@ -578,7 +601,7 @@ function PackPickStep({
           />
           <input
             className="input pl-8"
-            placeholder="Search by name (type to filter)…"
+            placeholder={t("wizard.modpack.search")}
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             autoFocus
@@ -586,7 +609,7 @@ function PackPickStep({
         </div>
         <input
           className="input"
-          placeholder="Minecraft version (optional)"
+          placeholder={t("content.browse.mcVersion")}
           value={gameVersion}
           onChange={(e) => setGameVersion(e.target.value)}
         />
@@ -687,19 +710,20 @@ function ResourcesStep({
   iconDataUrl: string | null;
   setIconDataUrl: (v: string | null) => void;
 }): JSX.Element {
+  const { t } = useT();
   return (
     <div className="space-y-5">
       <div className="tile p-7 space-y-5">
-        <h2 className="heading-md">Basics</h2>
+        <h2 className="heading-md">{t("wizard.step.basics")}</h2>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <Field label="Name">
+          <Field label={t("wizard.name")}>
             <input
               className="input"
               value={name}
               onChange={(e) => setName(e.target.value)}
             />
           </Field>
-          <Field label="Description (optional)">
+          <Field label={t("wizard.description")}>
             <input
               className="input"
               value={description}
@@ -708,13 +732,13 @@ function ResourcesStep({
           </Field>
         </div>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <Field label="Node">
+          <Field label={t("tile.node")}>
             <select
               className="select"
               value={nodeId}
               onChange={(e) => setNodeId(e.target.value)}
             >
-              <option value="">— select —</option>
+              <option value="">— {t("common.loading").replace("…", "")}—</option>
               {nodes.map((n) => (
                 <option key={n.id} value={n.id}>
                   {n.name} ({n.status})
@@ -722,7 +746,7 @@ function ResourcesStep({
               ))}
             </select>
           </Field>
-          <Field label="Host port" hint="container 25565">
+          <Field label={t("wizard.resources.port")}>
             <input
               className="input"
               type="number"
@@ -733,10 +757,7 @@ function ResourcesStep({
             />
           </Field>
         </div>
-        <Field
-          label="Memory"
-          hint="JVM heap limit. Vanilla 2–4 GB, Paper 4–8 GB, modpacks 8–16 GB."
-        >
+        <Field label={t("wizard.resources.memory")}>
           <div className="pt-1">
             <MemorySlider
               value={memoryMb}
@@ -751,11 +772,9 @@ function ResourcesStep({
 
       <div className="tile p-7 space-y-5">
         <div>
-          <h2 className="heading-md">Server icon</h2>
+          <h2 className="heading-md">{t("wizard.icon")}</h2>
           <p className="text-sm text-ink-muted mt-1">
-            Optional. Shown next to the MOTD in the in-game server list.
-            Upload any image — we'll crop to a square and save as a 64×64
-            PNG after the server is created.
+            {t("wizard.iconHint")}
           </p>
         </div>
         <ImageUpload
@@ -764,19 +783,12 @@ function ResourcesStep({
           targetSize={64}
           previewSize={80}
           shape="square"
-          label="Upload icon"
-          hint="Auto-resized to 64×64 PNG. itzg picks it up automatically on first start."
         />
       </div>
 
       <div className="tile p-7 space-y-5">
         <div>
-          <h2 className="heading-md">Server configuration</h2>
-          <p className="text-sm text-ink-muted mt-1">
-            Proper controls for the itzg runtime env vars — difficulty,
-            gamemode, MOTD, world generation, mobs, JVM tuning. Expand a
-            section to edit its settings.
-          </p>
+          <h2 className="heading-md">{t("wizard.env")}</h2>
         </div>
         <EnvForm env={env} onChange={setEnv} currentType={currentType} />
       </div>
@@ -809,6 +821,7 @@ function ReviewStep({
   onEula: (v: boolean) => void;
   err: string | null;
 }): JSX.Element {
+  const { t } = useT();
   return (
     <div className="tile p-7 space-y-6">
       <div className="rounded-xl overflow-hidden">
@@ -833,7 +846,7 @@ function ReviewStep({
           )}
           <div className="min-w-0 flex-1">
             <div className="text-xs uppercase tracking-wider text-ink-muted">
-              Modpack
+              {t("content.browse.kind.modpack")}
             </div>
             <div className="font-medium truncate">{pack.name}</div>
           </div>
@@ -841,11 +854,11 @@ function ReviewStep({
       )}
 
       <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-3 text-sm">
-        <ReviewRow label="Version">{version}</ReviewRow>
-        <ReviewRow label="Memory">{memoryMb} MB</ReviewRow>
-        <ReviewRow label="Host port">{hostPort}</ReviewRow>
-        <ReviewRow label="Node">{nodeName ?? "—"}</ReviewRow>
-        <ReviewRow label="Env vars">{envCount} defined</ReviewRow>
+        <ReviewRow label={t("wizard.version")}>{version}</ReviewRow>
+        <ReviewRow label={t("wizard.resources.memory")}>{memoryMb} MB</ReviewRow>
+        <ReviewRow label={t("wizard.resources.port")}>{hostPort}</ReviewRow>
+        <ReviewRow label={t("tile.node")}>{nodeName ?? "—"}</ReviewRow>
+        <ReviewRow label={t("server.overview.env")}>{envCount}</ReviewRow>
       </dl>
 
       <div className="divider" />
@@ -858,7 +871,7 @@ function ReviewStep({
           className="mt-1"
         />
         <span>
-          I accept the{" "}
+          {t("wizard.eula")} —{" "}
           <a
             className="link"
             href="https://www.minecraft.net/en-us/eula"
@@ -867,7 +880,6 @@ function ReviewStep({
           >
             Minecraft EULA
           </a>
-          . Required to run any Minecraft server.
         </span>
       </label>
 

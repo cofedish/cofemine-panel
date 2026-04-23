@@ -251,6 +251,182 @@ const en: Dict = {
   "infra.removeIntegrationConfirm.title": "Remove key?",
   "infra.removeIntegrationConfirm.body":
     "Remove this integration key? The key will be cleared from the database.",
+
+  "auth.login.title": "Sign in",
+  "auth.login.subtitle": "Welcome back. Enter your credentials to continue.",
+  "auth.login.usernameOrEmail": "Username or email",
+  "auth.login.password": "Password",
+  "auth.login.submit": "Sign in",
+  "auth.login.submitting": "Signing in…",
+  "auth.login.failed": "Login failed",
+  "auth.shell.title": "Minecraft servers, without the yak-shaving.",
+  "auth.shell.subtitle":
+    "Create, scale, and operate containers for Paper, Vanilla, Fabric, Forge and friends — with live consoles, backups, and mod installers built in.",
+  "auth.shell.quote":
+    "Spin up Paper 1.21 in under a minute; the panel handles EULA, RCON and volumes for you.",
+  "auth.shell.cite": "Cofemine docs",
+  "auth.shell.footer": "Self-hosted · Docker-first",
+
+  "setup.title": "First-run setup",
+  "setup.subtitle": "Create the OWNER account. Runs once.",
+  "setup.email": "Email",
+  "setup.username": "Username",
+  "setup.password": "Password",
+  "setup.passwordHint": "min 8 characters",
+  "setup.submit": "Create owner account",
+  "setup.submitting": "Creating…",
+  "setup.failed": "Setup failed",
+  "setup.shell.title": "Welcome.",
+  "setup.shell.subtitle":
+    "Let's create the first account. This person becomes the OWNER and can invite others later.",
+  "setup.shell.quote":
+    "Roles are enforced at the API layer, audited in the panel, and default to least-privilege.",
+  "setup.shell.cite": "Security model",
+
+  "wizard.title": "New server",
+  "wizard.back": "Back",
+  "wizard.next": "Next",
+  "wizard.create": "Create server",
+  "wizard.creating": "Creating…",
+  "wizard.step.basics": "Basics",
+  "wizard.step.source": "Source",
+  "wizard.step.resources": "Resources",
+  "wizard.step.review": "Review",
+  "wizard.name": "Server name",
+  "wizard.description": "Description (optional)",
+  "wizard.type": "Server type",
+  "wizard.version": "Minecraft version",
+  "wizard.source": "Source",
+  "wizard.source.plain": "Plain",
+  "wizard.source.modrinth": "Modrinth pack",
+  "wizard.source.curseforge": "CurseForge pack",
+  "wizard.modpack.search": "Search packs…",
+  "wizard.modpack.picked": "Picked",
+  "wizard.modpack.clear": "Clear",
+  "wizard.resources.memory": "Memory",
+  "wizard.resources.cpu": "CPU limit",
+  "wizard.resources.cpuHint": "cores (empty = no limit)",
+  "wizard.resources.port": "Host port",
+  "wizard.eula": "Accept Minecraft EULA",
+  "wizard.eulaDesc":
+    "By checking this you agree to the Minecraft EULA. Required to boot the server.",
+  "wizard.env": "Extra environment variables",
+  "wizard.review.intro":
+    "Double-check the summary — after creation the container starts automatically if EULA is accepted.",
+  "wizard.icon": "Server icon",
+  "wizard.iconHint": "Optional — auto-resized to 64×64 PNG.",
+  "wizard.source.plainDesc":
+    "Pick a server type (Vanilla, Paper, Fabric, Forge…) and an MC version. Fast and minimal.",
+  "wizard.source.modrinthDesc":
+    "Search modpacks on modrinth.com. The runtime auto-detects loader + version from the pack.",
+  "wizard.source.curseforgeDesc":
+    "Search modpacks on curseforge.com. Requires a CurseForge API key in Integrations.",
+  "wizard.source.meta.plain": "8 types",
+  "wizard.source.meta.modrinth": "auto-detected",
+  "wizard.source.meta.curseforgeOk": "auto-detected",
+  "wizard.source.meta.curseforgeMissing": "needs API key",
+  "wizard.source.cfDisabledHint":
+    "Configure a CurseForge API key first.",
+  "wizard.source.selected": "Selected",
+
+  "settings.title": "Settings",
+  "settings.subtitle":
+    "Customize how the panel looks and behaves for your account.",
+  "settings.appearance": "Appearance",
+  "settings.profile": "Profile",
+  "settings.avatar": "Profile avatar",
+  "settings.avatarHint": "Auto-resized to 128×128 PNG before upload.",
+  "settings.saveAvatar": "Save avatar",
+  "settings.removeAvatar": "Remove avatar",
+  "settings.avatarSaved": "Avatar saved.",
+  "settings.avatarRemoved": "Avatar removed.",
+  "settings.account": "Account",
+  "settings.about": "About",
+  "settings.aboutText":
+    "Cofemine Panel v0.1.0 — self-hosted, Docker-first Minecraft control panel.",
+  "settings.username": "Username",
+  "settings.email": "Email",
+  "settings.role": "Role",
+  "settings.theme.mode": "Mode",
+  "settings.theme.accent": "Accent",
+
+  "integrations.title": "Integrations",
+  "integrations.subtitle":
+    "Providers the panel uses to search and install mods / packs. Modrinth is free and always on; CurseForge needs an API key.",
+  "integrations.modrinth.desc":
+    "Public API — enabled by default. No credentials required.",
+  "integrations.curseforge.desc":
+    "Requires a CurseForge Studios API key. Without a key, users can still upload JAR files manually.",
+  "integrations.apiKey": "API key",
+  "integrations.apiKeyPlaceholder":
+    "cf-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+  "integrations.apiKeySaved":
+    "Saved encrypted in the database — not readable after save.",
+  "integrations.save": "Save",
+  "integrations.saving": "Saving…",
+  "integrations.remove": "Remove",
+  "integrations.enabled": "Enabled",
+  "integrations.disabled": "Disabled",
+  "integrations.getKey": "Get a key",
+
+  "backups.create": "Create backup",
+  "backups.creating": "Creating…",
+  "backups.restore": "Restore",
+  "backups.delete": "Delete",
+  "backups.empty": "No backups yet. Click Create backup to snapshot /data.",
+  "backups.name": "Name",
+  "backups.size": "Size",
+  "backups.status": "Status",
+  "backups.created": "Created",
+  "backups.finished": "Finished",
+
+  "schedules.title": "Schedules",
+  "schedules.subtitle":
+    "Cron-driven actions: restarts, backups, and command runs.",
+  "schedules.add": "Add schedule",
+  "schedules.name": "Name",
+  "schedules.cron": "Cron",
+  "schedules.action": "Action",
+  "schedules.nextRun": "Next run",
+  "schedules.enabled": "Enabled",
+  "schedules.empty": "No schedules yet.",
+
+  "properties.title": "server.properties",
+  "properties.subtitle":
+    "Typed editor with inline hints. Changes are written back to the file and require a restart to take effect.",
+  "properties.save": "Save properties",
+  "properties.saving": "Saving…",
+  "properties.saved": "Properties saved.",
+  "properties.filter": "Filter…",
+
+  "files.title": "File manager",
+  "files.subtitle": "Browse and edit /data on disk.",
+  "files.empty": "This folder is empty.",
+  "files.open": "Open",
+  "files.save": "Save",
+  "files.saving": "Saving…",
+  "files.truncated":
+    "File is too large to preview in the browser. Use SSH or the agent API to edit.",
+  "files.back": "Back",
+
+  "console.title": "Console",
+  "console.connected": "connected",
+  "console.disconnected": "disconnected",
+  "console.waiting": "Waiting for output…",
+  "console.send": "Send",
+  "console.placeholder": "say Hello, world",
+
+  "activity.title": "Activity log",
+  "activity.empty": "No events yet.",
+  "activity.actor": "Actor",
+  "activity.action": "Action",
+  "activity.resource": "Resource",
+  "activity.when": "When",
+  "activity.ip": "IP",
+
+  "pageHeader.admin": "Administration",
+  "pageHeader.adminSub":
+    "Manage panel users and review activity. Server-specific logs live on each server's page.",
 };
 
 const ru: Dict = {
@@ -486,6 +662,185 @@ const ru: Dict = {
   "infra.removeIntegrationConfirm.title": "Удалить ключ?",
   "infra.removeIntegrationConfirm.body":
     "Удалить этот ключ интеграции? Он будет удалён из базы.",
+
+  "auth.login.title": "Вход",
+  "auth.login.subtitle": "С возвращением. Введите данные для входа.",
+  "auth.login.usernameOrEmail": "Логин или email",
+  "auth.login.password": "Пароль",
+  "auth.login.submit": "Войти",
+  "auth.login.submitting": "Вход…",
+  "auth.login.failed": "Ошибка входа",
+  "auth.shell.title": "Minecraft-серверы без лишней возни.",
+  "auth.shell.subtitle":
+    "Создавайте, масштабируйте и администрируйте контейнеры Paper, Vanilla, Fabric, Forge и других — с живой консолью, бэкапами и установщиком модов из коробки.",
+  "auth.shell.quote":
+    "Поднимите Paper 1.21 меньше чем за минуту — панель сама подпишет EULA, включит RCON и примонтирует тома.",
+  "auth.shell.cite": "Документация Cofemine",
+  "auth.shell.footer": "Self-hosted · Docker-first",
+
+  "setup.title": "Первичная настройка",
+  "setup.subtitle":
+    "Создание аккаунта владельца. Запускается один раз.",
+  "setup.email": "Email",
+  "setup.username": "Логин",
+  "setup.password": "Пароль",
+  "setup.passwordHint": "минимум 8 символов",
+  "setup.submit": "Создать аккаунт владельца",
+  "setup.submitting": "Создаю…",
+  "setup.failed": "Не удалось завершить настройку",
+  "setup.shell.title": "Добро пожаловать.",
+  "setup.shell.subtitle":
+    "Давайте создадим первый аккаунт. Этот пользователь станет OWNER и сможет приглашать остальных.",
+  "setup.shell.quote":
+    "Роли проверяются на уровне API, пишутся в аудит и по умолчанию минимальны.",
+  "setup.shell.cite": "Модель безопасности",
+
+  "wizard.title": "Новый сервер",
+  "wizard.back": "Назад",
+  "wizard.next": "Далее",
+  "wizard.create": "Создать сервер",
+  "wizard.creating": "Создаю…",
+  "wizard.step.basics": "Основное",
+  "wizard.step.source": "Источник",
+  "wizard.step.resources": "Ресурсы",
+  "wizard.step.review": "Обзор",
+  "wizard.name": "Имя сервера",
+  "wizard.description": "Описание (необязательно)",
+  "wizard.type": "Тип сервера",
+  "wizard.version": "Версия Minecraft",
+  "wizard.source": "Источник",
+  "wizard.source.plain": "Обычный",
+  "wizard.source.modrinth": "Сборка Modrinth",
+  "wizard.source.curseforge": "Сборка CurseForge",
+  "wizard.modpack.search": "Поиск сборок…",
+  "wizard.modpack.picked": "Выбрано",
+  "wizard.modpack.clear": "Очистить",
+  "wizard.resources.memory": "Память",
+  "wizard.resources.cpu": "Лимит CPU",
+  "wizard.resources.cpuHint": "ядер (пусто = без лимита)",
+  "wizard.resources.port": "Порт хоста",
+  "wizard.eula": "Принять Minecraft EULA",
+  "wizard.eulaDesc":
+    "Отметка подтверждает согласие с Minecraft EULA. Обязательно для запуска сервера.",
+  "wizard.env": "Дополнительные переменные окружения",
+  "wizard.review.intro":
+    "Проверьте данные — после создания контейнер стартует автоматически, если EULA принята.",
+  "wizard.icon": "Иконка сервера",
+  "wizard.iconHint": "Необязательно — автоматически масштабируется до 64×64 PNG.",
+  "wizard.source.plainDesc":
+    "Выберите тип сервера (Vanilla, Paper, Fabric, Forge…) и версию MC. Быстро и минимально.",
+  "wizard.source.modrinthDesc":
+    "Поиск сборок на modrinth.com. Загрузчик и версия определяются из сборки автоматически.",
+  "wizard.source.curseforgeDesc":
+    "Поиск сборок на curseforge.com. Нужен API-ключ CurseForge (см. Интеграции).",
+  "wizard.source.meta.plain": "8 типов",
+  "wizard.source.meta.modrinth": "автоопределение",
+  "wizard.source.meta.curseforgeOk": "автоопределение",
+  "wizard.source.meta.curseforgeMissing": "нужен API-ключ",
+  "wizard.source.cfDisabledHint":
+    "Сначала настройте API-ключ CurseForge.",
+  "wizard.source.selected": "Выбрано",
+
+  "settings.title": "Настройки",
+  "settings.subtitle":
+    "Настройте внешний вид и поведение панели под свой аккаунт.",
+  "settings.appearance": "Внешний вид",
+  "settings.profile": "Профиль",
+  "settings.avatar": "Аватар профиля",
+  "settings.avatarHint":
+    "Автоматически масштабируется до 128×128 PNG перед загрузкой.",
+  "settings.saveAvatar": "Сохранить аватар",
+  "settings.removeAvatar": "Удалить аватар",
+  "settings.avatarSaved": "Аватар сохранён.",
+  "settings.avatarRemoved": "Аватар удалён.",
+  "settings.account": "Аккаунт",
+  "settings.about": "О панели",
+  "settings.aboutText":
+    "Cofemine Panel v0.1.0 — self-hosted, Docker-first панель Minecraft.",
+  "settings.username": "Логин",
+  "settings.email": "Email",
+  "settings.role": "Роль",
+  "settings.theme.mode": "Режим",
+  "settings.theme.accent": "Акцент",
+
+  "integrations.title": "Интеграции",
+  "integrations.subtitle":
+    "Провайдеры, через которые панель ищет и ставит моды и сборки. Modrinth бесплатный и всегда включён; для CurseForge нужен API-ключ.",
+  "integrations.modrinth.desc":
+    "Публичный API — включён по умолчанию. Не требует авторизации.",
+  "integrations.curseforge.desc":
+    "Требуется API-ключ CurseForge Studios. Без ключа можно вручную загружать JAR-файлы.",
+  "integrations.apiKey": "API-ключ",
+  "integrations.apiKeyPlaceholder":
+    "cf-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+  "integrations.apiKeySaved":
+    "Сохранён в БД зашифрованным — после сохранения не читается.",
+  "integrations.save": "Сохранить",
+  "integrations.saving": "Сохраняю…",
+  "integrations.remove": "Удалить",
+  "integrations.enabled": "Включено",
+  "integrations.disabled": "Выключено",
+  "integrations.getKey": "Получить ключ",
+
+  "backups.create": "Создать бэкап",
+  "backups.creating": "Создаю…",
+  "backups.restore": "Восстановить",
+  "backups.delete": "Удалить",
+  "backups.empty":
+    "Бэкапов пока нет. Нажмите «Создать бэкап», чтобы сделать снимок /data.",
+  "backups.name": "Имя",
+  "backups.size": "Размер",
+  "backups.status": "Статус",
+  "backups.created": "Создан",
+  "backups.finished": "Завершён",
+
+  "schedules.title": "Расписания",
+  "schedules.subtitle":
+    "Cron-задачи: перезапуски, бэкапы и запуск команд.",
+  "schedules.add": "Добавить задание",
+  "schedules.name": "Имя",
+  "schedules.cron": "Cron",
+  "schedules.action": "Действие",
+  "schedules.nextRun": "Следующий запуск",
+  "schedules.enabled": "Включено",
+  "schedules.empty": "Расписаний пока нет.",
+
+  "properties.title": "server.properties",
+  "properties.subtitle":
+    "Типизированный редактор с подсказками. Изменения пишутся в файл и применяются после перезапуска.",
+  "properties.save": "Сохранить",
+  "properties.saving": "Сохраняю…",
+  "properties.saved": "Свойства сохранены.",
+  "properties.filter": "Фильтр…",
+
+  "files.title": "Файловый менеджер",
+  "files.subtitle": "Просмотр и редактирование /data на диске.",
+  "files.empty": "Папка пуста.",
+  "files.open": "Открыть",
+  "files.save": "Сохранить",
+  "files.saving": "Сохраняю…",
+  "files.truncated":
+    "Файл слишком большой, чтобы показать в браузере. Используйте SSH или API агента.",
+  "files.back": "Назад",
+
+  "console.title": "Консоль",
+  "console.connected": "подключено",
+  "console.disconnected": "отключено",
+  "console.waiting": "Жду вывод…",
+  "console.send": "Отправить",
+  "console.placeholder": "say Hello, world",
+
+  "activity.title": "Лог действий",
+  "activity.empty": "Событий пока нет.",
+  "activity.actor": "Кто",
+  "activity.action": "Действие",
+  "activity.resource": "Ресурс",
+  "activity.when": "Когда",
+  "activity.ip": "IP",
+
+  "pageHeader.admin": "Администрирование",
+  "pageHeader.adminSub":
+    "Управление пользователями панели и просмотр активности. Логи конкретных серверов — на странице сервера.",
 };
 
 const DICTS: Record<Lang, Dict> = { en, ru };

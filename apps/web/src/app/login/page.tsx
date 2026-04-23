@@ -4,9 +4,11 @@ import { useRouter } from "next/navigation";
 import { api, ApiError } from "@/lib/api";
 import { AuthShell } from "@/components/auth-shell";
 import { LogoMark, Wordmark } from "@/components/logo";
+import { useT } from "@/lib/i18n";
 
 export default function LoginPage(): JSX.Element {
   const router = useRouter();
+  const { t } = useT();
   const [usernameOrEmail, setU] = useState("");
   const [password, setP] = useState("");
   const [err, setErr] = useState<string | null>(null);
@@ -29,7 +31,7 @@ export default function LoginPage(): JSX.Element {
       await api.post("/auth/login", { usernameOrEmail, password });
       router.push("/");
     } catch (e) {
-      setErr(e instanceof ApiError ? e.message : "Login failed");
+      setErr(e instanceof ApiError ? e.message : t("auth.login.failed"));
     } finally {
       setBusy(false);
     }
@@ -37,10 +39,10 @@ export default function LoginPage(): JSX.Element {
 
   return (
     <AuthShell
-      title="Minecraft servers, without the yak-shaving."
-      subtitle="Create, scale, and operate containers for Paper, Vanilla, Fabric, Forge and friends — with live consoles, backups, and mod installers built in."
-      quote="Spin up Paper 1.21 in under a minute; the panel handles EULA, RCON and volumes for you."
-      cite="Cofemine docs"
+      title={t("auth.shell.title")}
+      subtitle={t("auth.shell.subtitle")}
+      quote={t("auth.shell.quote")}
+      cite={t("auth.shell.cite")}
     >
       <form onSubmit={submit} className="space-y-5">
         <div className="lg:hidden flex items-center gap-2.5 mb-2">
@@ -51,16 +53,16 @@ export default function LoginPage(): JSX.Element {
         </div>
 
         <div>
-          <h1 className="heading-xl">Sign in</h1>
+          <h1 className="heading-xl">{t("auth.login.title")}</h1>
           <p className="text-sm text-ink-secondary mt-1.5">
-            Welcome back. Enter your credentials to continue.
+            {t("auth.login.subtitle")}
           </p>
         </div>
 
         <div className="space-y-4">
           <div className="space-y-1.5">
             <label className="text-xs font-medium text-ink-secondary">
-              Username or email
+              {t("auth.login.usernameOrEmail")}
             </label>
             <input
               className="input"
@@ -72,7 +74,7 @@ export default function LoginPage(): JSX.Element {
           </div>
           <div className="space-y-1.5">
             <label className="text-xs font-medium text-ink-secondary">
-              Password
+              {t("auth.login.password")}
             </label>
             <input
               className="input"
@@ -93,7 +95,7 @@ export default function LoginPage(): JSX.Element {
           className="btn btn-primary w-full"
           type="submit"
         >
-          {busy ? "Signing in…" : "Sign in"}
+          {busy ? t("auth.login.submitting") : t("auth.login.submit")}
         </button>
       </form>
     </AuthShell>

@@ -2,6 +2,7 @@
 import { motion } from "framer-motion";
 import type { ReactNode } from "react";
 import { LogoMark, Wordmark } from "./logo";
+import { useT } from "@/lib/i18n";
 
 /**
  * Split-screen auth layout: left-hand brand panel (gradient + grid),
@@ -20,6 +21,7 @@ export function AuthShell({
   quote?: string;
   cite?: string;
 }): JSX.Element {
+  const { t } = useT();
   return (
     <div className="min-h-screen flex">
       {/* Brand panel */}
@@ -60,7 +62,7 @@ export function AuthShell({
         </div>
 
         <div className="relative text-xs text-white/60 flex items-center gap-4">
-          <span>Self-hosted · Docker-first</span>
+          <span>{t("auth.shell.footer")}</span>
           <span>v0.1.0</span>
         </div>
       </aside>

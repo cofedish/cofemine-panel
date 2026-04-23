@@ -6,6 +6,7 @@ import { AppearancePanel } from "@/components/appearance-switcher";
 import { ImageUpload } from "@/components/image-upload";
 import { User, Palette, Info, ImageIcon } from "lucide-react";
 import { useState } from "react";
+import { useT } from "@/lib/i18n";
 
 type Me = {
   id: string;
@@ -17,36 +18,34 @@ type Me = {
 
 export default function SettingsPage(): JSX.Element {
   const { data } = useSWR<Me>("/auth/me", fetcher);
+  const { t } = useT();
 
   return (
     <div className="space-y-8 max-w-4xl">
       <PageHeader
-        title="Settings"
-        description="Personal preferences and appearance."
+        title={t("settings.title")}
+        description={t("settings.subtitle")}
       />
 
-      <Section icon={<User size={16} />} title="Account">
+      <Section icon={<User size={16} />} title={t("settings.account")}>
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
-          <Field label="Username" value={data?.username} />
-          <Field label="Email" value={data?.email} />
-          <Field label="Role" value={data?.role} />
+          <Field label={t("settings.username")} value={data?.username} />
+          <Field label={t("settings.email")} value={data?.email} />
+          <Field label={t("settings.role")} value={data?.role} />
         </div>
       </Section>
 
-      <Section icon={<ImageIcon size={16} />} title="Avatar">
+      <Section icon={<ImageIcon size={16} />} title={t("settings.avatar")}>
         <AvatarEditor current={data?.avatar ?? null} />
       </Section>
 
-      <Section icon={<Palette size={16} />} title="Appearance">
+      <Section icon={<Palette size={16} />} title={t("settings.appearance")}>
         <AppearancePanel />
       </Section>
 
-      <Section icon={<Info size={16} />} title="About">
+      <Section icon={<Info size={16} />} title={t("settings.about")}>
         <div className="text-sm text-ink-secondary leading-relaxed">
-          <b className="text-ink">Cofemine Panel</b> v0.1.0 — self-hosted,
-          Docker-first Minecraft control panel. See the <code className="kbd">docs/</code>{" "}
-          folder for architecture, deployment, API reference and the security
-          model.
+          {t("settings.aboutText")}
         </div>
       </Section>
     </div>
@@ -54,6 +53,7 @@ export default function SettingsPage(): JSX.Element {
 }
 
 function AvatarEditor({ current }: { current: string | null }): JSX.Element {
+  const { t } = useT();
   const [value, setValue] = useState<string | null>(current);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -80,8 +80,6 @@ function AvatarEditor({ current }: { current: string | null }): JSX.Element {
         targetSize={128}
         previewSize={96}
         shape="round"
-        label="Upload avatar"
-        hint="Image will be cropped to a square and stored as a 128×128 PNG."
       />
       {err && (
         <div className="text-sm text-[rgb(var(--danger))]">{err}</div>
@@ -92,7 +90,7 @@ function AvatarEditor({ current }: { current: string | null }): JSX.Element {
           onClick={save}
           disabled={!dirty || busy}
         >
-          {busy ? "Saving…" : "Save avatar"}
+          {busy ? t("integrations.saving") : t("settings.saveAvatar")}
         </button>
         {dirty && (
           <button
@@ -102,7 +100,7 @@ function AvatarEditor({ current }: { current: string | null }): JSX.Element {
               setErr(null);
             }}
           >
-            Cancel
+            {t("common.cancel")}
           </button>
         )}
       </div>

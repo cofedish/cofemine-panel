@@ -4,9 +4,11 @@ import { useRouter } from "next/navigation";
 import { api, ApiError } from "@/lib/api";
 import { AuthShell } from "@/components/auth-shell";
 import { LogoMark, Wordmark } from "@/components/logo";
+import { useT } from "@/lib/i18n";
 
 export default function SetupPage(): JSX.Element {
   const router = useRouter();
+  const { t } = useT();
   const [email, setEmail] = useState("");
   const [username, setU] = useState("");
   const [password, setP] = useState("");
@@ -21,7 +23,7 @@ export default function SetupPage(): JSX.Element {
       await api.post("/auth/setup", { email, username, password });
       router.push("/");
     } catch (e) {
-      setErr(e instanceof ApiError ? e.message : "Setup failed");
+      setErr(e instanceof ApiError ? e.message : t("setup.failed"));
     } finally {
       setBusy(false);
     }
@@ -29,10 +31,10 @@ export default function SetupPage(): JSX.Element {
 
   return (
     <AuthShell
-      title="Welcome."
-      subtitle="Let's create the first account. This person becomes the OWNER and can invite others later."
-      quote="Roles are enforced at the API layer, audited in the panel, and default to least-privilege."
-      cite="Security model"
+      title={t("setup.shell.title")}
+      subtitle={t("setup.shell.subtitle")}
+      quote={t("setup.shell.quote")}
+      cite={t("setup.shell.cite")}
     >
       <form onSubmit={submit} className="space-y-5">
         <div className="lg:hidden flex items-center gap-2.5 mb-2">
@@ -43,16 +45,16 @@ export default function SetupPage(): JSX.Element {
         </div>
 
         <div>
-          <h1 className="heading-xl">First-run setup</h1>
+          <h1 className="heading-xl">{t("setup.title")}</h1>
           <p className="text-sm text-ink-secondary mt-1.5">
-            Create the OWNER account. Runs once.
+            {t("setup.subtitle")}
           </p>
         </div>
 
         <div className="space-y-4">
           <div className="space-y-1.5">
             <label className="text-xs font-medium text-ink-secondary">
-              Email
+              {t("setup.email")}
             </label>
             <input
               type="email"
@@ -64,7 +66,7 @@ export default function SetupPage(): JSX.Element {
           </div>
           <div className="space-y-1.5">
             <label className="text-xs font-medium text-ink-secondary">
-              Username
+              {t("setup.username")}
             </label>
             <input
               className="input"
@@ -75,7 +77,7 @@ export default function SetupPage(): JSX.Element {
           </div>
           <div className="space-y-1.5">
             <label className="text-xs font-medium text-ink-secondary">
-              Password
+              {t("setup.password")}
             </label>
             <input
               type="password"
@@ -85,7 +87,7 @@ export default function SetupPage(): JSX.Element {
               value={password}
               onChange={(e) => setP(e.target.value)}
             />
-            <div className="text-xs text-ink-muted">min 8 characters</div>
+            <div className="text-xs text-ink-muted">{t("setup.passwordHint")}</div>
           </div>
         </div>
 
@@ -98,7 +100,7 @@ export default function SetupPage(): JSX.Element {
           className="btn btn-primary w-full"
           type="submit"
         >
-          {busy ? "Creating…" : "Create owner account"}
+          {busy ? t("setup.submitting") : t("setup.submit")}
         </button>
       </form>
     </AuthShell>

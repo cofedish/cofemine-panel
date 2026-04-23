@@ -68,9 +68,9 @@ export function ServerBackups({ serverId }: { serverId: string }): JSX.Element {
   return (
     <div className="card">
       <div className="flex items-center justify-between px-4 py-3 border-b border-line">
-        <h3 className="font-medium">Backups</h3>
+        <h3 className="font-medium">{t("server.tabs.backups")}</h3>
         <button className="btn-primary" onClick={create} disabled={busy}>
-          {busy ? "Creating…" : "Create backup"}
+          {busy ? t("backups.creating") : t("backups.create")}
         </button>
       </div>
       {data && data.length > 0 ? (
@@ -95,20 +95,20 @@ export function ServerBackups({ serverId }: { serverId: string }): JSX.Element {
                 onClick={() => restore(b.id)}
                 disabled={b.status !== "success"}
               >
-                restore
+                {t("backups.restore").toLowerCase()}
               </button>
               <button
                 className="text-xs text-danger hover:underline"
                 onClick={() => remove(b.id, b.name)}
               >
-                delete
+                {t("backups.delete").toLowerCase()}
               </button>
             </li>
           ))}
         </ul>
       ) : (
         <div className="p-10 text-center text-ink-muted">
-          No backups yet. Click <b>Create backup</b> to snapshot the world + configs.
+          {t("backups.empty")}
         </div>
       )}
     </div>

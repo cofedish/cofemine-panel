@@ -7,6 +7,7 @@ import { PageHeader } from "@/components/page-header";
 import { Stagger, StaggerItem } from "@/components/motion";
 import { Drawer } from "@/components/drawer";
 import { Check, Package, Key, ExternalLink, Sparkles } from "lucide-react";
+import { useT } from "@/lib/i18n";
 
 type Integrations = {
   providers: {
@@ -47,6 +48,7 @@ const DEFS: IntegrationDef[] = [
 
 export default function IntegrationsPage(): JSX.Element {
   const { data } = useSWR<Integrations>("/integrations", fetcher);
+  const { t } = useT();
   const [openKey, setOpenKey] = useState<"modrinth" | "curseforge" | null>(
     null
   );
@@ -54,8 +56,8 @@ export default function IntegrationsPage(): JSX.Element {
   return (
     <div className="space-y-8">
       <PageHeader
-        title="Integrations"
-        description="Connect external content sources. Providers expose a unified search and install flow across all your servers."
+        title={t("integrations.title")}
+        description={t("integrations.subtitle")}
       />
 
       <Stagger className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
@@ -102,6 +104,7 @@ function IntegrationCard({
   enabled: boolean;
   onOpen: () => void;
 }): JSX.Element {
+  const { t } = useT();
   return (
     <motion.button
       type="button"
@@ -134,7 +137,8 @@ function IntegrationCard({
           <span
             className={`chip ${enabled ? "chip-success" : "chip-warning"}`}
           >
-            {enabled && <Check size={10} />} {enabled ? "Enabled" : "Setup"}
+            {enabled && <Check size={10} />}{" "}
+            {enabled ? t("integrations.enabled") : t("integrations.disabled")}
           </span>
         </div>
         <p className="text-sm text-ink-secondary mt-3 flex-1">
@@ -171,22 +175,11 @@ function ComingSoonCard(): JSX.Element {
 }
 
 function ModrinthDetails(): JSX.Element {
+  const { t } = useT();
   return (
     <div className="space-y-5">
-      <Row
-        icon={<Package size={14} />}
-        label="Project types"
-        value="mods, modpacks, plugins, datapacks, resourcepacks, shaders"
-      />
-      <Row
-        icon={<Key size={14} />}
-        label="Authentication"
-        value="None — public API"
-      />
-      <div className="divider" />
       <p className="text-sm text-ink-secondary leading-relaxed">
-        Modpacks are applied via the runtime's <code className="kbd">MODRINTH_PROJECT</code>{" "}
-        env var. The server refetches the pack on next start — no manual unzip.
+        {t("integrations.modrinth.desc")}
       </p>
       <a
         href="https://modrinth.com"
@@ -194,13 +187,14 @@ function ModrinthDetails(): JSX.Element {
         rel="noreferrer"
         className="link text-sm inline-flex items-center gap-1"
       >
-        Visit modrinth.com <ExternalLink size={12} />
+        modrinth.com <ExternalLink size={12} />
       </a>
     </div>
   );
 }
 
 function CurseForgeDetails(): JSX.Element {
+  const { t } = useT();
   const [apiKey, setApiKey] = useState("");
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
@@ -213,7 +207,7 @@ function CurseForgeDetails(): JSX.Element {
     try {
       await api.patch(`/integrations/curseforge.apiKey`, { value: apiKey });
       setApiKey("");
-      setMsg("Saved.");
+      setMsg(t("common.success"));
       mutate("/integrations");
     } catch (err) {
       setMsg(err instanceof ApiError ? err.message : String(err));
@@ -234,23 +228,16 @@ function CurseForgeDetails(): JSX.Element {
           className={`chip ${enabled ? "chip-success" : "chip-warning"} !h-6 px-2.5`}
         >
           {enabled && <Check size={10} />}
-          {enabled ? "Configured" : "Not configured"}
+          {enabled ? t("integrations.enabled") : t("integrations.disabled")}
         </span>
       </div>
-      <Row
-        icon={<Package size={14} />}
-        label="Project types"
-        value="mods, modpacks, plugins"
-      />
-      <Row
-        icon={<Key size={14} />}
-        label="Authentication"
-        value="API key required"
-      />
+      <p className="text-sm text-ink-secondary">
+        {t("integrations.curseforge.desc")}
+      </p>
       <div className="divider" />
       <div className="space-y-2">
         <label className="text-xs font-medium text-ink-secondary">
-          API key
+          {t("integrations.apiKey")}
         </label>
         <input
           className="input font-mono"
@@ -265,11 +252,11 @@ function CurseForgeDetails(): JSX.Element {
             disabled={!apiKey || busy}
             onClick={save}
           >
-            Save
+            {busy ? t("integrations.saving") : t("integrations.save")}
           </button>
           {enabled && (
             <button className="btn btn-ghost" onClick={clear}>
-              Remove
+              {t("integrations.remove")}
             </button>
           )}
         </div>
@@ -278,16 +265,16 @@ function CurseForgeDetails(): JSX.Element {
         )}
       </div>
       <p className="text-xs text-ink-muted">
-        Get a key at{" "}
         <a
           className="link"
           href="https://console.curseforge.com/"
           target="_blank"
           rel="noreferrer"
         >
-          console.curseforge.com
+          {t("integrations.getKey")}
         </a>
-        . It's encrypted server-side before being stored.
+        {" — "}
+        {t("integrations.apiKeySaved")}
       </p>
     </div>
   );

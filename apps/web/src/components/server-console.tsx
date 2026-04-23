@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
+import { useT } from "@/lib/i18n";
 
 /**
  * Live console. Opens a WebSocket to the panel-api, which proxies to the
@@ -11,6 +12,7 @@ import { useEffect, useRef, useState } from "react";
  * screen above a freshly booted "Starting server…" which is confusing.
  */
 export function ServerConsole({ serverId }: { serverId: string }): JSX.Element {
+  const { t } = useT();
   const [lines, setLines] = useState<string[]>([]);
   const [cmd, setCmd] = useState("");
   const [connected, setConnected] = useState(false);
@@ -85,9 +87,9 @@ export function ServerConsole({ serverId }: { serverId: string }): JSX.Element {
   return (
     <div className="card overflow-hidden">
       <div className="flex items-center justify-between px-4 py-2 border-b border-line text-xs">
-        <span>Console</span>
+        <span>{t("console.title")}</span>
         <span className={connected ? "text-accent" : "text-ink-muted"}>
-          {connected ? "connected" : "disconnected"}
+          {connected ? t("console.connected") : t("console.disconnected")}
         </span>
       </div>
       <div
@@ -95,7 +97,7 @@ export function ServerConsole({ serverId }: { serverId: string }): JSX.Element {
         className="font-mono text-xs whitespace-pre-wrap bg-base p-4 h-[480px] overflow-auto"
       >
         {lines.length === 0 ? (
-          <div className="text-ink-muted">Waiting for output…</div>
+          <div className="text-ink-muted">{t("console.waiting")}</div>
         ) : (
           lines.join("")
         )}
@@ -103,7 +105,7 @@ export function ServerConsole({ serverId }: { serverId: string }): JSX.Element {
       <div className="p-3 border-t border-line flex gap-2">
         <input
           className="input font-mono text-xs"
-          placeholder="say Hello, world"
+          placeholder={t("console.placeholder")}
           value={cmd}
           onChange={(e) => setCmd(e.target.value)}
           onKeyDown={(e) => {
@@ -111,7 +113,7 @@ export function ServerConsole({ serverId }: { serverId: string }): JSX.Element {
           }}
         />
         <button className="btn-primary" onClick={send} disabled={!connected}>
-          Send
+          {t("console.send")}
         </button>
       </div>
     </div>

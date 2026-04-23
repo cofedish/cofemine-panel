@@ -2,6 +2,7 @@
 import useSWR, { mutate } from "swr";
 import { useState } from "react";
 import { api, fetcher } from "@/lib/api";
+import { useT } from "@/lib/i18n";
 
 type Schedule = {
   id: string;
@@ -18,6 +19,7 @@ export function ServerSchedules({
 }: {
   serverId: string;
 }): JSX.Element {
+  const { t } = useT();
   const { data } = useSWR<Schedule[]>(
     `/servers/${serverId}/schedules`,
     fetcher
@@ -45,11 +47,11 @@ export function ServerSchedules({
   return (
     <div className="space-y-4">
       <div className="card p-5 space-y-3">
-        <h3 className="font-medium">New schedule</h3>
+        <h3 className="font-medium">{t("schedules.add")}</h3>
         <div className="grid grid-cols-4 gap-3">
           <input
             className="input"
-            placeholder="Name"
+            placeholder={t("schedules.name")}
             value={name}
             onChange={(e) => setName(e.target.value)}
           />
@@ -84,13 +86,13 @@ export function ServerSchedules({
           />
         </div>
         <button className="btn-primary" onClick={create}>
-          Add schedule
+          {t("schedules.add")}
         </button>
       </div>
 
       <div className="card">
         <div className="px-4 py-3 border-b border-line font-medium">
-          Active schedules
+          {t("schedules.title")}
         </div>
         {data && data.length > 0 ? (
           <ul className="divide-y divide-line">
@@ -107,20 +109,22 @@ export function ServerSchedules({
                   </div>
                 </div>
                 <span className="badge badge-muted">
-                  {s.enabled ? "enabled" : "disabled"}
+                  {s.enabled
+                    ? t("integrations.enabled").toLowerCase()
+                    : t("integrations.disabled").toLowerCase()}
                 </span>
                 <button
                   className="text-xs text-danger hover:underline"
                   onClick={() => remove(s.id)}
                 >
-                  remove
+                  {t("common.delete").toLowerCase()}
                 </button>
               </li>
             ))}
           </ul>
         ) : (
           <div className="p-6 text-center text-ink-muted text-sm">
-            No schedules. Common example: <code>0 4 * * *</code> for nightly backups.
+            {t("schedules.empty")}
           </div>
         )}
       </div>

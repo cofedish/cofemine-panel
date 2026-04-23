@@ -86,14 +86,14 @@ export function ServerFiles({ serverId }: { serverId: string }): JSX.Element {
             disabled={!dirty}
             onClick={save}
           >
-            <Save size={14} /> Save
+            <Save size={14} /> {t("files.save")}
           </button>
         )}
       </div>
       {data?.kind === "dir" && (
         <ul className="divide-y divide-line text-sm">
           {data.entries.length === 0 && (
-            <li className="px-4 py-6 text-ink-muted">Empty directory</li>
+            <li className="px-4 py-6 text-ink-muted">{t("files.empty")}</li>
           )}
           {data.entries.map((e) => (
             <li
@@ -115,7 +115,7 @@ export function ServerFiles({ serverId }: { serverId: string }): JSX.Element {
                 className="text-danger text-xs hover:underline"
                 onClick={() => remove(e.name, e.isDir)}
               >
-                delete
+                {t("common.delete").toLowerCase()}
               </button>
             </li>
           ))}
@@ -125,7 +125,7 @@ export function ServerFiles({ serverId }: { serverId: string }): JSX.Element {
         <div>
           {data.truncated ? (
             <div className="p-6 text-sm text-ink-muted">
-              File too large to edit in browser ({data.size} bytes).
+              {t("files.truncated")}
             </div>
           ) : (
             <textarea
@@ -141,7 +141,7 @@ export function ServerFiles({ serverId }: { serverId: string }): JSX.Element {
       )}
       {data?.kind === "missing" && (
         <div className="p-6 text-sm text-ink-muted">
-          File does not exist yet. Start the server once to generate default files.
+          {t("files.empty")}
         </div>
       )}
     </div>

@@ -5,6 +5,7 @@ import { motion } from "framer-motion";
 import { Sun, Moon, Monitor, Check } from "lucide-react";
 import { ACCENTS, useAccent, type Accent } from "./theme-provider";
 import { cn } from "@/lib/cn";
+import { useT } from "@/lib/i18n";
 
 const ACCENT_PREVIEW: Record<Accent, { label: string; hex: string }> = {
   emerald: { label: "Emerald", hex: "#059669" },
@@ -23,37 +24,38 @@ const ACCENT_PREVIEW: Record<Accent, { label: string; hex: string }> = {
 export function AppearancePanel(): JSX.Element {
   const { theme, setTheme } = useTheme();
   const { accent, setAccent } = useAccent();
+  const { t } = useT();
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
 
   return (
     <div className="space-y-6">
       <div>
-        <h3 className="font-medium mb-3">Mode</h3>
+        <h3 className="font-medium mb-3">{t("settings.theme.mode")}</h3>
         <div className="grid grid-cols-3 gap-3 max-w-xl">
           <ModeTile
             active={mounted && theme === "light"}
             onClick={() => setTheme("light")}
             icon={<Sun size={16} />}
-            label="Light"
+            label={t("theme.light")}
           />
           <ModeTile
             active={mounted && theme === "dark"}
             onClick={() => setTheme("dark")}
             icon={<Moon size={16} />}
-            label="Dark"
+            label={t("theme.dark")}
           />
           <ModeTile
             active={mounted && theme === "system"}
             onClick={() => setTheme("system")}
             icon={<Monitor size={16} />}
-            label="System"
+            label={t("theme.system")}
           />
         </div>
       </div>
 
       <div>
-        <h3 className="font-medium mb-3">Accent</h3>
+        <h3 className="font-medium mb-3">{t("settings.theme.accent")}</h3>
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 max-w-xl">
           {ACCENTS.map((a) => {
             const preview = ACCENT_PREVIEW[a];
