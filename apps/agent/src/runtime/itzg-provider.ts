@@ -27,6 +27,20 @@ export class ItzgRuntimeProvider implements MinecraftRuntimeProvider {
   readonly key = "itzg";
 
   createContainerSpec(spec: ServerSpec, dataPath: string): ContainerCreateOptions {
+    // Install-phase retry knobs for mc-image-helper. Only matters for
+    // modpack-source types (Modrinth / CurseForge) where the helper
+    // downloads hundreds of jars and any one of them can time out on a
+    // flaky CDN — each retry resumes without redownloading files that
+    // already landed on /data. Defaults (server env) win over the
+    // agent-level defaults.
+    const installRetryDefaults: Record<string, string> =
+      spec.type === "MODRINTH" || spec.type === "CURSEFORGE"
+        ? {
+            MAX_RETRIES: config.AGENT_MC_MAX_RETRIES,
+            RETRY_BACKOFF: config.AGENT_MC_RETRY_BACKOFF,
+          }
+        : {};
+
     const envMap: Record<string, string> = {
       EULA: spec.eulaAccepted ? "TRUE" : "FALSE",
       TYPE: TYPE_MAP[spec.type] ?? "VANILLA",
@@ -34,6 +48,7 @@ export class ItzgRuntimeProvider implements MinecraftRuntimeProvider {
       MEMORY: `${spec.memoryMb}M`,
       ENABLE_RCON: "true",
       RCON_PASSWORD: `rcon-${spec.id}`,
+      ...installRetryDefaults,
       ...spec.env,
     };
     const env = Object.entries(envMap).map(([k, v]) => `${k}=${v}`);

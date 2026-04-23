@@ -34,6 +34,8 @@ services:
       AGENT_DOCKER_NETWORK: "cofemine_mcnet"
       AGENT_LABEL_PREFIX: "cofemine"
       DOCKER_SOCKET: "/var/run/docker.sock"
+      AGENT_MC_MAX_RETRIES: ${AGENT_MC_MAX_RETRIES:-10}
+      AGENT_MC_RETRY_BACKOFF: ${AGENT_MC_RETRY_BACKOFF:-10}
     volumes:
       # Docker socket so the agent can start Minecraft containers.
       - /var/run/docker.sock:/var/run/docker.sock

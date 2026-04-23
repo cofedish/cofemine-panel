@@ -12,6 +12,16 @@ const schema = z.object({
   DOCKER_SOCKET: z.string().default("/var/run/docker.sock"),
   /** If set, the agent talks to a remote Docker daemon via HTTP(s). */
   DOCKER_HOST_URL: z.string().url().optional(),
+
+  /** How many times mc-image-helper retries a failed download during
+   * the modpack install phase (Modrinth / CurseForge). The default of 4
+   * is itzg's; we bump it to 10 because CF's forgecdn.net is flaky for
+   * many regions and each timeout-and-retry cycle still makes progress
+   * (already-downloaded jars are kept on disk). Only applies to the
+   * install phase — does not affect the running MC server. */
+  AGENT_MC_MAX_RETRIES: z.string().default("10"),
+  /** Backoff in seconds between retry attempts. Same phase as above. */
+  AGENT_MC_RETRY_BACKOFF: z.string().default("10"),
 });
 
 export const config = schema.parse(process.env);

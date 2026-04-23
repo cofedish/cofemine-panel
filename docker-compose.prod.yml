@@ -34,6 +34,8 @@ services:
       AGENT_BACKUP_ROOT: ${BACKUP_ROOT:-/var/lib/cofemine/backups}
       AGENT_DOCKER_NETWORK: "cofemine_mcnet"
       AGENT_LABEL_PREFIX: "cofemine"
+      AGENT_MC_MAX_RETRIES: ${AGENT_MC_MAX_RETRIES:-10}
+      AGENT_MC_RETRY_BACKOFF: ${AGENT_MC_RETRY_BACKOFF:-10}
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       # Bind the SAME host paths into the agent as it will later hand to
