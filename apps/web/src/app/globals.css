@@ -189,9 +189,10 @@
   --ring: 234 179 8;
 }
 
-/* Minecraft — grass-block lime-green. Pushed distinctly yellow so it
- * doesn't collide with Emerald's teal-green. Reference: tailwind lime
- * scale — #65A30D (light) / #A3E635 (dark). */
+/* Minecraft — grass-block lime-green. User wants the dark theme to read
+ * as the same lime as light (tailwind lime-700 / #65A30D) so it stops
+ * collapsing toward emerald-green in dark mode. We keep the hex identical
+ * across modes; only the soft/ink tokens adapt. */
 .accent-minecraft {
   --accent: 101 163 13;
   --accent-hover: 77 124 15;
@@ -200,11 +201,11 @@
   --ring: 101 163 13;
 }
 .dark.accent-minecraft {
-  --accent: 163 230 53;
-  --accent-hover: 190 242 100;
+  --accent: 101 163 13;
+  --accent-hover: 132 204 22;
   --accent-soft: 26 46 5;
-  --accent-ink: 20 33 8;
-  --ring: 163 230 53;
+  --accent-ink: 255 255 255;
+  --ring: 101 163 13;
 }
 
 /* ======================================================================
@@ -266,6 +267,20 @@ body {
    ====================================================================== */
 
 @layer components {
+  /* Pixel / Minecraft-style text. The CSS var is injected by next/font
+   * in app/layout.tsx; the fallback keeps things legible if the font
+   * hasn't loaded yet. Pixel-rendering keeps the blocky look crisp at
+   * small sizes. */
+  .font-pixel {
+    font-family: var(--font-pixel), "Courier New", monospace;
+    font-weight: 400;
+    letter-spacing: 0.01em;
+    text-rendering: optimizeSpeed;
+    image-rendering: pixelated;
+    -webkit-font-smoothing: none;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
   .surface {
     background: rgb(var(--bg-surface-1));
     border: 1px solid rgb(var(--border));

@@ -29,7 +29,7 @@ export function TopNav(): JSX.Element {
           <span className="w-8 h-8 rounded-lg bg-[rgb(var(--accent-soft))] text-[rgb(var(--accent))] grid place-items-center">
             <LogoMark size={20} />
           </span>
-          <Wordmark className="text-base hidden sm:inline" />
+          <Wordmark className="text-[12px] hidden sm:inline" />
         </Link>
 
         <nav className="hidden md:flex items-center gap-0.5 ml-4">

@@ -49,7 +49,7 @@ export default function LoginPage(): JSX.Element {
           <span className="w-9 h-9 rounded-lg bg-[rgb(var(--accent-soft))] text-[rgb(var(--accent))] grid place-items-center">
             <LogoMark size={22} />
           </span>
-          <Wordmark className="text-lg" />
+          <Wordmark className="text-sm" />
         </div>
 
         <div>

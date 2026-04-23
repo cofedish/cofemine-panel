@@ -39,7 +39,7 @@ export function AuthShell({
           <span className="w-10 h-10 rounded-lg bg-white/15 backdrop-blur-sm grid place-items-center ring-1 ring-white/25">
             <LogoMark size={22} />
           </span>
-          <Wordmark className="text-xl text-white" />
+          <Wordmark className="text-sm text-white" />
         </div>
 
         <div className="relative space-y-6 max-w-md">
