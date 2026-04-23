@@ -2,6 +2,8 @@ import "./globals.css";
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
 import { ThemeProvider } from "@/components/theme-provider";
+import { DialogProvider } from "@/components/dialog-provider";
+import { I18nProvider } from "@/lib/i18n";
 
 export const metadata: Metadata = {
   title: "Cofemine Panel",
@@ -17,7 +19,11 @@ export default function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning>
       <body>
-        <ThemeProvider>{children}</ThemeProvider>
+        <ThemeProvider>
+          <I18nProvider>
+            <DialogProvider>{children}</DialogProvider>
+          </I18nProvider>
+        </ThemeProvider>
       </body>
     </html>
   );

@@ -10,6 +10,8 @@ import { Drawer } from "@/components/drawer";
 import { Stagger, StaggerItem } from "@/components/motion";
 import { Avatar } from "@/components/avatar";
 import { UserPlus, ClipboardList, Trash2 } from "lucide-react";
+import { useDialog } from "@/components/dialog-provider";
+import { useT } from "@/lib/i18n";
 
 type User = {
   id: string;
@@ -91,6 +93,8 @@ export default function AdministrationPage(): JSX.Element {
 function UsersTab(): JSX.Element {
   const { data } = useSWR<User[]>("/users", fetcher);
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const dialog = useDialog();
+  const { t } = useT();
 
   return (
     <div className="space-y-5">
@@ -136,7 +140,16 @@ function UsersTab(): JSX.Element {
                     <button
                       className="text-ink-muted hover:text-[rgb(var(--danger))] transition-colors"
                       onClick={async () => {
-                        if (!confirm(`Delete ${u.username}?`)) return;
+                        const ok = await dialog.confirm({
+                          tone: "danger",
+                          danger: true,
+                          title: t("admin.removeUserConfirm.title"),
+                          message: t("admin.removeUserConfirm.body", {
+                            username: u.username,
+                          }),
+                          okLabel: t("common.delete"),
+                        });
+                        if (!ok) return;
                         await api.del(`/users/${u.id}`);
                         mutate("/users");
                       }}

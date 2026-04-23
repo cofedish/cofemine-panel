@@ -5,10 +5,11 @@ import Link from "next/link";
 import { AnimatePresence, motion } from "framer-motion";
 import useSWR from "swr";
 import { api, fetcher } from "@/lib/api";
-import { LogOut, Settings, Sun, Moon, Monitor } from "lucide-react";
+import { LogOut, Settings, Sun, Moon, Monitor, Languages } from "lucide-react";
 import { useTheme } from "next-themes";
 import { cn } from "@/lib/cn";
 import { Avatar } from "./avatar";
+import { useT, type Lang } from "@/lib/i18n";
 
 type Me = {
   id: string;
@@ -24,6 +25,7 @@ export function UserMenu(): JSX.Element {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   const { theme, setTheme } = useTheme();
+  const { lang, setLang, t } = useT();
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
 
@@ -99,6 +101,31 @@ export function UserMenu(): JSX.Element {
                   )}
                 >
                   <Icon size={14} />
+                  {label}
+                </button>
+              ))}
+            </div>
+
+            <div className="px-2 pt-2 pb-0.5 text-[10px] uppercase tracking-wider text-ink-muted flex items-center gap-1.5">
+              <Languages size={10} /> {t("lang.label")}
+            </div>
+            <div className="grid grid-cols-2 gap-1 p-1">
+              {(
+                [
+                  { v: "en", label: t("lang.en") },
+                  { v: "ru", label: t("lang.ru") },
+                ] as const
+              ).map(({ v, label }) => (
+                <button
+                  key={v}
+                  onClick={() => setLang(v as Lang)}
+                  className={cn(
+                    "py-2 rounded-md text-xs border transition-colors",
+                    lang === v
+                      ? "border-[rgb(var(--accent))]/60 bg-[rgb(var(--accent-soft))]/60 text-[rgb(var(--accent))]"
+                      : "border-transparent hover:bg-surface-2 text-ink-secondary"
+                  )}
+                >
                   {label}
                 </button>
               ))}

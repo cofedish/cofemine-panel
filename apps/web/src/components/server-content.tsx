@@ -15,6 +15,8 @@ import {
   RefreshCw,
 } from "lucide-react";
 import { ModrinthMark, CurseForgeMark } from "./brand-icons";
+import { useDialog } from "./dialog-provider";
+import { useT } from "@/lib/i18n";
 
 /* ================================ TYPES ================================ */
 
@@ -215,6 +217,8 @@ function InstalledPanel({
   installed: InstalledContent | undefined;
   serverId: string;
 }): JSX.Element {
+  const dialog = useDialog();
+  const { t } = useT();
   const [sub, setSub] = useState<"mods" | "plugins" | "datapacks">("mods");
   const groups: Record<"mods" | "plugins" | "datapacks", InstalledFile[]> = {
     mods: installed?.mods ?? [],
@@ -225,14 +229,25 @@ function InstalledPanel({
   const [query, setQuery] = useState("");
 
   async function remove(file: InstalledFile): Promise<void> {
-    if (!confirm(`Delete ${file.name}?`)) return;
+    const ok = await dialog.confirm({
+      tone: "danger",
+      danger: true,
+      title: t("content.installConfirm.delete.title"),
+      message: t("content.installConfirm.delete.body", { name: file.name }),
+      okLabel: t("common.delete"),
+    });
+    if (!ok) return;
     try {
       await api.del(
         `/servers/${serverId}/installed-content?type=${sub}&name=${encodeURIComponent(file.name)}`
       );
       mutate(`/servers/${serverId}/installed-content`);
     } catch (e) {
-      alert(e instanceof ApiError ? e.message : String(e));
+      dialog.alert({
+        tone: "danger",
+        title: t("common.error"),
+        message: e instanceof ApiError ? e.message : String(e),
+      });
     }
   }
 
@@ -411,6 +426,8 @@ function FailuresPanel({
   failures: Failure[];
   onFindOnModrinth: (query: string) => void;
 }): JSX.Element {
+  const dialog = useDialog();
+  const { t } = useT();
   const [busy, setBusy] = useState(false);
   const [autoBusy, setAutoBusy] = useState(false);
   const [autoStatus, setAutoStatus] = useState<string | null>(null);
@@ -427,15 +444,11 @@ function FailuresPanel({
    */
   async function tryModrinthForAll(): Promise<void> {
     if (!server) return;
-    if (
-      !confirm(
-        `Search Modrinth for ${failures.length} failing mod${
-          failures.length === 1 ? "" : "s"
-        } and auto-install the best match for each?\n\nFailed mods that resolve will be added to CF_EXCLUDE_MODS so the pack stops retrying them. The world and /data are preserved.`
-      )
-    ) {
-      return;
-    }
+    const ok = await dialog.confirm({
+      title: t("content.autoConfirm.title"),
+      message: t("content.autoConfirm.body", { n: failures.length }),
+    });
+    if (!ok) return;
     setAutoBusy(true);
     setAutoStatus(null);
     const loader = typeToLoader(server.type);
@@ -514,14 +527,13 @@ function FailuresPanel({
 
     setAutoBusy(false);
     const lines = [
-      `Installed: ${installed.length}`,
-      `No match on Modrinth: ${noMatch.length}`,
-      `Errors: ${errored.length}`,
+      t("content.autoSummary.installed", { n: installed.length }),
+      t("content.autoSummary.noMatch", { n: noMatch.length }),
+      t("content.autoSummary.errors", { n: errored.length }),
     ];
     if (noMatch.length > 0) {
       lines.push(
         "",
-        "No Modrinth match for:",
         ...noMatch.slice(0, 10).map((r) => `  • ${r.failure.modName}`)
       );
       if (noMatch.length > 10) lines.push(`  … +${noMatch.length - 10} more`);
@@ -529,7 +541,6 @@ function FailuresPanel({
     if (errored.length > 0) {
       lines.push(
         "",
-        "Errors:",
         ...errored
           .slice(0, 5)
           .map((r) => `  • ${r.failure.modName}: ${r.message}`)
@@ -537,29 +548,31 @@ function FailuresPanel({
     }
     setAutoStatus(
       installed.length > 0
-        ? `${installed.length} mod${
-            installed.length === 1 ? "" : "s"
-          } installed from Modrinth. Start the server to retry.`
-        : "No Modrinth replacements installed."
+        ? t("content.autoSummary.installedStatus", { n: installed.length })
+        : t("content.autoSummary.nothingInstalled")
     );
-    alert(lines.join("\n"));
+    dialog.alert({
+      tone: installed.length > 0 ? "success" : "info",
+      title: t("content.autoSummary.title"),
+      message: lines.join("\n"),
+    });
   }
 
   async function skipAndRetry(): Promise<void> {
     if (!server) return;
     if (idsToSkip.length === 0) {
-      alert(
-        "No CurseForge mod IDs could be parsed from the logs. Use 'Find on Modrinth' per mod instead."
-      );
+      dialog.alert({
+        tone: "warning",
+        title: t("content.failures.noIds.title"),
+        message: t("content.failures.noIds.body"),
+      });
       return;
     }
-    if (
-      !confirm(
-        `Add ${idsToSkip.length} mod ID${idsToSkip.length === 1 ? "" : "s"} to CF_EXCLUDE_MODS and rebuild the container?\n\nThe pack will install without the failing mods. The world and /data are preserved.`
-      )
-    ) {
-      return;
-    }
+    const ok = await dialog.confirm({
+      title: t("content.skipConfirm.title"),
+      message: t("content.skipConfirm.body", { n: idsToSkip.length }),
+    });
+    if (!ok) return;
     setBusy(true);
     try {
       const existing = (server.env.CF_EXCLUDE_MODS ?? "")
@@ -573,13 +586,19 @@ function FailuresPanel({
         env: { ...server.env, CF_EXCLUDE_MODS: merged },
       });
       await api.post(`/servers/${serverId}/repair`);
-      alert(
-        `Done. ${idsToSkip.length} mod${idsToSkip.length === 1 ? "" : "s"} will be skipped on next start. Press Start to retry the install.`
-      );
+      dialog.alert({
+        tone: "success",
+        title: t("common.done"),
+        message: t("content.skipDone", { n: idsToSkip.length }),
+      });
       mutate(`/servers/${serverId}`);
       mutate(`/servers/${serverId}/install-failures`);
     } catch (e) {
-      alert(e instanceof ApiError ? e.message : String(e));
+      dialog.alert({
+        tone: "danger",
+        title: t("common.error"),
+        message: e instanceof ApiError ? e.message : String(e),
+      });
     } finally {
       setBusy(false);
     }

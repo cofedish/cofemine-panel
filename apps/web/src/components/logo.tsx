@@ -60,11 +60,16 @@ export function Wordmark({
 }: {
   className?: string;
 }): JSX.Element {
+  // Both halves get explicit colors. Without the `text-ink` on "mine",
+  // the second half inherits whatever the surrounding element happens
+  // to pick — which on a dark-themed `bg-base` header ended up reading
+  // as a too-dark shade and disappearing against the background.
   return (
     <span
       className={`font-display font-semibold tracking-tight ${className}`}
     >
-      <span className="text-accent">cofe</span>mine
+      <span className="text-[rgb(var(--accent))]">cofe</span>
+      <span className="text-[rgb(var(--ink))]">mine</span>
     </span>
   );
 }

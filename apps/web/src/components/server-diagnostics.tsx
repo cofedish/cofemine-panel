@@ -3,6 +3,8 @@ import { useState } from "react";
 import useSWR, { mutate } from "swr";
 import { api, ApiError, fetcher } from "@/lib/api";
 import { cn } from "@/lib/cn";
+import { useDialog } from "./dialog-provider";
+import { useT } from "@/lib/i18n";
 import {
   AlertTriangle,
   ChevronDown,
@@ -94,6 +96,8 @@ function CrashRow({
   serverId: string;
   report: CrashSummary;
 }): JSX.Element {
+  const dialog = useDialog();
+  const { t } = useT();
   const [open, setOpen] = useState(false);
   const [detail, setDetail] = useState<CrashDetail | null>(null);
   const [loading, setLoading] = useState(false);
@@ -121,14 +125,25 @@ function CrashRow({
   }
 
   async function remove(): Promise<void> {
-    if (!confirm(`Delete ${report.name}?`)) return;
+    const ok = await dialog.confirm({
+      tone: "danger",
+      danger: true,
+      title: t("diagnostics.deleteConfirm.title"),
+      message: t("diagnostics.deleteConfirm.body", { name: report.name }),
+      okLabel: t("common.delete"),
+    });
+    if (!ok) return;
     try {
       await api.del(
         `/servers/${serverId}/crash-reports/${encodeURIComponent(report.name)}`
       );
       mutate(`/servers/${serverId}/crash-reports`);
     } catch (e) {
-      alert(e instanceof ApiError ? e.message : String(e));
+      dialog.alert({
+        tone: "danger",
+        title: t("common.error"),
+        message: e instanceof ApiError ? e.message : String(e),
+      });
     }
   }
 

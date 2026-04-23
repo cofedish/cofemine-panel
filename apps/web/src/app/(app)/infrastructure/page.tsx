@@ -8,6 +8,8 @@ import { Stagger, StaggerItem } from "@/components/motion";
 import { StatusDot } from "@/components/status-dot";
 import { Drawer } from "@/components/drawer";
 import { Plus, HardDrive, Trash2, Activity } from "lucide-react";
+import { useDialog } from "@/components/dialog-provider";
+import { useT } from "@/lib/i18n";
 
 type Node = {
   id: string;
@@ -73,21 +75,38 @@ export default function InfrastructurePage(): JSX.Element {
 }
 
 function NodeCard({ node }: { node: Node }): JSX.Element {
+  const dialog = useDialog();
+  const { t } = useT();
   async function check(): Promise<void> {
     try {
       await api.get(`/nodes/${node.id}/health`);
       mutate("/nodes");
     } catch (e) {
-      alert(e instanceof ApiError ? e.message : String(e));
+      dialog.alert({
+        tone: "danger",
+        title: t("common.error"),
+        message: e instanceof ApiError ? e.message : String(e),
+      });
     }
   }
   async function remove(): Promise<void> {
-    if (!confirm(`Delete node "${node.name}"?`)) return;
+    const ok = await dialog.confirm({
+      tone: "danger",
+      danger: true,
+      title: t("infra.removeNodeConfirm.title"),
+      message: t("infra.removeNodeConfirm.body", { name: node.name }),
+      okLabel: t("common.delete"),
+    });
+    if (!ok) return;
     try {
       await api.del(`/nodes/${node.id}`);
       mutate("/nodes");
     } catch (e) {
-      alert(e instanceof ApiError ? e.message : String(e));
+      dialog.alert({
+        tone: "danger",
+        title: t("common.error"),
+        message: e instanceof ApiError ? e.message : String(e),
+      });
     }
   }
 

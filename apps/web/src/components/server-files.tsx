@@ -3,6 +3,8 @@ import { useState } from "react";
 import useSWR, { mutate } from "swr";
 import { api, fetcher } from "@/lib/api";
 import { Folder, File as FileIcon, ChevronLeft, Save } from "lucide-react";
+import { useDialog } from "./dialog-provider";
+import { useT } from "@/lib/i18n";
 
 type DirEntry = { name: string; isDir: boolean };
 type Listing =
@@ -11,6 +13,8 @@ type Listing =
   | { kind: "missing"; path: string };
 
 export function ServerFiles({ serverId }: { serverId: string }): JSX.Element {
+  const dialog = useDialog();
+  const { t } = useT();
   const [path, setPath] = useState("");
   const { data } = useSWR<Listing>(
     `/servers/${serverId}/files?path=${encodeURIComponent(path)}`,
@@ -51,8 +55,16 @@ export function ServerFiles({ serverId }: { serverId: string }): JSX.Element {
   }
 
   async function remove(target: string, isDir: boolean): Promise<void> {
+    void isDir;
     const p = path ? `${path}/${target}` : target;
-    if (!confirm(`Delete ${isDir ? "folder" : "file"} "${p}"?`)) return;
+    const ok = await dialog.confirm({
+      tone: "danger",
+      danger: true,
+      title: t("files.deleteConfirm.title"),
+      message: t("files.deleteConfirm.body", { path: p }),
+      okLabel: t("common.delete"),
+    });
+    if (!ok) return;
     await api.del(`/servers/${serverId}/files?path=${encodeURIComponent(p)}`);
     mutate(`/servers/${serverId}/files?path=${encodeURIComponent(path)}`);
   }

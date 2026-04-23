@@ -2,6 +2,8 @@
 import useSWR, { mutate } from "swr";
 import { useState } from "react";
 import { api, ApiError, fetcher } from "@/lib/api";
+import { useDialog } from "./dialog-provider";
+import { useT } from "@/lib/i18n";
 
 type Backup = {
   id: string;
@@ -14,6 +16,8 @@ type Backup = {
 };
 
 export function ServerBackups({ serverId }: { serverId: string }): JSX.Element {
+  const dialog = useDialog();
+  const { t } = useT();
   const { data } = useSWR<Backup[]>(
     `/servers/${serverId}/backups`,
     fetcher,
@@ -27,20 +31,36 @@ export function ServerBackups({ serverId }: { serverId: string }): JSX.Element {
       await api.post(`/servers/${serverId}/backups`, {});
       mutate(`/servers/${serverId}/backups`);
     } catch (err) {
-      alert(err instanceof ApiError ? err.message : String(err));
+      dialog.alert({
+        tone: "danger",
+        title: t("common.error"),
+        message: err instanceof ApiError ? err.message : String(err),
+      });
     } finally {
       setBusy(false);
     }
   }
 
   async function restore(id: string): Promise<void> {
-    if (!confirm("Restore this backup? The current world will be replaced.")) return;
+    const ok = await dialog.confirm({
+      tone: "warning",
+      title: t("backups.restoreConfirm.title"),
+      message: t("backups.restoreConfirm.body"),
+    });
+    if (!ok) return;
     await api.post(`/backups/${id}/restore`);
-    alert("Restore complete. Start the server to use it.");
+    dialog.toast({ tone: "success", message: t("common.done") });
   }
 
-  async function remove(id: string): Promise<void> {
-    if (!confirm("Delete this backup?")) return;
+  async function remove(id: string, name: string): Promise<void> {
+    const ok = await dialog.confirm({
+      tone: "danger",
+      danger: true,
+      title: t("backups.deleteConfirm.title"),
+      message: t("backups.deleteConfirm.body", { name }),
+      okLabel: t("common.delete"),
+    });
+    if (!ok) return;
     await api.del(`/backups/${id}`);
     mutate(`/servers/${serverId}/backups`);
   }
@@ -79,7 +99,7 @@ export function ServerBackups({ serverId }: { serverId: string }): JSX.Element {
               </button>
               <button
                 className="text-xs text-danger hover:underline"
-                onClick={() => remove(b.id)}
+                onClick={() => remove(b.id, b.name)}
               >
                 delete
               </button>

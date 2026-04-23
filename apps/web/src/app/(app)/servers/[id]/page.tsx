@@ -16,6 +16,8 @@ import { PageHeader } from "@/components/page-header";
 import { getServerMeta, ServerTypeIcon } from "@/components/server-icons";
 import { ImageUpload } from "@/components/image-upload";
 import { cn } from "@/lib/cn";
+import { useDialog } from "@/components/dialog-provider";
+import { useT } from "@/lib/i18n";
 import {
   Play,
   Square,
@@ -70,6 +72,8 @@ type Tab = (typeof TABS)[number]["key"];
 export default function ServerDetailPage(): JSX.Element {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
+  const dialog = useDialog();
+  const { t } = useT();
   const [tab, setTab] = useState<Tab>("overview");
   const { data, mutate } = useSWR<ServerDetail>(
     id ? `/servers/${id}` : null,
@@ -102,7 +106,11 @@ export default function ServerDetailPage(): JSX.Element {
       await api.post(`/servers/${id}/${action}`);
       mutate();
     } catch (err) {
-      alert(err instanceof ApiError ? err.message : String(err));
+      dialog.alert({
+        tone: "danger",
+        title: t("common.error"),
+        message: err instanceof ApiError ? err.message : String(err),
+      });
     }
   }
   async function clone(): Promise<void> {
@@ -110,39 +118,58 @@ export default function ServerDetailPage(): JSX.Element {
       const res = await api.post<{ id: string }>(`/servers/${id}/clone`);
       router.push(`/servers/${res.id}`);
     } catch (err) {
-      alert(err instanceof ApiError ? err.message : String(err));
+      dialog.alert({
+        tone: "danger",
+        title: t("common.error"),
+        message: err instanceof ApiError ? err.message : String(err),
+      });
     }
   }
   async function repair(): Promise<void> {
-    if (
-      !confirm(
-        "Reprovision the container with current integration keys?\n\nThe world and /data are preserved — only the container itself is recreated."
-      )
-    ) {
-      return;
-    }
+    const ok = await dialog.confirm({
+      title: t("server.repairConfirm.title"),
+      message: t("server.repairConfirm.body"),
+    });
+    if (!ok) return;
     try {
       const res = await api.post<{ changed: boolean }>(
         `/servers/${id}/repair`
       );
-      alert(
-        res.changed
-          ? "Container rebuilt with updated env. You can start the server now."
-          : "Container rebuilt. No env changes were needed."
-      );
+      dialog.alert({
+        tone: "success",
+        title: t("common.done"),
+        message: res.changed
+          ? t("server.repair.doneChanged")
+          : t("server.repair.doneUnchanged"),
+      });
       mutate();
     } catch (err) {
-      alert(err instanceof ApiError ? err.message : String(err));
+      dialog.alert({
+        tone: "danger",
+        title: t("common.error"),
+        message: err instanceof ApiError ? err.message : String(err),
+      });
     }
   }
   async function remove(): Promise<void> {
     if (!data) return;
-    if (!confirm(`Delete server "${data.name}"? This is irreversible.`)) return;
+    const ok = await dialog.confirm({
+      tone: "danger",
+      danger: true,
+      title: t("server.deleteConfirm.title"),
+      message: t("server.deleteConfirm.body", { name: data.name }),
+      okLabel: t("common.delete"),
+    });
+    if (!ok) return;
     try {
       await api.del(`/servers/${id}`);
       router.push("/");
     } catch (err) {
-      alert(err instanceof ApiError ? err.message : String(err));
+      dialog.alert({
+        tone: "danger",
+        title: t("common.error"),
+        message: err instanceof ApiError ? err.message : String(err),
+      });
     }
   }
 
