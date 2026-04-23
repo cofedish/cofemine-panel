@@ -74,7 +74,7 @@ export function AppearancePanel(): JSX.Element {
                 style={{ ["--accent-raw" as any]: preview.hex }}
               >
                 <span
-                  className="w-5 h-5 rounded-full ring-2 ring-surface-1 shadow"
+                  className="w-5 h-5 shrink-0 rounded-full ring-2 ring-surface-1 shadow"
                   style={{ background: preview.hex }}
                 />
                 <span className="text-sm font-medium flex-1">
