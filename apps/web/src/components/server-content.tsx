@@ -90,6 +90,11 @@ type Failure = {
   url?: string;
 };
 
+type InstallInterrupt = {
+  kind: "timeout" | "exhausted" | "generic";
+  message: string;
+};
+
 type InnerTab = "installed" | "browse";
 
 /* ============================= ROOT COMPONENT ============================ */
@@ -104,7 +109,10 @@ export function ServerContent({ serverId }: { serverId: string }): JSX.Element {
     fetcher,
     { refreshInterval: 15000 }
   );
-  const { data: failures } = useSWR<{ failures: Failure[] }>(
+  const { data: failures } = useSWR<{
+    failures: Failure[];
+    interrupt: InstallInterrupt | null;
+  }>(
     `/servers/${serverId}/install-failures`,
     fetcher,
     { refreshInterval: 20000, shouldRetryOnError: false }
@@ -133,6 +141,9 @@ export function ServerContent({ serverId }: { serverId: string }): JSX.Element {
 
   return (
     <div className="space-y-6">
+      {failures?.interrupt && (
+        <InterruptBanner interrupt={failures.interrupt} />
+      )}
       {failures?.failures && failures.failures.length > 0 && (
         <FailuresPanel
           serverId={serverId}
@@ -415,6 +426,34 @@ function InstalledCard({
 }
 
 /* =============================== FAILURES =============================== */
+
+function InterruptBanner({
+  interrupt,
+}: {
+  interrupt: InstallInterrupt;
+}): JSX.Element {
+  // Kind-specific heading so the user sees the nature of the problem at
+  // a glance; body is the human-readable message the agent already
+  // formatted for this kind.
+  const titleMap: Record<InstallInterrupt["kind"], string> = {
+    timeout: "CurseForge: таймаут скачивания",
+    exhausted: "CurseForge: попытки исчерпаны",
+    generic: "CurseForge: установка прервана",
+  };
+  return (
+    <section className="tile p-5 flex items-start gap-3 border-[rgb(var(--warning))]/30">
+      <span className="w-8 h-8 rounded-md bg-[rgb(var(--warning-soft))] text-[rgb(var(--warning))] grid place-items-center shrink-0">
+        <AlertTriangle size={16} />
+      </span>
+      <div className="flex-1 min-w-0">
+        <h3 className="heading-md">{titleMap[interrupt.kind]}</h3>
+        <p className="text-sm text-ink-secondary mt-1">
+          {interrupt.message}
+        </p>
+      </div>
+    </section>
+  );
+}
 
 function FailuresPanel({
   serverId,

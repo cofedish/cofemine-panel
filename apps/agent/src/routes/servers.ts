@@ -488,14 +488,20 @@ export async function serversAgentRoutes(app: FastifyInstance): Promise<void> {
   });
 
   /**
-   * Parse recent container logs for CurseForge 403 "Retry" failures —
-   * mods where the pack points at a file the author has disabled for
-   * third-party downloads. Deduped by mod; last retry count kept.
+   * Parse recent container logs for CurseForge install problems.
+   * Two flavours surfaced:
+   *   - `failures[]` — per-mod 403s where the author disabled third-party
+   *     downloads. These are fixable via "Skip failures & retry" / Modrinth
+   *     replacements.
+   *   - `interrupt` — a generic install abort (network timeout, retries
+   *     exhausted, "Failed to auto-install CurseForge modpack"). Not a
+   *     per-mod fix; usually resolves itself on the next Start because
+   *     already-downloaded files are kept.
    */
   app.get("/servers/:id/install-failures", async (req) => {
     const { id } = req.params as { id: string };
     const container = await findContainer(id);
-    if (!container) return { failures: [] };
+    if (!container) return { failures: [], interrupt: null };
     const rawLogs = (await container.logs({
       follow: false,
       stdout: true,
@@ -504,7 +510,10 @@ export async function serversAgentRoutes(app: FastifyInstance): Promise<void> {
       timestamps: false,
     })) as unknown as Buffer;
     const text = demuxLogBuffer(rawLogs);
-    return { failures: parseCfFailures(text) };
+    return {
+      failures: parseCfFailures(text),
+      interrupt: parseInstallInterrupt(text),
+    };
   });
 
   /**
@@ -1050,6 +1059,45 @@ function parseCfFailures(text: string): Array<{
   return [...dedup.values()].sort((a, b) =>
     a.modName.localeCompare(b.modName)
   );
+}
+
+type InstallInterrupt = {
+  /** "timeout" for netty ReadTimeoutException, "exhausted" for reactor
+   *  RetryExhaustedException, "generic" for the catch-all init log line. */
+  kind: "timeout" | "exhausted" | "generic";
+  /** One-liner safe to show in UI. */
+  message: string;
+};
+
+/**
+ * Detect a CurseForge-install interrupt in the container logs. These are
+ * distinct from per-mod 403s: the whole modpack install died mid-way
+ * (usually a network hiccup to CF), and simply pressing Start again
+ * resumes because already-downloaded jars are preserved on disk.
+ */
+function parseInstallInterrupt(text: string): InstallInterrupt | null {
+  if (/io\.netty\.handler\.timeout\.ReadTimeoutException/.test(text)) {
+    return {
+      kind: "timeout",
+      message:
+        "CurseForge read timed out while downloading modpack files. Files already on disk are kept — press Start to resume the install.",
+    };
+  }
+  if (/RetryExhaustedException|Retries exhausted/.test(text)) {
+    return {
+      kind: "exhausted",
+      message:
+        "CurseForge install gave up after repeated retries. Most files already downloaded — press Start to resume.",
+    };
+  }
+  if (/Failed to auto-install CurseForge modpack/.test(text)) {
+    return {
+      kind: "generic",
+      message:
+        "CurseForge modpack install was interrupted. Press Start to resume — already-downloaded files are preserved.",
+    };
+  }
+  return null;
 }
 
 function parseProperties(raw: string): Record<string, string> {
