@@ -58,8 +58,7 @@ export function LogoMark({
 /**
  * CofePanel wordmark in Press Start 2P (pixel font). "Cofe" uses the
  * theme accent; "Panel" uses the ink colour so both halves stay legible
- * on every background. A subtle 2-px offset shadow mimics the chunky
- * drop-shadow used on Minecraft's own title screen.
+ * on every background.
  */
 export function Wordmark({
   className = "",
@@ -69,9 +68,6 @@ export function Wordmark({
   return (
     <span
       className={`font-pixel leading-none inline-flex items-baseline gap-[1px] ${className}`}
-      style={{
-        textShadow: "2px 2px 0 rgb(0 0 0 / 0.35)",
-      }}
     >
       <span className="text-[rgb(var(--accent))]">Cofe</span>
       <span className="text-[rgb(var(--ink))]">Panel</span>

@@ -98,7 +98,7 @@
   --ring: 5 150 105;
 }
 .dark.accent-emerald,
-.dark:not(.accent-sky):not(.accent-ruby):not(.accent-caramel):not(.accent-violet):not(.accent-lucifer) {
+.dark:not(.accent-sky):not(.accent-ruby):not(.accent-caramel):not(.accent-violet):not(.accent-lucifer):not(.accent-minecraft) {
   --accent: 16 185 129;
   --accent-hover: 52 211 153;
   --accent-soft: 9 48 35;
