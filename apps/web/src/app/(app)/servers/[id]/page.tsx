@@ -9,6 +9,7 @@ import { ServerFiles } from "@/components/server-files";
 import { ServerBackups } from "@/components/server-backups";
 import { ServerProperties } from "@/components/server-properties";
 import { ServerContent } from "@/components/server-content";
+import { ServerDiagnostics } from "@/components/server-diagnostics";
 import { ServerSchedules } from "@/components/server-schedules";
 import { StatusDot } from "@/components/status-dot";
 import { PageHeader } from "@/components/page-header";
@@ -62,6 +63,7 @@ const TABS = [
   { key: "backups", label: "Backups" },
   { key: "schedules", label: "Schedules" },
   { key: "content", label: "Mods & Plugins" },
+  { key: "diagnostics", label: "Diagnostics" },
 ] as const;
 type Tab = (typeof TABS)[number]["key"];
 
@@ -310,6 +312,7 @@ export default function ServerDetailPage(): JSX.Element {
         {tab === "backups" && <ServerBackups serverId={id} />}
         {tab === "schedules" && <ServerSchedules serverId={id} />}
         {tab === "content" && <ServerContent serverId={id} />}
+        {tab === "diagnostics" && <ServerDiagnostics serverId={id} />}
       </div>
     </div>
   );

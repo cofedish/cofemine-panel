@@ -396,9 +396,138 @@ function FailuresPanel({
   onFindOnModrinth: (query: string) => void;
 }): JSX.Element {
   const [busy, setBusy] = useState(false);
+  const [autoBusy, setAutoBusy] = useState(false);
+  const [autoStatus, setAutoStatus] = useState<string | null>(null);
   const idsToSkip = failures
     .map((f) => f.modId)
     .filter((x): x is number => typeof x === "number");
+
+  /**
+   * For each failure, search Modrinth using a cleaned-up mod name plus
+   * the server's loader + version as filters, then install the top hit.
+   * Mods that resolve get their CF id appended to CF_EXCLUDE_MODS so the
+   * pack stops retrying them. Ends with a summary + repair so the next
+   * Start picks up the new env.
+   */
+  async function tryModrinthForAll(): Promise<void> {
+    if (!server) return;
+    if (
+      !confirm(
+        `Search Modrinth for ${failures.length} failing mod${
+          failures.length === 1 ? "" : "s"
+        } and auto-install the best match for each?\n\nFailed mods that resolve will be added to CF_EXCLUDE_MODS so the pack stops retrying them. The world and /data are preserved.`
+      )
+    ) {
+      return;
+    }
+    setAutoBusy(true);
+    setAutoStatus(null);
+    const loader = typeToLoader(server.type);
+    const gameVersion =
+      server.version && server.version !== "LATEST" ? server.version : "";
+
+    const results = await Promise.all(
+      failures.map(async (f) => {
+        try {
+          const qp = new URLSearchParams();
+          qp.set("query", cleanModNameForSearch(f.modName));
+          if (gameVersion) qp.set("gameVersion", gameVersion);
+          if (loader) qp.set("loader", loader);
+          qp.set("projectType", "mod");
+          qp.set("limit", "1");
+          const res = await api.get<any>(
+            `/integrations/modrinth/search?${qp.toString()}`
+          );
+          const raw: any[] = Array.isArray(res) ? res : (res.results ?? []);
+          const top = raw[0];
+          if (!top) return { failure: f, status: "no-match" as const };
+          await api.post(`/integrations/servers/${serverId}/install/modrinth`, {
+            projectId: top.id,
+            kind: "mod",
+          });
+          return {
+            failure: f,
+            status: "installed" as const,
+            projectName: top.name as string,
+          };
+        } catch (e) {
+          return {
+            failure: f,
+            status: "error" as const,
+            message: e instanceof ApiError ? e.message : String(e),
+          };
+        }
+      })
+    );
+
+    const installed = results.filter((r) => r.status === "installed");
+    const noMatch = results.filter((r) => r.status === "no-match");
+    const errored = results.filter((r) => r.status === "error");
+
+    // Skip every failure that we successfully replaced — no point letting
+    // itzg keep retrying the broken CF download.
+    const idsToExclude = installed
+      .map((r) => r.failure.modId)
+      .filter((x): x is number => typeof x === "number");
+    try {
+      if (idsToExclude.length > 0) {
+        const existing = (server.env.CF_EXCLUDE_MODS ?? "")
+          .split(",")
+          .map((s) => s.trim())
+          .filter(Boolean);
+        const merged = Array.from(
+          new Set([...existing, ...idsToExclude.map(String)])
+        ).join(",");
+        await api.patch(`/servers/${serverId}`, {
+          env: { ...server.env, CF_EXCLUDE_MODS: merged },
+        });
+        await api.post(`/servers/${serverId}/repair`);
+      }
+      mutate(`/servers/${serverId}`);
+      mutate(`/servers/${serverId}/installed-content`);
+      mutate(`/servers/${serverId}/install-failures`);
+    } catch (e) {
+      setAutoBusy(false);
+      setAutoStatus(
+        `Install succeeded but repair failed: ${
+          e instanceof ApiError ? e.message : String(e)
+        }`
+      );
+      return;
+    }
+
+    setAutoBusy(false);
+    const lines = [
+      `Installed: ${installed.length}`,
+      `No match on Modrinth: ${noMatch.length}`,
+      `Errors: ${errored.length}`,
+    ];
+    if (noMatch.length > 0) {
+      lines.push(
+        "",
+        "No Modrinth match for:",
+        ...noMatch.slice(0, 10).map((r) => `  • ${r.failure.modName}`)
+      );
+      if (noMatch.length > 10) lines.push(`  … +${noMatch.length - 10} more`);
+    }
+    if (errored.length > 0) {
+      lines.push(
+        "",
+        "Errors:",
+        ...errored
+          .slice(0, 5)
+          .map((r) => `  • ${r.failure.modName}: ${r.message}`)
+      );
+    }
+    setAutoStatus(
+      installed.length > 0
+        ? `${installed.length} mod${
+            installed.length === 1 ? "" : "s"
+          } installed from Modrinth. Start the server to retry.`
+        : "No Modrinth replacements installed."
+    );
+    alert(lines.join("\n"));
+  }
 
   async function skipAndRetry(): Promise<void> {
     if (!server) return;
@@ -457,17 +586,31 @@ function FailuresPanel({
             open-source replacements.
           </p>
         </div>
-        {idsToSkip.length > 0 && (
+        <div className="flex gap-2 shrink-0 flex-wrap">
           <button
-            className="btn-primary shrink-0"
-            onClick={skipAndRetry}
-            disabled={busy || !server}
-            title="Add these mod IDs to CF_EXCLUDE_MODS and rebuild the container"
+            className="btn-subtle shrink-0"
+            onClick={tryModrinthForAll}
+            disabled={autoBusy || busy || !server}
+            title="Search Modrinth for each failed mod and install the best match"
           >
-            {busy ? "Applying…" : "Skip failures & retry"}
+            <ModrinthMark size={12} />{" "}
+            {autoBusy ? "Searching Modrinth…" : "Try Modrinth for all"}
           </button>
-        )}
+          {idsToSkip.length > 0 && (
+            <button
+              className="btn-primary shrink-0"
+              onClick={skipAndRetry}
+              disabled={busy || autoBusy || !server}
+              title="Add these mod IDs to CF_EXCLUDE_MODS and rebuild the container"
+            >
+              {busy ? "Applying…" : "Skip failures & retry"}
+            </button>
+          )}
+        </div>
       </div>
+      {autoStatus && (
+        <p className="text-sm text-ink-secondary">{autoStatus}</p>
+      )}
       <ul className="divide-y divide-line">
         {failures.map((f) => (
           <li

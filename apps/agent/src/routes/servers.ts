@@ -410,6 +410,48 @@ export async function serversAgentRoutes(app: FastifyInstance): Promise<void> {
     return { failures: parseCfFailures(text) };
   });
 
+  /**
+   * List crash reports written by the MC server into /data/crash-reports.
+   * Each entry carries a parsed summary (time, exception, suspect mods)
+   * so the UI can show the important bits without downloading the whole
+   * file. Also includes hs_err_pidNNN.log files from the JVM when present.
+   */
+  app.get("/servers/:id/crash-reports", async (req) => {
+    const { id } = req.params as { id: string };
+    const base = dataDirFor(id);
+    const reports = await listCrashReports(base);
+    return { reports };
+  });
+
+  app.get("/servers/:id/crash-reports/:name", async (req, reply) => {
+    const { id, name } = req.params as { id: string; name: string };
+    const base = dataDirFor(id);
+    const abs = resolveCrashReport(base, name);
+    if (!abs) return reply.code(400).send({ error: "invalid name" });
+    try {
+      const content = await fs.readFile(abs, "utf8");
+      const stat = await fs.stat(abs);
+      return {
+        name,
+        size: stat.size,
+        mtime: stat.mtime.toISOString(),
+        content,
+        summary: parseCrashReport(content),
+      };
+    } catch {
+      return reply.code(404).send({ error: "not found" });
+    }
+  });
+
+  app.delete("/servers/:id/crash-reports/:name", async (req, reply) => {
+    const { id, name } = req.params as { id: string; name: string };
+    const base = dataDirFor(id);
+    const abs = resolveCrashReport(base, name);
+    if (!abs) return reply.code(400).send({ error: "invalid name" });
+    await fs.rm(abs, { force: true });
+    return { ok: true };
+  });
+
   app.get("/servers/:id/properties", async (req) => {
     const { id } = req.params as { id: string };
     const base = dataDirFor(id);
@@ -669,4 +711,174 @@ function parseListOutput(raw: string): {
 
 async function copyRecursive(src: string, dst: string): Promise<void> {
   await fs.cp(src, dst, { recursive: true, force: true });
+}
+
+type CrashReportSummary = {
+  name: string;
+  size: number;
+  mtime: string;
+  kind: "mc" | "jvm";
+  time?: string;
+  description?: string;
+  exception?: string;
+  suspectPackages: string[];
+};
+
+/**
+ * List crash reports from /data/crash-reports/*.txt plus any hs_err_pid*.log
+ * files in /data. Each gets a lightweight parsed summary: exception line,
+ * description, and a de-duplicated list of mod-like package names pulled
+ * from the stack trace (java.* and net.minecraft.* are filtered out so
+ * what remains is likely a third-party mod).
+ */
+async function listCrashReports(base: string): Promise<CrashReportSummary[]> {
+  const out: CrashReportSummary[] = [];
+  const crashDir = path.join(base, "crash-reports");
+  try {
+    const entries = await fs.readdir(crashDir, { withFileTypes: true });
+    for (const e of entries) {
+      if (!e.isFile() || !e.name.endsWith(".txt")) continue;
+      const full = path.join(crashDir, e.name);
+      try {
+        const [stat, content] = await Promise.all([
+          fs.stat(full),
+          fs.readFile(full, "utf8"),
+        ]);
+        const parsed = parseCrashReport(content);
+        out.push({
+          name: e.name,
+          size: stat.size,
+          mtime: stat.mtime.toISOString(),
+          kind: "mc",
+          ...parsed,
+        });
+      } catch {}
+    }
+  } catch {}
+  try {
+    const entries = await fs.readdir(base, { withFileTypes: true });
+    for (const e of entries) {
+      if (!e.isFile()) continue;
+      if (!/^hs_err_pid\d+\.log$/.test(e.name)) continue;
+      const full = path.join(base, e.name);
+      try {
+        const [stat, content] = await Promise.all([
+          fs.stat(full),
+          fs.readFile(full, "utf8"),
+        ]);
+        const parsed = parseCrashReport(content);
+        out.push({
+          name: e.name,
+          size: stat.size,
+          mtime: stat.mtime.toISOString(),
+          kind: "jvm",
+          ...parsed,
+        });
+      } catch {}
+    }
+  } catch {}
+  return out.sort((a, b) => b.mtime.localeCompare(a.mtime));
+}
+
+/** Safely resolve a crash-report name to its absolute path (both the
+ *  crash-reports dir and the /data root for hs_err_* logs). */
+function resolveCrashReport(base: string, name: string): string | null {
+  if (!name || name.includes("/") || name.includes("\\") || name.includes("..")) {
+    return null;
+  }
+  if (/^hs_err_pid\d+\.log$/.test(name)) {
+    return path.join(base, name);
+  }
+  if (name.endsWith(".txt")) {
+    return path.join(base, "crash-reports", name);
+  }
+  return null;
+}
+
+/**
+ * Extract the useful bits from a Forge / Minecraft crash report (or a JVM
+ * hs_err log). We look for:
+ *  - "Time: ..."
+ *  - "Description: ..."
+ *  - the first exception line ("Caused by: ..." wins; otherwise the first
+ *    "... Exception: ..." we find)
+ *  - mod-ish packages from the stack — anything matching at(pkg.Class) that
+ *    isn't Minecraft/Java/standard-library is a likely suspect.
+ */
+function parseCrashReport(content: string): {
+  time?: string;
+  description?: string;
+  exception?: string;
+  suspectPackages: string[];
+} {
+  const time = content.match(/^\s*Time:\s*(.+)$/m)?.[1]?.trim();
+  const description = content
+    .match(/^\s*Description:\s*(.+)$/m)?.[1]
+    ?.trim();
+
+  // Prefer the last "Caused by:" — that's the real root of a stack trace.
+  const causedByAll = [
+    ...content.matchAll(/^Caused by:\s*([^\r\n]+)$/gm),
+  ].map((m) => m[1]?.trim() ?? "");
+  let exception: string | undefined = causedByAll.at(-1);
+  if (!exception) {
+    exception = content
+      .match(/^[^\r\n]*?(?:[A-Z][a-zA-Z]*(?:Exception|Error))[^\r\n]*$/m)?.[0]
+      ?.trim();
+  }
+
+  const packages = new Set<string>();
+  const stackRe = /at\s+([a-zA-Z_][\w]*(?:\.[a-zA-Z_][\w$]*)+)\s*\(/g;
+  for (const m of content.matchAll(stackRe)) {
+    const fq = m[1] ?? "";
+    const top = fq.split(".").slice(0, 2).join(".");
+    if (!top) continue;
+    if (isBoringPackage(top)) continue;
+    packages.add(top);
+    if (packages.size >= 20) break;
+  }
+
+  return {
+    time,
+    description,
+    exception,
+    suspectPackages: [...packages],
+  };
+}
+
+/** Return true for packages that aren't mods — we want to filter these
+ *  out of the suspect list so what's left is something worth blaming. */
+function isBoringPackage(top: string): boolean {
+  const lower = top.toLowerCase();
+  const boringPrefixes = [
+    "java.",
+    "javax.",
+    "jdk.",
+    "sun.",
+    "com.sun.",
+    "net.minecraft.",
+    "net.minecraftforge.",
+    "net.neoforged.",
+    "com.mojang.",
+    "cpw.mods.",
+    "org.apache.",
+    "org.slf4j.",
+    "org.objectweb.",
+    "org.bukkit.",
+    "org.spongepowered.",
+    "io.netty.",
+    "com.google.",
+    "com.electronwill.",
+    "com.mohistmc.",
+    "net.fabricmc.",
+    "net.fabricmc.loader.",
+    "org.quiltmc.",
+    "io.papermc.",
+    "kotlin.",
+    "scala.",
+  ];
+  for (const p of boringPrefixes) {
+    if (lower === p.slice(0, -1) || lower.startsWith(p)) return true;
+  }
+  return false;
 }
