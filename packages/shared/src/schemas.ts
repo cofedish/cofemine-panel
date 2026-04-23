@@ -28,11 +28,20 @@ export const portMappingSchema = z.object({
 });
 
 const createServerShape = z.object({
+  // Human-readable name. We allow Unicode letters/digits (so Cyrillic +
+  // accented names work) plus common punctuation that shows up in modpack
+  // titles — colon, apostrophe, parentheses, ampersand, etc. The Docker
+  // container name is derived separately via toContainerName() which
+  // strips this down to an ASCII slug, so shell/container safety isn't
+  // coupled to what the user types here.
   name: z
     .string()
     .min(2)
-    .max(48)
-    .regex(/^[a-zA-Z0-9 _.-]+$/, "Invalid characters"),
+    .max(80)
+    .regex(
+      /^[\p{L}\p{N} _.,'"()&!?:;+\-]+$/u,
+      "Invalid characters"
+    ),
   description: z.string().max(500).optional(),
   nodeId: z.string().min(1),
   type: z.enum(SERVER_TYPES),
