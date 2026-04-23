@@ -13,7 +13,7 @@ const ACCENT_PREVIEW: Record<Accent, { label: string; hex: string }> = {
   ruby: { label: "Ruby", hex: "#E11D48" },
   lucifer: { label: "Lucifer", hex: "#991B1B" },
   caramel: { label: "Caramel", hex: "#B45309" },
-  minecraft: { label: "Minecraft", hex: "#55A630" },
+  minecraft: { label: "Minecraft", hex: "#65A30D" },
 };
 
 /**

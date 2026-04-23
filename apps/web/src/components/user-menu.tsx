@@ -80,16 +80,16 @@ export function UserMenu(): JSX.Element {
             </div>
 
             <div className="px-2 pt-1 pb-0.5 text-[10px] uppercase tracking-wider text-ink-muted">
-              Theme
+              {t("theme.label")}
             </div>
             <div className="grid grid-cols-3 gap-1 p-1">
               {(
                 [
-                  { v: "light", label: "Light", Icon: Sun },
-                  { v: "dark", label: "Dark", Icon: Moon },
-                  { v: "system", label: "System", Icon: Monitor },
+                  { v: "light", labelKey: "theme.light", Icon: Sun },
+                  { v: "dark", labelKey: "theme.dark", Icon: Moon },
+                  { v: "system", labelKey: "theme.system", Icon: Monitor },
                 ] as const
-              ).map(({ v, label, Icon }) => (
+              ).map(({ v, labelKey, Icon }) => (
                 <button
                   key={v}
                   onClick={() => setTheme(v)}
@@ -101,7 +101,7 @@ export function UserMenu(): JSX.Element {
                   )}
                 >
                   <Icon size={14} />
-                  {label}
+                  {t(labelKey)}
                 </button>
               ))}
             </div>
@@ -134,10 +134,10 @@ export function UserMenu(): JSX.Element {
             <div className="divider my-1" />
 
             <MenuItem href="/settings" icon={<Settings size={14} />} onClick={() => setOpen(false)}>
-              Settings
+              {t("menu.settings")}
             </MenuItem>
             <MenuButton icon={<LogOut size={14} />} onClick={logout} danger>
-              Sign out
+              {t("menu.signOut")}
             </MenuButton>
           </motion.div>
         )}

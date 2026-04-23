@@ -13,7 +13,7 @@
 
 const COLS = 80;
 const BLOCK = 20; // px in the viewBox
-const MAX_HEIGHT = 10; // in blocks
+const MAX_HEIGHT = 14; // in blocks
 const SEED = 1337;
 
 function seededHeights(): number[] {
@@ -42,7 +42,7 @@ export function MinecraftBackdrop(): JSX.Element {
       aria-hidden
       className="pointer-events-none fixed inset-x-0 bottom-0 z-0 select-none opacity-[0.18] dark:opacity-[0.22]"
       style={{
-        height: "clamp(160px, 32vh, 320px)",
+        height: "clamp(220px, 44vh, 440px)",
         // Soft fade from fully-visible at the bottom to transparent at the top
         // so the skyline dissolves into the page background.
         WebkitMaskImage:

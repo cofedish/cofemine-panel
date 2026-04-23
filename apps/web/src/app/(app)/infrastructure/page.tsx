@@ -28,6 +28,7 @@ const STATUS_LABEL: Record<string, string> = {
 export default function InfrastructurePage(): JSX.Element {
   const { data } = useSWR<Node[]>("/nodes", fetcher);
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const { t } = useT();
 
   const onlineCount =
     data?.filter((n) => n.status === "ONLINE").length ?? 0;
@@ -35,12 +36,12 @@ export default function InfrastructurePage(): JSX.Element {
   return (
     <div className="space-y-8">
       <PageHeader
-        title="Infrastructure"
-        description="Docker hosts (nodes) that run your Minecraft server containers. Each node runs its own agent; the panel talks to them over a shared secret."
+        title={t("infra.title")}
+        description={t("infra.subtitle")}
         badge={
           data && (
             <span className="chip chip-muted">
-              {onlineCount} / {data.length} online
+              {t("infra.online", { n: onlineCount, total: data.length })}
             </span>
           )
         }
@@ -49,7 +50,7 @@ export default function InfrastructurePage(): JSX.Element {
             className="btn btn-primary"
             onClick={() => setDrawerOpen(true)}
           >
-            <Plus size={16} /> Add node
+            <Plus size={16} /> {t("infra.addNode")}
           </button>
         }
       />

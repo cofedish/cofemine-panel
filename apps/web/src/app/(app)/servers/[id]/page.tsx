@@ -58,14 +58,14 @@ type Stats = {
 type Player = { online: number; max: number; players: string[] };
 
 const TABS = [
-  { key: "overview", label: "Overview" },
-  { key: "console", label: "Console" },
-  { key: "files", label: "Files" },
-  { key: "properties", label: "Properties" },
-  { key: "backups", label: "Backups" },
-  { key: "schedules", label: "Schedules" },
-  { key: "content", label: "Mods & Plugins" },
-  { key: "diagnostics", label: "Diagnostics" },
+  { key: "overview", i18n: "server.tabs.overview" },
+  { key: "console", i18n: "server.tabs.console" },
+  { key: "files", i18n: "server.tabs.files" },
+  { key: "properties", i18n: "server.tabs.properties" },
+  { key: "backups", i18n: "server.tabs.backups" },
+  { key: "schedules", i18n: "server.tabs.schedules" },
+  { key: "content", i18n: "server.tabs.content" },
+  { key: "diagnostics", i18n: "server.tabs.diagnostics" },
 ] as const;
 type Tab = (typeof TABS)[number]["key"];
 
@@ -267,7 +267,7 @@ export default function ServerDetailPage(): JSX.Element {
         <div className="relative grid grid-cols-2 md:grid-cols-4 gap-6">
           <HeroStat
             icon={<Users size={14} />}
-            label="Players"
+            label={t("tile.players")}
             value={
               players
                 ? `${players.online}/${players.max}`
@@ -278,27 +278,27 @@ export default function ServerDetailPage(): JSX.Element {
           />
           <HeroStat
             icon={<Cpu size={14} />}
-            label="CPU"
+            label={t("server.hero.cpu")}
             value={
               stats?.cpuPercent != null ? `${stats.cpuPercent}%` : "—"
             }
           />
           <HeroStat
             icon={<HardDriveIcon size={14} />}
-            label="Memory"
+            label={t("tile.memory")}
             value={
               stats?.memoryBytes != null
                 ? `${(stats.memoryBytes / 1024 / 1024).toFixed(0)} MB`
-                : `${data.memoryMb} MB limit`
+                : t("server.hero.memoryLimit", { mb: data.memoryMb })
             }
           />
           <HeroStat
             icon={<Clock size={14} />}
-            label="Last start"
+            label={t("tile.lastStartLabel")}
             value={
               data.lastStartedAt
                 ? new Date(data.lastStartedAt).toLocaleString()
-                : "never"
+                : t("tile.neverStarted")
             }
           />
         </div>
@@ -306,19 +306,19 @@ export default function ServerDetailPage(): JSX.Element {
 
       {/* Tabs */}
       <div className="border-b border-line flex gap-1 overflow-x-auto">
-        {TABS.map((t) => (
+        {TABS.map((tb) => (
           <button
-            key={t.key}
-            onClick={() => setTab(t.key)}
+            key={tb.key}
+            onClick={() => setTab(tb.key)}
             className={cn(
               "relative px-4 py-3 text-sm whitespace-nowrap transition-colors",
-              tab === t.key
+              tab === tb.key
                 ? "text-ink font-medium"
                 : "text-ink-secondary hover:text-ink"
             )}
           >
-            {t.label}
-            {tab === t.key && (
+            {t(tb.i18n)}
+            {tab === tb.key && (
               <motion.span
                 layoutId="server-tab"
                 className="absolute -bottom-px left-2 right-2 h-0.5 bg-[rgb(var(--accent))] rounded-full"
@@ -374,29 +374,36 @@ function Overview({
   data: ServerDetail;
   players: Player | null;
 }): JSX.Element {
+  const { t } = useT();
   const ports = Array.isArray(data.ports) ? (data.ports as any[]) : [];
   return (
     <div className="space-y-5">
       <ServerIconEditor serverId={data.id} />
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
       <div className="tile p-6 lg:col-span-2 space-y-5">
-        <h3 className="heading-md">Runtime configuration</h3>
+        <h3 className="heading-md">{t("server.overview.runtime")}</h3>
         <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-4 text-sm">
-          <Row label="Server type">{data.type}</Row>
-          <Row label="Version">{data.version}</Row>
-          <Row label="Memory limit">{data.memoryMb} MB</Row>
-          <Row label="CPU limit">{data.cpuLimit ?? "unlimited"}</Row>
-          <Row label="Node">{data.node.name}</Row>
-          <Row label="Ports">
+          <Row label={t("server.hero.serverType")}>{data.type}</Row>
+          <Row label={t("server.hero.version")}>{data.version}</Row>
+          <Row label={t("server.overview.memoryLimit")}>
+            {data.memoryMb} MB
+          </Row>
+          <Row label={t("server.overview.cpuLimit")}>
+            {data.cpuLimit ?? t("server.overview.unlimited")}
+          </Row>
+          <Row label={t("tile.node")}>{data.node.name}</Row>
+          <Row label={t("server.overview.ports")}>
             {ports.length > 0
               ? ports
                   .map((p) => `${p.host}→${p.container}/${p.protocol}`)
                   .join(", ")
               : "—"}
           </Row>
-          <Row label="Env vars" full>
+          <Row label={t("server.overview.env")} full>
             {Object.keys(data.env ?? {}).length === 0 ? (
-              <span className="text-ink-muted italic">none</span>
+              <span className="text-ink-muted italic">
+                {t("server.overview.envNone")}
+              </span>
             ) : (
               <div className="flex flex-wrap gap-1.5 mt-1">
                 {Object.entries(data.env).map(([k, v]) => (
@@ -415,7 +422,7 @@ function Overview({
       </div>
 
       <div className="tile p-6 space-y-4">
-        <h3 className="heading-md">Players online</h3>
+        <h3 className="heading-md">{t("server.overview.players")}</h3>
         {players ? (
           <>
             <div className="text-5xl font-semibold tabular-nums">
@@ -433,7 +440,7 @@ function Overview({
               </div>
             ) : (
               <p className="text-sm text-ink-muted">
-                No players online right now.
+                {t("server.overview.noPlayers")}
               </p>
             )}
           </>
@@ -454,6 +461,7 @@ function Overview({
  * /data/server-icon.png via the agent; itzg picks it up on next start.
  */
 function ServerIconEditor({ serverId }: { serverId: string }): JSX.Element {
+  const { t } = useT();
   // Load the currently-saved icon so the preview isn't empty after a
   // page refresh. useSWR auto-updates when we POST/DELETE and mutate().
   const { data: current } = useSWR<{ data: string | null }>(
@@ -484,7 +492,7 @@ function ServerIconEditor({ serverId }: { serverId: string }): JSX.Element {
     setStatus(null);
     try {
       await api.post(`/servers/${serverId}/icon`, { data: value });
-      setStatus("Icon saved.");
+      setStatus(t("server.icon.saved"));
       setValueDirty(false);
       await mutate(`/servers/${serverId}/icon`);
     } catch (e) {
@@ -501,7 +509,7 @@ function ServerIconEditor({ serverId }: { serverId: string }): JSX.Element {
       await api.del(`/servers/${serverId}/icon`);
       setValue(null);
       setValueDirty(false);
-      setStatus("Icon removed.");
+      setStatus(t("server.icon.removed"));
       await mutate(`/servers/${serverId}/icon`);
     } catch (e) {
       setStatus(e instanceof ApiError ? e.message : String(e));
@@ -513,10 +521,9 @@ function ServerIconEditor({ serverId }: { serverId: string }): JSX.Element {
   return (
     <section className="tile p-6 space-y-4">
       <div>
-        <h3 className="heading-md">Server icon</h3>
+        <h3 className="heading-md">{t("server.icon.title")}</h3>
         <p className="text-sm text-ink-muted mt-1">
-          Shown next to the MOTD in the in-game server list. Upload any
-          image — we'll crop to a square and save as a 64×64 PNG.
+          {t("server.icon.body")}
         </p>
       </div>
       <ImageUpload
@@ -525,8 +532,6 @@ function ServerIconEditor({ serverId }: { serverId: string }): JSX.Element {
         targetSize={64}
         previewSize={80}
         shape="square"
-        label="Upload icon"
-        hint="Auto-resized to 64×64 PNG before upload."
       />
       <div className="flex gap-2 items-center">
         <button
@@ -534,10 +539,10 @@ function ServerIconEditor({ serverId }: { serverId: string }): JSX.Element {
           onClick={save}
           disabled={!value || busy}
         >
-          {busy ? "Saving…" : "Save icon"}
+          {busy ? t("server.icon.saving") : t("server.icon.save")}
         </button>
         <button className="btn btn-ghost" onClick={clear} disabled={busy}>
-          Remove saved icon
+          {t("server.icon.remove")}
         </button>
         {status && (
           <span className="text-xs text-ink-secondary">{status}</span>

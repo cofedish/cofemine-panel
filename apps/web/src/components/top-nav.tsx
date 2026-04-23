@@ -5,13 +5,14 @@ import { motion } from "framer-motion";
 import { cn } from "@/lib/cn";
 import { LogoMark, Wordmark } from "./logo";
 import { UserMenu } from "./user-menu";
+import { useT } from "@/lib/i18n";
 
 const LINKS = [
-  { href: "/", label: "Dashboard" },
-  { href: "/infrastructure", label: "Infrastructure" },
-  { href: "/integrations", label: "Integrations" },
-  { href: "/administration", label: "Administration" },
-];
+  { href: "/", key: "nav.dashboard" },
+  { href: "/infrastructure", key: "nav.infrastructure" },
+  { href: "/integrations", key: "nav.integrations" },
+  { href: "/administration", key: "nav.administration" },
+] as const;
 
 /**
  * Top navigation. Horizontal, sticky, backdrop-blurred. On mobile the
@@ -19,6 +20,7 @@ const LINKS = [
  */
 export function TopNav(): JSX.Element {
   const pathname = usePathname() ?? "/";
+  const { t } = useT();
 
   return (
     <header className="sticky top-0 z-40 bg-[rgb(var(--bg-base))]/80 backdrop-blur-xl border-b border-line">
@@ -52,7 +54,7 @@ export function TopNav(): JSX.Element {
                     transition={{ type: "spring", duration: 0.35, bounce: 0.15 }}
                   />
                 )}
-                <span className="relative z-10">{l.label}</span>
+                <span className="relative z-10">{t(l.key)}</span>
               </Link>
             );
           })}
@@ -81,7 +83,7 @@ export function TopNav(): JSX.Element {
                   : "text-ink-secondary hover:text-ink hover:bg-surface-2"
               )}
             >
-              {l.label}
+              {t(l.key)}
             </Link>
           );
         })}

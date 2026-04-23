@@ -6,6 +6,7 @@ import { ServerTile, type ServerSummary } from "@/components/server-tile";
 import { Stagger, StaggerItem } from "@/components/motion";
 import { PageHeader } from "@/components/page-header";
 import { StatCard } from "@/components/stat-card";
+import { useT } from "@/lib/i18n";
 import {
   Plus,
   ServerCog,
@@ -25,6 +26,7 @@ export default function Dashboard(): JSX.Element {
     "/nodes",
     fetcher
   );
+  const { t } = useT();
 
   const running = servers?.filter((s) => s.status === "running").length ?? 0;
   const total = servers?.length ?? 0;
@@ -33,15 +35,11 @@ export default function Dashboard(): JSX.Element {
   return (
     <div className="space-y-10">
       <PageHeader
-        title="Dashboard"
-        description={
-          total === 0
-            ? "No servers yet — spin up your first Minecraft server in under a minute."
-            : "A live view of every Minecraft server you operate."
-        }
+        title={t("dashboard.title")}
+        description={t("dashboard.subtitle")}
         actions={
           <Link href="/servers/new" className="btn btn-primary">
-            <Plus size={16} /> New server
+            <Plus size={16} /> {t("dashboard.newServer")}
           </Link>
         }
       />
@@ -49,37 +47,43 @@ export default function Dashboard(): JSX.Element {
       <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <StatCard
           icon={<ServerCog size={18} />}
-          label="Servers"
+          label={t("dashboard.stats.servers")}
           value={total}
-          hint={total === 0 ? "none yet" : `${running} running`}
+          hint={
+            total === 0
+              ? t("dashboard.stats.noneYet")
+              : t("dashboard.stats.runningNote", { n: running })
+          }
           tone="accent"
         />
         <StatCard
           icon={<Radio size={18} />}
-          label="Running"
+          label={t("dashboard.stats.running")}
           value={running}
-          hint={`${total - running} idle`}
+          hint={t("dashboard.stats.idle", { n: total - running })}
           tone="success"
         />
         <StatCard
           icon={<HardDrive size={18} />}
-          label="Nodes online"
+          label={t("dashboard.stats.nodes")}
           value={nodes ? `${onlineNodes}/${nodes.length}` : "—"}
-          hint="Docker hosts"
+          hint={t("dashboard.stats.dockerHosts")}
         />
         <StatCard
           icon={<UsersIcon size={18} />}
-          label="Total players"
+          label={t("dashboard.stats.players")}
           value="—"
-          hint="live across servers"
+          hint={t("dashboard.stats.liveAcrossServers")}
         />
       </section>
 
       <section className="space-y-4">
         <div className="flex items-center justify-between">
-          <h2 className="heading-lg">Your servers</h2>
+          <h2 className="heading-lg">{t("dashboard.yourServers")}</h2>
           <span className="text-sm text-ink-muted">
-            {total === 0 ? "Empty" : `${total} total`}
+            {total === 0
+              ? t("dashboard.empty")
+              : t("dashboard.total", { n: total })}
           </span>
         </div>
         {isLoading ? (
@@ -118,22 +122,22 @@ function GridSkeleton(): JSX.Element {
 }
 
 function EmptyState(): JSX.Element {
+  const { t } = useT();
   return (
     <div className="tile p-14 text-center">
       <div className="mx-auto w-16 h-16 rounded-2xl bg-[rgb(var(--accent-soft))] text-[rgb(var(--accent))] grid place-items-center mb-5">
         <ServerCog size={28} />
       </div>
-      <h3 className="heading-lg mb-1">Start your first server</h3>
+      <h3 className="heading-lg mb-1">{t("dashboard.startFirst.title")}</h3>
       <p className="text-ink-secondary max-w-md mx-auto mb-6">
-        Pick a type (Vanilla, Paper, Fabric, Forge…), choose a version, and
-        we'll bring up a fresh Minecraft container for you.
+        {t("dashboard.startFirst.body")}
       </p>
       <div className="flex items-center justify-center gap-3">
         <Link href="/servers/new" className="btn btn-primary">
-          <Plus size={16} /> Create server
+          <Plus size={16} /> {t("dashboard.createServer")}
         </Link>
         <Link href="/integrations" className="btn btn-ghost">
-          <Plug size={16} /> Integrations
+          <Plug size={16} /> {t("nav.integrations")}
         </Link>
       </div>
     </div>

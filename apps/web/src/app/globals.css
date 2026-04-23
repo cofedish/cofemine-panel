@@ -189,20 +189,22 @@
   --ring: 234 179 8;
 }
 
-/* Minecraft — classic grass-block green. Saturated, earthy, readable on
- * both light and dark. Hex reference: #55A630 (light) / #84CC16 (dark). */
+/* Minecraft — grass-block lime-green. Pushed distinctly yellow so it
+ * doesn't collide with Emerald's teal-green. Reference: tailwind lime
+ * scale — #65A30D (light) / #A3E635 (dark). */
 .accent-minecraft {
-  --accent: 85 166 48;
-  --accent-hover: 70 140 40;
-  --accent-soft: 220 252 180;
+  --accent: 101 163 13;
+  --accent-hover: 77 124 15;
+  --accent-soft: 236 252 203;
   --accent-ink: 255 255 255;
-  --ring: 85 166 48;
+  --ring: 101 163 13;
 }
 .dark.accent-minecraft {
-  --accent: 132 204 22;
-  --accent-hover: 163 230 53;
-  --accent-soft: 28 55 12;
-  --ring: 132 204 22;
+  --accent: 163 230 53;
+  --accent-hover: 190 242 100;
+  --accent-soft: 26 46 5;
+  --accent-ink: 20 33 8;
+  --ring: 163 230 53;
 }
 
 /* ======================================================================

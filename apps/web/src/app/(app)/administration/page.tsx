@@ -37,29 +37,30 @@ type AuditEvent = {
 };
 
 const TABS = [
-  { key: "users", label: "Users", icon: UserPlus },
-  { key: "activity", label: "Activity log", icon: ClipboardList },
+  { key: "users", i18n: "admin.tabs.users", icon: UserPlus },
+  { key: "activity", i18n: "admin.tabs.audit", icon: ClipboardList },
 ] as const;
 type Tab = (typeof TABS)[number]["key"];
 
 export default function AdministrationPage(): JSX.Element {
   const [tab, setTab] = useState<Tab>("users");
+  const { t } = useT();
 
   return (
     <div className="space-y-8">
       <PageHeader
-        title="Administration"
-        description="Manage panel users and review activity. Server-specific logs live on each server's page."
+        title={t("nav.administration")}
+        description=""
       />
 
       <div className="flex gap-1 border-b border-line -mt-2">
-        {TABS.map((t) => {
-          const Icon = t.icon;
-          const active = tab === t.key;
+        {TABS.map((tb) => {
+          const Icon = tb.icon;
+          const active = tab === tb.key;
           return (
             <button
-              key={t.key}
-              onClick={() => setTab(t.key)}
+              key={tb.key}
+              onClick={() => setTab(tb.key)}
               className={cn(
                 "relative px-4 py-3 text-sm inline-flex items-center gap-2 transition-colors",
                 active
@@ -68,7 +69,7 @@ export default function AdministrationPage(): JSX.Element {
               )}
             >
               <Icon size={14} />
-              {t.label}
+              {t(tb.i18n)}
               {active && (
                 <motion.span
                   layoutId="admin-tab"
@@ -99,12 +100,12 @@ function UsersTab(): JSX.Element {
   return (
     <div className="space-y-5">
       <div className="flex items-center justify-between">
-        <h2 className="heading-lg">Panel users</h2>
+        <h2 className="heading-lg">{t("admin.users.title")}</h2>
         <button
           className="btn btn-primary"
           onClick={() => setDrawerOpen(true)}
         >
-          <UserPlus size={16} /> Invite user
+          <UserPlus size={16} /> {t("admin.users.invite")}
         </button>
       </div>
 
@@ -113,10 +114,10 @@ function UsersTab(): JSX.Element {
           <table className="w-full text-sm">
             <thead className="bg-surface-2 text-left text-xs text-ink-muted uppercase tracking-wider">
               <tr>
-                <th className="px-5 py-3 font-medium">User</th>
-                <th className="px-5 py-3 font-medium">Email</th>
-                <th className="px-5 py-3 font-medium">Role</th>
-                <th className="px-5 py-3 font-medium">Joined</th>
+                <th className="px-5 py-3 font-medium">{t("admin.users.table.user")}</th>
+                <th className="px-5 py-3 font-medium">{t("admin.users.table.email")}</th>
+                <th className="px-5 py-3 font-medium">{t("admin.users.table.role")}</th>
+                <th className="px-5 py-3 font-medium">{t("admin.users.table.joined")}</th>
                 <th className="px-5 py-3" />
               </tr>
             </thead>

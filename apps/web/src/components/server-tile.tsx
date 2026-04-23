@@ -7,6 +7,7 @@ import { StatusDot } from "./status-dot";
 import { ServerTypeHero, getServerMeta } from "./server-icons";
 import { cn } from "@/lib/cn";
 import { Users, ArrowUpRight, Cpu } from "lucide-react";
+import { useT } from "@/lib/i18n";
 
 export interface ServerSummary {
   id: string;
@@ -24,6 +25,7 @@ export interface ServerSummary {
 
 export function ServerTile({ server }: { server: ServerSummary }): JSX.Element {
   const meta = getServerMeta(server.type);
+  const { t } = useT();
 
   const { data: players } = useSWR<{ online: number; max: number }>(
     server.status === "running" ? `/servers/${server.id}/players` : null,
@@ -97,7 +99,7 @@ export function ServerTile({ server }: { server: ServerSummary }): JSX.Element {
           <div className="grid grid-cols-3 gap-4 pt-3 border-t border-line">
             <Cell
               icon={<Users size={12} />}
-              label="Players"
+              label={t("tile.players")}
               value={
                 players
                   ? `${players.online}/${players.max}`
@@ -108,23 +110,24 @@ export function ServerTile({ server }: { server: ServerSummary }): JSX.Element {
             />
             <Cell
               icon={<Cpu size={12} />}
-              label="Memory"
+              label={t("tile.memory")}
               value={`${Math.round(server.memoryMb / 1024)}G`}
             />
             <Cell
-              label="Port"
+              label={t("tile.port")}
               value={primary ? String(primary.host) : "—"}
             />
           </div>
 
           <div className="flex items-center justify-between text-xs text-ink-muted">
             <span>
-              Node <span className="text-ink-secondary">{server.node.name}</span>
+              {t("tile.node")}{" "}
+              <span className="text-ink-secondary">{server.node.name}</span>
             </span>
             {server.lastStartedAt ? (
-              <span>Last start {timeAgo(server.lastStartedAt)}</span>
+              <span>{t("tile.lastStart", { ago: timeAgo(server.lastStartedAt, t) })}</span>
             ) : (
-              <span>Never started</span>
+              <span>{t("tile.neverStarted")}</span>
             )}
           </div>
         </div>
@@ -155,12 +158,15 @@ function Cell({
   );
 }
 
-function timeAgo(iso: string): string {
+function timeAgo(
+  iso: string,
+  t: (k: string, v?: Record<string, string | number>) => string
+): string {
   const diff = (Date.now() - new Date(iso).getTime()) / 1000;
-  if (diff < 60) return "just now";
-  if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
-  if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
-  return `${Math.floor(diff / 86400)}d ago`;
+  if (diff < 60) return t("time.secondsAgo", { n: Math.max(1, Math.floor(diff)) });
+  if (diff < 3600) return t("time.minutesAgo", { n: Math.floor(diff / 60) });
+  if (diff < 86400) return t("time.hoursAgo", { n: Math.floor(diff / 3600) });
+  return t("time.daysAgo", { n: Math.floor(diff / 86400) });
 }
 
 /** Old component alias for files that still import ServerCard. */

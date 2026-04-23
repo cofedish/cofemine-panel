@@ -110,6 +110,7 @@ export function ServerContent({ serverId }: { serverId: string }): JSX.Element {
     { refreshInterval: 20000, shouldRetryOnError: false }
   );
 
+  const { t } = useT();
   const [tab, setTab] = useState<InnerTab>("installed");
   const [initialQuery, setInitialQuery] = useState<string | null>(null);
   const [jumpVersion, setJumpVersion] = useState(0);
@@ -146,13 +147,13 @@ export function ServerContent({ serverId }: { serverId: string }): JSX.Element {
         <TabButton
           active={tab === "installed"}
           onClick={() => setTab("installed")}
-          label="Installed"
+          label={t("content.tabs.installed")}
           count={totalInstalled}
         />
         <TabButton
           active={tab === "browse"}
           onClick={() => setTab("browse")}
-          label="Browse & install"
+          label={t("content.tabs.browse")}
         />
       </div>
 
@@ -296,7 +297,7 @@ function InstalledPanel({
             />
             <input
               className="input !py-1.5 pl-7 text-xs w-44"
-              placeholder="Filter…"
+              placeholder={t("content.installed.filter")}
               value={query}
               onChange={(e) => setQuery(e.target.value)}
             />
@@ -315,10 +316,10 @@ function InstalledPanel({
       {filtered.length === 0 ? (
         <div className="tile p-10 text-center text-ink-muted">
           {installed === undefined
-            ? "Loading…"
+            ? t("common.loading")
             : query
-              ? `No ${sub} match "${query}".`
-              : `No ${sub} installed yet.`}
+              ? t("content.installed.noMatch", { type: sub, q: query })
+              : t("content.installed.empty", { type: sub })}
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
@@ -611,14 +612,9 @@ function FailuresPanel({
           <AlertTriangle size={16} />
         </span>
         <div className="flex-1 min-w-[280px]">
-          <h3 className="heading-md">Failed CurseForge downloads</h3>
+          <h3 className="heading-md">{t("content.failures.title")}</h3>
           <p className="text-sm text-ink-muted mt-1">
-            {failures.length} mod{failures.length === 1 ? "" : "s"} the pack
-            couldn't fetch automatically — the mod authors disabled third-party
-            downloads. <b>Skip failures & retry</b> adds them to{" "}
-            <code className="kbd">CF_EXCLUDE_MODS</code> so itzg installs the
-            rest. After that, use <b>Find on Modrinth</b> per mod to drop in
-            open-source replacements.
+            {t("content.failures.desc", { n: failures.length })}
           </p>
         </div>
         <div className="flex gap-2 shrink-0 flex-wrap">
@@ -629,7 +625,7 @@ function FailuresPanel({
             title="Search Modrinth for each failed mod and install the best match"
           >
             <ModrinthMark size={12} />{" "}
-            {autoBusy ? "Searching Modrinth…" : "Try Modrinth for all"}
+            {autoBusy ? t("content.tryModrinthAll.busy") : t("content.tryModrinthAll")}
           </button>
           {idsToSkip.length > 0 && (
             <button
@@ -638,7 +634,7 @@ function FailuresPanel({
               disabled={busy || autoBusy || !server}
               title="Add these mod IDs to CF_EXCLUDE_MODS and rebuild the container"
             >
-              {busy ? "Applying…" : "Skip failures & retry"}
+              {busy ? t("content.skipRetry.applying") : t("content.skipRetry")}
             </button>
           )}
         </div>
@@ -663,7 +659,7 @@ function FailuresPanel({
               className="btn-subtle !py-1.5 !px-3 text-xs"
               onClick={() => onFindOnModrinth(f.modName)}
             >
-              <ModrinthMark size={12} /> Find on Modrinth
+              <ModrinthMark size={12} /> {t("content.findOnModrinth")}
             </button>
             {f.modId && (
               <a
@@ -701,6 +697,7 @@ function BrowsePanel({
   jumpVersion: number;
 }): JSX.Element {
   const { data: integ } = useSWR<Integrations>("/integrations", fetcher);
+  const { t } = useT();
   const [provider, setProvider] = useState<"modrinth" | "curseforge">(
     "modrinth"
   );
@@ -902,14 +899,17 @@ function BrowsePanel({
           />
           <input
             className="input pl-8"
-            placeholder={`Search ${provider} ${kind}s…`}
+            placeholder={t("content.browse.searchPlaceholder", {
+              provider,
+              kind: t(`content.browse.kind.${kind}`),
+            })}
             value={query}
             onChange={(e) => setQuery(e.target.value)}
           />
         </div>
         <input
           className="input"
-          placeholder="MC version (e.g. 1.21.1)"
+          placeholder={t("content.browse.mcVersion")}
           value={gameVersion}
           onChange={(e) => setGameVersion(e.target.value)}
         />
@@ -918,7 +918,7 @@ function BrowsePanel({
           value={loader}
           onChange={(e) => setLoader(e.target.value)}
         >
-          <option value="">any loader</option>
+          <option value="">{t("content.browse.anyLoader")}</option>
           <option value="fabric">fabric</option>
           <option value="forge">forge</option>
           <option value="neoforge">neoforge</option>
@@ -930,20 +930,21 @@ function BrowsePanel({
           value={kind}
           onChange={(e) => setKind(e.target.value as Kind)}
         >
-          <option value="mod">mod</option>
-          <option value="modpack">modpack</option>
-          <option value="plugin">plugin</option>
-          <option value="datapack">datapack</option>
+          <option value="mod">{t("content.browse.kind.mod")}</option>
+          <option value="modpack">{t("content.browse.kind.modpack")}</option>
+          <option value="plugin">{t("content.browse.kind.plugin")}</option>
+          <option value="datapack">{t("content.browse.kind.datapack")}</option>
         </select>
       </div>
 
       <div className="flex items-center justify-between min-h-[20px] text-sm">
         <span className="text-ink-muted">
           {busy
-            ? "Searching…"
-            : `${results.length} result${results.length === 1 ? "" : "s"}${
-                hasMore ? "+" : ""
-              }`}
+            ? t("content.browse.searching")
+            : t("content.browse.results", {
+                n: results.length,
+                more: hasMore ? "+" : "",
+              })}
         </span>
         {msg && <span className="text-[rgb(var(--success))]">{msg}</span>}
         {err && <span className="text-[rgb(var(--danger))]">{err}</span>}
@@ -952,10 +953,7 @@ function BrowsePanel({
       {cfDisabled && provider === "curseforge" ? (
         <div className="tile p-8 text-center">
           <p className="text-sm text-ink-secondary max-w-md mx-auto">
-            CurseForge requires an API key. Go to <b>Integrations</b> and paste
-            one in. Without a key, CurseForge mods can still be installed
-            manually by uploading the JAR to the <code>mods/</code> folder in
-            the File manager.
+            {t("content.browse.cfKeyMissing")}
           </p>
         </div>
       ) : (
@@ -980,8 +978,8 @@ function BrowsePanel({
             {!busy && results.length === 0 && (
               <div className="md:col-span-2 tile p-8 text-center text-ink-muted text-sm">
                 {query
-                  ? "Nothing matches. Try a different query."
-                  : "No results available."}
+                  ? t("content.browse.noMatch")
+                  : t("content.browse.noResults")}
               </div>
             )}
           </div>
@@ -992,7 +990,7 @@ function BrowsePanel({
                 onClick={loadMore}
                 disabled={loadingMore}
               >
-                {loadingMore ? "Loading…" : "Load more"}
+                {loadingMore ? t("content.browse.loadingMore") : t("content.browse.loadMore")}
               </button>
             </div>
           )}
@@ -1013,6 +1011,7 @@ function ResultCard({
   installing: boolean;
   onInstall: () => void;
 }): JSX.Element {
+  const { t } = useT();
   return (
     <div className="tile p-4 flex gap-3">
       {r.iconUrl ? (
@@ -1032,7 +1031,7 @@ function ResultCard({
           <div className="font-medium truncate">{r.name}</div>
           {installed && (
             <span className="chip chip-success">
-              <Check size={10} /> Installed
+              <Check size={10} /> {t("content.installedBadge")}
             </span>
           )}
         </div>
@@ -1053,16 +1052,15 @@ function ResultCard({
         className={cn("btn self-start", installed ? "btn-ghost" : "btn-subtle")}
         onClick={onInstall}
         disabled={installing || installed}
-        title={installed ? "Already installed" : undefined}
       >
         {installed ? (
           <>
-            <Check size={14} /> Installed
+            <Check size={14} /> {t("content.installedBadge")}
           </>
         ) : installing ? (
-          "Installing…"
+          t("content.installing")
         ) : (
-          "Install"
+          t("content.install")
         )}
       </button>
     </div>
