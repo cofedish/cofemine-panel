@@ -15,6 +15,7 @@ export const ACCENTS = [
   "ruby",
   "lucifer",
   "caramel",
+  "minecraft",
 ] as const;
 export type Accent = (typeof ACCENTS)[number];
 const ACCENT_STORAGE = "cofemine-accent";

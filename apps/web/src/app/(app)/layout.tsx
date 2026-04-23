@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { TopNav } from "@/components/top-nav";
 import { AuthGate } from "@/components/auth-gate";
 import { PageFade } from "@/components/motion";
+import { MinecraftBackdrop } from "@/components/minecraft-backdrop";
 
 export default function AppLayout({
   children,
@@ -10,7 +11,8 @@ export default function AppLayout({
 }): JSX.Element {
   return (
     <AuthGate>
-      <div className="min-h-screen flex flex-col">
+      <MinecraftBackdrop />
+      <div className="min-h-screen flex flex-col relative">
         <TopNav />
         <main className="flex-1 w-full max-w-[1400px] mx-auto px-6 py-10">
           <PageFade>{children}</PageFade>

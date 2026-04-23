@@ -189,6 +189,22 @@
   --ring: 234 179 8;
 }
 
+/* Minecraft — classic grass-block green. Saturated, earthy, readable on
+ * both light and dark. Hex reference: #55A630 (light) / #84CC16 (dark). */
+.accent-minecraft {
+  --accent: 85 166 48;
+  --accent-hover: 70 140 40;
+  --accent-soft: 220 252 180;
+  --accent-ink: 255 255 255;
+  --ring: 85 166 48;
+}
+.dark.accent-minecraft {
+  --accent: 132 204 22;
+  --accent-hover: 163 230 53;
+  --accent-soft: 28 55 12;
+  --ring: 132 204 22;
+}
+
 /* ======================================================================
    3. Base
    ====================================================================== */
