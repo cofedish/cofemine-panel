@@ -226,17 +226,38 @@ body {
 }
 
 /* Native-app feel: over static text / icons / chrome the cursor stays
- * as an arrow, never turning into the browser's I-beam. `cursor: auto`
- * (the UA default on paragraphs, headings, spans, etc.) would let the
- * browser pick I-beam over text. Forcing `default` on *everything* and
- * then re-enabling the right cursor on interactive surfaces below is
- * the reliable way. Users can still select text — `user-select` is a
- * separate property and stays default. */
+ * as an arrow, never turning into the browser's I-beam, and clicking
+ * on a heading or label won't drop a blinking text caret in the middle
+ * of the UI (which happens on caret-browsing, double-click-to-select,
+ * or when a parent accidentally becomes focusable). We disable
+ * user-select on app chrome and re-enable it on content that users
+ * might genuinely want to copy (code, mono, paths, etc.). */
 * {
   cursor: default;
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  user-select: none;
 }
 
-/* Explicit I-beam on actual text-input surfaces. */
+/* Re-enable text selection on places users might want to copy from:
+ * file paths, commands, server IDs, env vars, console output. */
+code,
+pre,
+kbd,
+samp,
+.font-mono,
+.kbd,
+code *,
+pre *,
+.font-mono *,
+.kbd * {
+  -webkit-user-select: text;
+  -moz-user-select: text;
+  user-select: text;
+}
+
+/* Explicit I-beam on actual text-input surfaces, and re-enable
+ * user-select there so users can actually type and select their input. */
 input[type="text"],
 input[type="email"],
 input[type="password"],
@@ -249,6 +270,9 @@ textarea,
 [contenteditable="true"],
 [contenteditable="true"] * {
   cursor: text;
+  -webkit-user-select: text;
+  -moz-user-select: text;
+  user-select: text;
 }
 
 /* Clickables always show the hand pointer. */
