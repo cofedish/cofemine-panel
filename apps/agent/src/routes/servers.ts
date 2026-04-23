@@ -139,15 +139,17 @@ export async function serversAgentRoutes(app: FastifyInstance): Promise<void> {
       if (!container) return reply.code(404).send({ error: "No container" });
       switch (action) {
         case "start":
-          await container.start().catch((err) => {
-            if (!String(err).includes("already started")) throw err;
-          });
+          await startWithPortRecovery(container, id, req.log);
           break;
         case "stop":
-          await container.stop({ t: 20 }).catch(() => {});
+          // Actually stop — don't swallow errors. If SIGTERM+timeout didn't
+          // work, escalate to SIGKILL so the next Start isn't blocked by a
+          // container that's still binding the host port.
+          await stopReliably(container, req.log);
           break;
         case "restart":
-          await container.restart({ t: 20 });
+          await stopReliably(container, req.log);
+          await startWithPortRecovery(container, id, req.log);
           break;
         case "kill":
           await container.kill().catch(() => {});
@@ -711,6 +713,137 @@ function parseListOutput(raw: string): {
 
 async function copyRecursive(src: string, dst: string): Promise<void> {
   await fs.cp(src, dst, { recursive: true, force: true });
+}
+
+type Logger = {
+  warn: (obj: unknown, msg?: string) => void;
+  info: (obj: unknown, msg?: string) => void;
+};
+
+/**
+ * Stop a container and *actually* stop it. dockerode's `container.stop`
+ * resolves with an error if the container is already stopped — fine —
+ * but also if SIGTERM hits a stuck JVM and the daemon's grace period
+ * expires without a clean exit. Previously we swallowed that silently,
+ * then the next Start would fail with "port is already allocated" because
+ * the old container was still holding 25565. Now we verify the state
+ * after stop and fall back to kill + wait.
+ */
+async function stopReliably(container: any, log: Logger): Promise<void> {
+  try {
+    await container.stop({ t: 20 });
+  } catch (err) {
+    const msg = String(err);
+    // "container already stopped" is the only benign case
+    if (!/already stopped|is not running/i.test(msg)) {
+      log.warn({ err }, "stop returned an error; will verify state");
+    }
+  }
+  // Confirm. If Docker still reports Running, escalate to kill.
+  try {
+    const info = await container.inspect();
+    if (info.State?.Running) {
+      log.warn({}, "container still running after stop; sending SIGKILL");
+      await container.kill().catch(() => {});
+      await container.wait({ condition: "not-running" }).catch(() => {});
+    }
+  } catch (err) {
+    log.warn({ err }, "inspect after stop failed");
+  }
+}
+
+/**
+ * Start a container, and if Docker rejects with "port is already
+ * allocated" because a zombie container (created by us in an earlier
+ * deploy / crashed stop) is still bound to the same host port, remove
+ * that zombie and retry once. Any non-cofemine container on the same
+ * port is left alone — we only clean up our own mess.
+ */
+async function startWithPortRecovery(
+  container: any,
+  serverId: string,
+  log: Logger
+): Promise<void> {
+  try {
+    await container.start();
+    return;
+  } catch (err) {
+    const msg = String(err);
+    if (/already started|already running/i.test(msg)) return;
+    if (!/port is already allocated|address already in use/i.test(msg)) {
+      throw err;
+    }
+    log.warn(
+      { err },
+      "start failed: port busy — searching for zombie containers on same port"
+    );
+    // Which host ports does *this* container need?
+    const info = await container.inspect().catch(() => null);
+    const wanted = extractHostPorts(info);
+    if (wanted.length === 0) throw err;
+    const cleaned = await removeZombiesOnPorts(wanted, serverId, log);
+    if (!cleaned) throw err;
+    // Retry once now that the ports are free.
+    await container.start();
+  }
+}
+
+/** Pull out "hostPort/proto" pairs from an inspect result's HostConfig. */
+function extractHostPorts(info: any): Array<{ port: number; proto: string }> {
+  const bindings = info?.HostConfig?.PortBindings as
+    | Record<string, Array<{ HostPort?: string }>>
+    | undefined;
+  if (!bindings) return [];
+  const out: Array<{ port: number; proto: string }> = [];
+  for (const [key, arr] of Object.entries(bindings)) {
+    const [, proto = "tcp"] = key.split("/");
+    for (const b of arr ?? []) {
+      const port = Number(b?.HostPort);
+      if (Number.isFinite(port)) out.push({ port, proto });
+    }
+  }
+  return out;
+}
+
+/**
+ * Find any cofemine-labelled container currently binding one of the
+ * given host ports, remove it, and return true if we cleaned at least
+ * one. Containers for the serverId we're trying to start are skipped
+ * (the caller's container is the one we want to start, not delete).
+ */
+async function removeZombiesOnPorts(
+  wanted: Array<{ port: number; proto: string }>,
+  ownSerID: string,
+  log: Logger
+): Promise<boolean> {
+  let cleaned = false;
+  const all = await docker.listContainers({ all: true });
+  for (const c of all) {
+    const label =
+      c.Labels?.[`${config.AGENT_LABEL_PREFIX}.serverId`] ?? undefined;
+    if (!label) continue; // not one of ours
+    if (label === ownSerID) continue; // our target container, skip
+    const portsInUse = (c.Ports ?? [])
+      .filter((p) => typeof p.PublicPort === "number")
+      .map((p) => ({ port: p.PublicPort as number, proto: p.Type ?? "tcp" }));
+    const clash = portsInUse.some((used) =>
+      wanted.some((w) => w.port === used.port && w.proto === used.proto)
+    );
+    if (!clash) continue;
+    log.warn(
+      { containerId: c.Id, label, portsInUse },
+      "removing zombie cofemine container blocking host port"
+    );
+    try {
+      const zombie = docker.getContainer(c.Id);
+      await zombie.stop({ t: 5 }).catch(() => {});
+      await zombie.remove({ force: true });
+      cleaned = true;
+    } catch (err) {
+      log.warn({ err }, "zombie removal failed");
+    }
+  }
+  return cleaned;
 }
 
 type CrashReportSummary = {
