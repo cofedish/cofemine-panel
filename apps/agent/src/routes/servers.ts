@@ -347,24 +347,59 @@ export async function serversAgentRoutes(app: FastifyInstance): Promise<void> {
       req.log
     );
 
+    // Fallback: anything that didn't resolve by SHA1 (pack-bundled jars,
+    // CF-only uploads that also happen to exist on Modrinth, etc.) —
+    // try a Modrinth project lookup by slug derived from the filename.
+    // Catches the common case where JEI / Create / AE2 etc. got dropped
+    // in by itzg's CF AUTO install and have no hash match.
+    const unresolvedSlugs = new Set<string>();
+    for (const f of [...mods, ...plugins, ...datapacks]) {
+      const resolvedByHash = f.sha1 ? versions[f.sha1] : undefined;
+      if (resolvedByHash) continue;
+      const slug = slugFromFilename(f.name);
+      if (slug) unresolvedSlugs.add(slug);
+    }
+    const projectsBySlug = await modrinthLookupBySlug(
+      [...unresolvedSlugs],
+      req.log
+    );
+
     const enrich = (f: HashedFile): EnrichedFile => {
       const v = f.sha1 ? versions[f.sha1] : undefined;
       const p = v?.project_id ? projects[v.project_id] : undefined;
-      return {
-        name: f.name,
-        size: f.size,
-        mtime: f.mtime,
-        modrinth: p
-          ? {
-              slug: p.slug as string,
-              title: p.title as string,
-              description: p.description as string | undefined,
-              icon: p.icon_url as string | null,
-              versionNumber: v?.version_number as string | undefined,
-              pageUrl: `https://modrinth.com/${p.project_type ?? "mod"}/${p.slug}`,
-            }
-          : undefined,
-      };
+      if (p) {
+        return {
+          name: f.name,
+          size: f.size,
+          mtime: f.mtime,
+          modrinth: {
+            slug: p.slug as string,
+            title: p.title as string,
+            description: p.description as string | undefined,
+            icon: p.icon_url as string | null,
+            versionNumber: v?.version_number as string | undefined,
+            pageUrl: `https://modrinth.com/${p.project_type ?? "mod"}/${p.slug}`,
+          },
+        };
+      }
+      const slugGuess = slugFromFilename(f.name);
+      const sp = slugGuess ? projectsBySlug[slugGuess] : undefined;
+      if (sp) {
+        return {
+          name: f.name,
+          size: f.size,
+          mtime: f.mtime,
+          modrinth: {
+            slug: sp.slug as string,
+            title: sp.title as string,
+            description: sp.description as string | undefined,
+            icon: sp.icon_url as string | null,
+            // No version match without a hash, just skip the version row.
+            pageUrl: `https://modrinth.com/${sp.project_type ?? "mod"}/${sp.slug}`,
+          },
+        };
+      }
+      return { name: f.name, size: f.size, mtime: f.mtime };
     };
 
     return {
@@ -592,6 +627,102 @@ async function modrinthLookupByHash(
     log?.warn({ err }, "modrinth hash lookup failed");
     return { versions: {}, projects: {} };
   }
+}
+
+// 10-minute in-memory cache of Modrinth project lookups by slug. SWR on
+// the web side polls installed-content every 15s; without this we'd hit
+// Modrinth for every unresolved jar on every poll.
+const slugCache = new Map<string, { at: number; project: any | null }>();
+const SLUG_TTL_MS = 10 * 60 * 1000;
+
+/**
+ * Resolve a batch of candidate Modrinth slugs (derived from JAR filenames)
+ * to full project metadata. Modrinth's `/v2/projects?ids=[...]` accepts
+ * both project IDs and slugs, so we can look up many in one call.
+ * Returns a { slug → project } map. Missing slugs are remembered as
+ * negative hits so we don't keep hammering the API for CF-exclusive
+ * mods that Modrinth will never know about.
+ */
+async function modrinthLookupBySlug(
+  slugs: string[],
+  log?: { warn: (obj: unknown, msg?: string) => void }
+): Promise<Record<string, any>> {
+  const now = Date.now();
+  const out: Record<string, any> = {};
+  const needFetch: string[] = [];
+  for (const s of slugs) {
+    const cached = slugCache.get(s);
+    if (cached && now - cached.at < SLUG_TTL_MS) {
+      if (cached.project) out[s] = cached.project;
+    } else {
+      needFetch.push(s);
+    }
+  }
+  if (needFetch.length === 0) return out;
+
+  const ua = "cofemine-panel/0.1 (+https://github.com/cofemine/panel)";
+  try {
+    const idsJson = JSON.stringify(needFetch);
+    const pr = await request(
+      `https://api.modrinth.com/v2/projects?ids=${encodeURIComponent(idsJson)}`,
+      { headers: { "user-agent": ua } }
+    );
+    if (pr.statusCode >= 400) {
+      // Some slug in the batch was invalid. Fall back to per-slug GETs
+      // so a single bad slug doesn't poison the whole list.
+      await Promise.all(
+        needFetch.map(async (s) => {
+          try {
+            const r = await request(
+              `https://api.modrinth.com/v2/project/${encodeURIComponent(s)}`,
+              { headers: { "user-agent": ua } }
+            );
+            if (r.statusCode >= 400) {
+              slugCache.set(s, { at: now, project: null });
+              await r.body.dump().catch(() => {});
+              return;
+            }
+            const proj = (await r.body.json()) as any;
+            slugCache.set(s, { at: now, project: proj });
+            out[s] = proj;
+          } catch {
+            slugCache.set(s, { at: now, project: null });
+          }
+        })
+      );
+      return out;
+    }
+    const list = (await pr.body.json()) as any[];
+    const bySlug = new Map<string, any>();
+    for (const p of list) {
+      if (p?.slug) bySlug.set(String(p.slug), p);
+    }
+    for (const s of needFetch) {
+      const p = bySlug.get(s) ?? null;
+      slugCache.set(s, { at: now, project: p });
+      if (p) out[s] = p;
+    }
+    return out;
+  } catch (err) {
+    log?.warn({ err }, "modrinth slug lookup failed");
+    return out;
+  }
+}
+
+/**
+ * Heuristic slug-from-filename for installed jars. Strips the extension,
+ * normalises separators, and chops off the version tail (1.20.1, v1.2,
+ * mc1.20, -neo-, -forge-, …) so what remains is the mod's root slug.
+ * Purely best-effort — returns "" when the filename is too mangled.
+ */
+function slugFromFilename(name: string): string {
+  let s = name.toLowerCase();
+  s = s.replace(/\.(jar|zip)$/, "");
+  s = s.replace(/[_\s]+/g, "-");
+  const m = s.match(
+    /^([a-z][a-z-]*?)(?=-\d|-v\d|-mc\d|-neo|-forge|-fabric|-quilt|$)/
+  );
+  return (m?.[1] ?? s).replace(/-+$/, "");
 }
 
 /** Demux Docker's multiplexed log stream into a single utf-8 string. */
