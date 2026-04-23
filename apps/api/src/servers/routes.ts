@@ -18,6 +18,7 @@ import {
   readCurseforgeApiKey,
   reconcileAndReprovision,
 } from "./service.js";
+import { readDownloadProxy } from "../integrations/download-proxy.js";
 
 export async function serversRoutes(app: FastifyInstance): Promise<void> {
   // List servers visible to the user.
@@ -120,6 +121,49 @@ export async function serversRoutes(app: FastifyInstance): Promise<void> {
       action: "server.repair",
       resource: id,
       metadata: { envChanged: result.changed },
+    });
+    return { ok: true, ...result };
+  });
+
+  // Toggle the per-server "route modpack install through the download
+  // proxy" flag and reprovision the container so the new JAVA_TOOL_OPTIONS
+  // take effect. Useful after an install has failed with a CDN timeout:
+  // flip on → Start → install tunnels through the proxy. Once the server
+  // boots cleanly, flip off to keep MC's own traffic direct.
+  const toggleProxySchema = z.object({ enabled: z.boolean() });
+  app.post("/:id/install-proxy", async (req) => {
+    const { id } = req.params as { id: string };
+    await assertServerPermission(req, id, "server.edit");
+    const body = toggleProxySchema.parse(req.body);
+    // If the user is turning this ON, make sure there's actually a proxy
+    // to route through. Without the check the flag would flip silently
+    // and the "Retry via proxy" button would appear to do nothing.
+    if (body.enabled) {
+      const proxy = await readDownloadProxy();
+      if (!proxy) {
+        const err = new Error(
+          "Download proxy is not configured. Set host/port in Integrations → Download proxy first."
+        );
+        (err as any).statusCode = 409;
+        throw err;
+      }
+    }
+    const server = await prisma.server.findUniqueOrThrow({ where: { id } });
+    const env = { ...((server.env as Record<string, string> | null) ?? {}) };
+    if (body.enabled) {
+      env["__COFEMINE_INSTALL_PROXY"] = "1";
+    } else {
+      delete env["__COFEMINE_INSTALL_PROXY"];
+    }
+    await prisma.server.update({
+      where: { id },
+      data: { env: env as unknown as object },
+    });
+    const result = await reconcileAndReprovision(id);
+    await writeAudit(req, {
+      action: "server.install-proxy.toggle",
+      resource: id,
+      metadata: { enabled: body.enabled },
     });
     return { ok: true, ...result };
   });

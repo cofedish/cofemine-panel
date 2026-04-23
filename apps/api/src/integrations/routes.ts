@@ -16,6 +16,11 @@ import { NodeClient } from "../nodes/node-client.js";
 import { ModrinthProvider } from "./modrinth-provider.js";
 import { CurseForgeProvider } from "./curseforge-provider.js";
 import type { ContentProvider } from "./content-provider.js";
+import {
+  clearDownloadProxy,
+  readDownloadProxyForDisplay,
+  writeDownloadProxy,
+} from "./download-proxy.js";
 
 const modrinth = new ModrinthProvider();
 const curseforge = new CurseForgeProvider();
@@ -168,6 +173,52 @@ export async function integrationsRoutes(app: FastifyInstance): Promise<void> {
     });
     return { ok: true, result: res };
   });
+
+  // Download proxy — optional SOCKS/HTTP proxy injected into the JVM of
+  // mod-install containers that are explicitly opted-in (per-server flag
+  // flipped by the UI). Settings live under `download.proxy.*` keys in
+  // IntegrationSetting; password is encrypted via SECRETS_KEY.
+  app.get("/download-proxy", async () => {
+    return readDownloadProxyForDisplay();
+  });
+
+  const writeProxySchema = z.object({
+    enabled: z.boolean().default(false),
+    protocol: z.enum(["socks", "http"]).default("socks"),
+    host: z.string().min(1).max(255),
+    port: z.coerce.number().int().min(1).max(65535),
+    username: z.string().max(255).optional(),
+    /** undefined = keep existing, "" = clear, otherwise overwrite. */
+    password: z.string().max(512).optional(),
+  });
+
+  app.put(
+    "/download-proxy",
+    { preHandler: requireGlobalPermission("integration.manage") },
+    async (req) => {
+      const body = writeProxySchema.parse(req.body);
+      await writeDownloadProxy(body);
+      await writeAudit(req, {
+        action: "integration.download-proxy.update",
+        resource: "download.proxy",
+        metadata: { enabled: body.enabled, host: body.host, port: body.port },
+      });
+      return { ok: true };
+    }
+  );
+
+  app.delete(
+    "/download-proxy",
+    { preHandler: requireGlobalPermission("integration.manage") },
+    async (req) => {
+      await clearDownloadProxy();
+      await writeAudit(req, {
+        action: "integration.download-proxy.clear",
+        resource: "download.proxy",
+      });
+      return { ok: true };
+    }
+  );
 
   // unused reference to silence tsc about `providers` if needed later
   void providers;

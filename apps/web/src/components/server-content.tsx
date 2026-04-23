@@ -142,7 +142,11 @@ export function ServerContent({ serverId }: { serverId: string }): JSX.Element {
   return (
     <div className="space-y-6">
       {failures?.interrupt && (
-        <InterruptBanner interrupt={failures.interrupt} />
+        <InterruptBanner
+          serverId={serverId}
+          server={server}
+          interrupt={failures.interrupt}
+        />
       )}
       {failures?.failures && failures.failures.length > 0 && (
         <FailuresPanel
@@ -428,10 +432,17 @@ function InstalledCard({
 /* =============================== FAILURES =============================== */
 
 function InterruptBanner({
+  serverId,
+  server,
   interrupt,
 }: {
+  serverId: string;
+  server: ServerContext | undefined;
   interrupt: InstallInterrupt;
 }): JSX.Element {
+  const { t } = useT();
+  const dialog = useDialog();
+  const [busy, setBusy] = useState(false);
   // Kind-specific heading so the user sees the nature of the problem at
   // a glance; body is the human-readable message the agent already
   // formatted for this kind.
@@ -440,16 +451,71 @@ function InterruptBanner({
     exhausted: "CurseForge: попытки исчерпаны",
     generic: "CurseForge: установка прервана",
   };
+
+  const proxyActive = server?.env?.__COFEMINE_INSTALL_PROXY === "1";
+
+  async function toggleProxy(enable: boolean): Promise<void> {
+    setBusy(true);
+    try {
+      await api.post(`/servers/${serverId}/install-proxy`, { enabled: enable });
+      mutate(`/servers/${serverId}`);
+    } catch (e) {
+      const msg = e instanceof ApiError ? e.message : String(e);
+      // The API error is typically "Download proxy not configured".
+      if (/not configured|download.proxy/i.test(msg)) {
+        dialog.alert({
+          tone: "warning",
+          title: t("proxy.toggle.needConfigTitle"),
+          message: t("proxy.toggle.needConfigBody"),
+        });
+      } else {
+        dialog.alert({
+          tone: "danger",
+          title: t("common.error"),
+          message: msg,
+        });
+      }
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
-    <section className="tile p-5 flex items-start gap-3 border-[rgb(var(--warning))]/30">
-      <span className="w-8 h-8 rounded-md bg-[rgb(var(--warning-soft))] text-[rgb(var(--warning))] grid place-items-center shrink-0">
-        <AlertTriangle size={16} />
-      </span>
-      <div className="flex-1 min-w-0">
-        <h3 className="heading-md">{titleMap[interrupt.kind]}</h3>
-        <p className="text-sm text-ink-secondary mt-1">
-          {interrupt.message}
-        </p>
+    <section className="tile p-5 space-y-4 border-[rgb(var(--warning))]/30">
+      <div className="flex items-start gap-3">
+        <span className="w-8 h-8 rounded-md bg-[rgb(var(--warning-soft))] text-[rgb(var(--warning))] grid place-items-center shrink-0">
+          <AlertTriangle size={16} />
+        </span>
+        <div className="flex-1 min-w-0">
+          <h3 className="heading-md">{titleMap[interrupt.kind]}</h3>
+          <p className="text-sm text-ink-secondary mt-1">
+            {interrupt.message}
+          </p>
+          {proxyActive && (
+            <p className="text-sm text-[rgb(var(--accent))] mt-2">
+              {t("proxy.enabledOnServer")}
+            </p>
+          )}
+        </div>
+      </div>
+      <div className="flex gap-2 flex-wrap">
+        {proxyActive ? (
+          <button
+            className="btn btn-ghost"
+            onClick={() => toggleProxy(false)}
+            disabled={busy}
+          >
+            {busy ? t("proxy.toggle.busy") : t("proxy.disableOnServer")}
+          </button>
+        ) : (
+          <button
+            className="btn btn-subtle"
+            onClick={() => toggleProxy(true)}
+            disabled={busy}
+          >
+            {busy ? t("proxy.toggle.busy") : t("proxy.useOnServer")}
+          </button>
+        )}
       </div>
     </section>
   );

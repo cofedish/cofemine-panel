@@ -1,12 +1,19 @@
 "use client";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import useSWR, { mutate } from "swr";
 import { motion } from "framer-motion";
 import { api, ApiError, fetcher } from "@/lib/api";
 import { PageHeader } from "@/components/page-header";
 import { Stagger, StaggerItem } from "@/components/motion";
 import { Drawer } from "@/components/drawer";
-import { Check, Package, Key, ExternalLink, Sparkles } from "lucide-react";
+import {
+  Check,
+  Package,
+  Key,
+  ExternalLink,
+  Sparkles,
+  Network,
+} from "lucide-react";
 import { useT } from "@/lib/i18n";
 
 type Integrations = {
@@ -46,12 +53,25 @@ const DEFS: IntegrationDef[] = [
   },
 ];
 
+type ProxyDisplay = {
+  enabled: boolean;
+  protocol: "socks" | "http";
+  host: string;
+  port: number;
+  username?: string;
+  hasPassword: boolean;
+};
+
 export default function IntegrationsPage(): JSX.Element {
   const { data } = useSWR<Integrations>("/integrations", fetcher);
-  const { t } = useT();
-  const [openKey, setOpenKey] = useState<"modrinth" | "curseforge" | null>(
-    null
+  const { data: proxy } = useSWR<ProxyDisplay>(
+    "/integrations/download-proxy",
+    fetcher
   );
+  const { t } = useT();
+  const [openKey, setOpenKey] = useState<
+    "modrinth" | "curseforge" | "download-proxy" | null
+  >(null);
 
   return (
     <div className="space-y-8">
@@ -70,6 +90,12 @@ export default function IntegrationsPage(): JSX.Element {
             />
           </StaggerItem>
         ))}
+        <StaggerItem>
+          <DownloadProxyCard
+            proxy={proxy ?? null}
+            onOpen={() => setOpenKey("download-proxy")}
+          />
+        </StaggerItem>
         <StaggerItem>
           <ComingSoonCard />
         </StaggerItem>
@@ -90,6 +116,14 @@ export default function IntegrationsPage(): JSX.Element {
         description="Manage your API key. The panel encrypts it with SECRETS_KEY before storing."
       >
         <CurseForgeDetails />
+      </Drawer>
+      <Drawer
+        open={openKey === "download-proxy"}
+        onClose={() => setOpenKey(null)}
+        title={t("proxy.title")}
+        description={t("proxy.subtitle")}
+      >
+        <DownloadProxyDetails />
       </Drawer>
     </div>
   );
@@ -152,6 +186,258 @@ function IntegrationCard({
         </div>
       </div>
     </motion.button>
+  );
+}
+
+function DownloadProxyCard({
+  proxy,
+  onOpen,
+}: {
+  proxy: ProxyDisplay | null;
+  onOpen: () => void;
+}): JSX.Element {
+  const { t } = useT();
+  const configured = !!proxy && !!proxy.host && !!proxy.port;
+  const enabled = !!proxy?.enabled;
+  return (
+    <motion.button
+      type="button"
+      onClick={onOpen}
+      whileHover={{ y: -3 }}
+      transition={{ duration: 0.18 }}
+      className="tile tile-interactive overflow-hidden h-full flex flex-col text-left"
+    >
+      <div
+        className="relative h-24 grid place-items-center text-white overflow-hidden"
+        style={{
+          background: "linear-gradient(135deg, #1e293b, #475569)",
+        }}
+      >
+        <span className="absolute inset-0 bg-grid-pattern opacity-30" />
+        <Network size={42} className="relative opacity-80" />
+      </div>
+      <div className="p-5 flex-1 flex flex-col">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <div className="heading-md">{t("proxy.title")}</div>
+            <div className="text-xs text-ink-muted mt-0.5">
+              {t("proxy.tagline")}
+            </div>
+          </div>
+          <span
+            className={`chip ${
+              enabled
+                ? "chip-success"
+                : configured
+                  ? "chip-warning"
+                  : "chip-muted"
+            }`}
+          >
+            {enabled && <Check size={10} />}{" "}
+            {enabled
+              ? t("integrations.enabled")
+              : configured
+                ? t("proxy.configuredButOff")
+                : t("proxy.notConfigured")}
+          </span>
+        </div>
+        <p className="text-sm text-ink-secondary mt-3 flex-1">
+          {t("proxy.cardDesc")}
+        </p>
+      </div>
+    </motion.button>
+  );
+}
+
+function DownloadProxyDetails(): JSX.Element {
+  const { t } = useT();
+  const { data } = useSWR<ProxyDisplay>(
+    "/integrations/download-proxy",
+    fetcher
+  );
+  const [enabled, setEnabled] = useState(false);
+  const [protocol, setProtocol] = useState<"socks" | "http">("socks");
+  const [host, setHost] = useState("");
+  const [port, setPort] = useState("");
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+  const [passwordDirty, setPasswordDirty] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+
+  const [hydrated, setHydrated] = useState(false);
+  // Seed the form from SWR data once it arrives. Guard with `hydrated`
+  // so typing into the fields afterwards isn't clobbered by late fetches.
+  useEffect(() => {
+    if (data && !hydrated) {
+      setEnabled(data.enabled);
+      setProtocol(data.protocol);
+      setHost(data.host);
+      setPort(data.port ? String(data.port) : "");
+      setUsername(data.username ?? "");
+      setHydrated(true);
+    }
+  }, [data, hydrated]);
+
+  async function save(): Promise<void> {
+    setBusy(true);
+    setMsg(null);
+    try {
+      const body: Record<string, unknown> = {
+        enabled,
+        protocol,
+        host,
+        port: Number(port),
+      };
+      if (username) body.username = username;
+      if (passwordDirty) body.password = password;
+      await api.put("/integrations/download-proxy", body);
+      setMsg(t("common.success"));
+      setPasswordDirty(false);
+      setPassword("");
+      mutate("/integrations/download-proxy");
+    } catch (err) {
+      setMsg(err instanceof ApiError ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function clear(): Promise<void> {
+    setBusy(true);
+    setMsg(null);
+    try {
+      await api.del("/integrations/download-proxy");
+      setEnabled(false);
+      setHost("");
+      setPort("");
+      setUsername("");
+      setPassword("");
+      mutate("/integrations/download-proxy");
+    } catch (err) {
+      setMsg(err instanceof ApiError ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="space-y-5">
+      <p className="text-sm text-ink-secondary leading-relaxed">
+        {t("proxy.detailsIntro")}
+      </p>
+
+      <label className="flex items-center gap-2.5 text-sm cursor-pointer">
+        <input
+          type="checkbox"
+          checked={enabled}
+          onChange={(e) => setEnabled(e.target.checked)}
+        />
+        <span>{t("proxy.enable")}</span>
+      </label>
+
+      <div className="grid grid-cols-1 sm:grid-cols-[140px_1fr_120px] gap-3">
+        <div className="space-y-1.5">
+          <label className="text-xs font-medium text-ink-secondary">
+            {t("proxy.protocol")}
+          </label>
+          <select
+            className="select"
+            value={protocol}
+            onChange={(e) => setProtocol(e.target.value as "socks" | "http")}
+          >
+            <option value="socks">SOCKS5</option>
+            <option value="http">HTTP</option>
+          </select>
+        </div>
+        <div className="space-y-1.5">
+          <label className="text-xs font-medium text-ink-secondary">
+            {t("proxy.host")}
+          </label>
+          <input
+            className="input font-mono"
+            placeholder="172.17.0.1"
+            value={host}
+            onChange={(e) => setHost(e.target.value)}
+          />
+        </div>
+        <div className="space-y-1.5">
+          <label className="text-xs font-medium text-ink-secondary">
+            {t("proxy.port")}
+          </label>
+          <input
+            className="input font-mono"
+            type="number"
+            min={1}
+            max={65535}
+            placeholder="2080"
+            value={port}
+            onChange={(e) => setPort(e.target.value)}
+          />
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <div className="space-y-1.5">
+          <label className="text-xs font-medium text-ink-secondary">
+            {t("proxy.username")}{" "}
+            <span className="text-ink-muted">({t("proxy.optional")})</span>
+          </label>
+          <input
+            className="input"
+            value={username}
+            onChange={(e) => setUsername(e.target.value)}
+          />
+        </div>
+        <div className="space-y-1.5">
+          <label className="text-xs font-medium text-ink-secondary">
+            {t("proxy.password")}{" "}
+            <span className="text-ink-muted">
+              ({t("proxy.optional")}
+              {data?.hasPassword && !passwordDirty
+                ? ` · ${t("proxy.passwordStored")}`
+                : ""}
+              )
+            </span>
+          </label>
+          <input
+            className="input font-mono"
+            type="password"
+            placeholder={
+              data?.hasPassword && !passwordDirty
+                ? "••••••••"
+                : ""
+            }
+            value={password}
+            onChange={(e) => {
+              setPassword(e.target.value);
+              setPasswordDirty(true);
+            }}
+          />
+        </div>
+      </div>
+
+      <div className="flex gap-2">
+        <button
+          className="btn btn-primary"
+          onClick={save}
+          disabled={busy || !host || !port}
+        >
+          {busy ? t("integrations.saving") : t("integrations.save")}
+        </button>
+        {data?.host && (
+          <button className="btn btn-ghost" onClick={clear} disabled={busy}>
+            {t("integrations.remove")}
+          </button>
+        )}
+      </div>
+      {msg && (
+        <div className="text-xs text-ink-secondary">{msg}</div>
+      )}
+      <p className="text-xs text-ink-muted leading-relaxed">
+        {t("proxy.helperNote")}
+      </p>
+    </div>
   );
 }
 

@@ -51,6 +51,12 @@ export class ItzgRuntimeProvider implements MinecraftRuntimeProvider {
       ...installRetryDefaults,
       ...spec.env,
     };
+    // Panel-internal state flags that should never leak into the itzg
+    // container. Used for bookkeeping (e.g. "use install proxy") and
+    // consumed by the API before hitting the agent.
+    for (const k of Object.keys(envMap)) {
+      if (k.startsWith("__COFEMINE_")) delete envMap[k];
+    }
     const env = Object.entries(envMap).map(([k, v]) => `${k}=${v}`);
 
     const portBindings: Record<string, Array<{ HostPort: string }>> = {};

@@ -2,6 +2,36 @@ import { prisma } from "../db.js";
 import { NodeClient } from "../nodes/node-client.js";
 import type { CreateServerInput } from "@cofemine/shared";
 import { decryptSecret } from "../crypto.js";
+import {
+  INSTALL_PROXY_ENV_FLAG,
+  makeJavaToolOptions,
+  readDownloadProxy,
+} from "../integrations/download-proxy.js";
+
+/**
+ * Transform the server's stored env into the env the agent will actually
+ * ship to the container. Strips panel-internal state flags and, if the
+ * server is opted-in (via `__COFEMINE_INSTALL_PROXY`), injects
+ * JAVA_TOOL_OPTIONS built from the global download-proxy settings so
+ * mc-image-helper tunnels its modpack downloads through the proxy.
+ */
+async function materializeEnv(
+  env: Record<string, string>
+): Promise<Record<string, string>> {
+  const out: Record<string, string> = { ...env };
+  const useProxy = out[INSTALL_PROXY_ENV_FLAG] === "1";
+  // Always strip our sentinel so it never reaches the container.
+  delete out[INSTALL_PROXY_ENV_FLAG];
+  if (!useProxy) return out;
+  const proxy = await readDownloadProxy();
+  if (!proxy) return out;
+  const opts = makeJavaToolOptions(proxy);
+  // Respect user-provided JAVA_TOOL_OPTIONS — append ours, don't overwrite.
+  out.JAVA_TOOL_OPTIONS = out.JAVA_TOOL_OPTIONS
+    ? `${out.JAVA_TOOL_OPTIONS} ${opts}`
+    : opts;
+  return out;
+}
 
 /** Normalize a human name into a container-safe identifier. */
 export function toContainerName(name: string, id: string): string {
@@ -124,6 +154,7 @@ export async function reconcileAndReprovision(
   const client = await NodeClient.forId(server.nodeId);
   const containerName =
     server.containerName ?? toContainerName(server.name, server.id);
+  const materialized = await materializeEnv(refreshedEnv);
   const spec = {
     id: server.id,
     name: server.name,
@@ -133,7 +164,7 @@ export async function reconcileAndReprovision(
     memoryMb: server.memoryMb,
     cpuLimit: server.cpuLimit,
     ports: server.ports,
-    env: refreshedEnv,
+    env: materialized,
     eulaAccepted: server.eulaAccepted,
   };
   const res = await client.call<{ containerId: string }>(
@@ -185,6 +216,8 @@ export async function provisionServerOnNode(serverId: string): Promise<void> {
   if (!server) throw Object.assign(new Error("Server not found"), { statusCode: 404 });
   const client = await NodeClient.forId(server.nodeId);
   const containerName = toContainerName(server.name, server.id);
+  const storedEnv = (server.env as Record<string, string> | null) ?? {};
+  const materialized = await materializeEnv(storedEnv);
   const spec = {
     id: server.id,
     name: server.name,
@@ -194,7 +227,7 @@ export async function provisionServerOnNode(serverId: string): Promise<void> {
     memoryMb: server.memoryMb,
     cpuLimit: server.cpuLimit,
     ports: server.ports,
-    env: server.env,
+    env: materialized,
     eulaAccepted: server.eulaAccepted,
   };
   const res = await client.call<{ containerId: string }>(

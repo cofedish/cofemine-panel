@@ -369,6 +369,35 @@ const en: Dict = {
   "integrations.disabled": "Disabled",
   "integrations.getKey": "Get a key",
 
+  "proxy.title": "Download proxy",
+  "proxy.tagline": "Optional SOCKS / HTTP proxy for modpack install",
+  "proxy.subtitle":
+    "Optional proxy routed *only* through the Java HTTP client that downloads mod jars during install. The MC server itself keeps its direct connection — not routed through this proxy.",
+  "proxy.cardDesc":
+    "Use when forgecdn.net / Modrinth CDN is unreliable from your region. Enable per-server via the Retry banner; direct connections are default.",
+  "proxy.detailsIntro":
+    "Stored encrypted in the panel database. Applied to a server's install phase only when you opt-in that server (Retry via proxy button).",
+  "proxy.enable": "Enable (available to be used by servers)",
+  "proxy.protocol": "Protocol",
+  "proxy.host": "Host",
+  "proxy.port": "Port",
+  "proxy.username": "Username",
+  "proxy.password": "Password",
+  "proxy.optional": "optional",
+  "proxy.passwordStored": "stored",
+  "proxy.notConfigured": "Not configured",
+  "proxy.configuredButOff": "Configured — off",
+  "proxy.helperNote":
+    "When this proxy is enabled AND a server is marked to use it, JAVA_TOOL_OPTIONS is injected with the matching JVM flags (SOCKS or HTTP). The MC server's own HTTP traffic goes through these flags too while the flag is on — turn it off after install succeeds to keep MC direct.",
+  "proxy.useOnServer": "Retry install via proxy",
+  "proxy.disableOnServer": "Stop using proxy for this server",
+  "proxy.toggle.busy": "Switching…",
+  "proxy.toggle.needConfigTitle": "Download proxy is not configured",
+  "proxy.toggle.needConfigBody":
+    "Set up host, port and (optionally) credentials in Integrations → Download proxy, enable it, then come back and try again.",
+  "proxy.enabledOnServer":
+    "Install is currently routed through the download proxy. After the server boots, turn it off so MC's own connections stay direct.",
+
   "backups.create": "Create backup",
   "backups.creating": "Creating…",
   "backups.restore": "Restore",
@@ -781,6 +810,35 @@ const ru: Dict = {
   "integrations.enabled": "Включено",
   "integrations.disabled": "Выключено",
   "integrations.getKey": "Получить ключ",
+
+  "proxy.title": "Прокси для скачиваний",
+  "proxy.tagline": "SOCKS / HTTP прокси для установки модпаков",
+  "proxy.subtitle":
+    "Опциональный прокси, через который ходит Java-клиент при скачивании jar'ов на фазе установки. Сам MC-сервер напрямую, через этот прокси не ходит.",
+  "proxy.cardDesc":
+    "Пригодится если forgecdn.net / CDN Modrinth плохо отдают из вашего региона. Включается на сервере кнопкой «Повторить через прокси»; по умолчанию — напрямую.",
+  "proxy.detailsIntro":
+    "Настройки шифруются в БД. Применяются к фазе установки конкретного сервера только если вы явно включили прокси на нём (кнопка «Повторить через прокси»).",
+  "proxy.enable": "Включено (доступно серверам)",
+  "proxy.protocol": "Протокол",
+  "proxy.host": "Хост",
+  "proxy.port": "Порт",
+  "proxy.username": "Логин",
+  "proxy.password": "Пароль",
+  "proxy.optional": "необязательно",
+  "proxy.passwordStored": "сохранён",
+  "proxy.notConfigured": "Не настроен",
+  "proxy.configuredButOff": "Настроен — выключен",
+  "proxy.helperNote":
+    "Когда прокси включён + конкретный сервер помечен его использовать — в JAVA_TOOL_OPTIONS пробрасываются соответствующие JVM-флаги (SOCKS или HTTP). Пока флаг включён, собственный HTTP-трафик MC-сервера тоже идёт через эти флаги — выключайте после завершения установки.",
+  "proxy.useOnServer": "Повторить установку через прокси",
+  "proxy.disableOnServer": "Отключить прокси для сервера",
+  "proxy.toggle.busy": "Переключаю…",
+  "proxy.toggle.needConfigTitle": "Прокси не настроен",
+  "proxy.toggle.needConfigBody":
+    "Зайдите в «Интеграции → Прокси для скачиваний», заполните хост, порт и (при необходимости) учётку, включите — и возвращайтесь.",
+  "proxy.enabledOnServer":
+    "Установка сейчас идёт через прокси. Как только сервер поднимется — выключите прокси для него, чтобы MC ходил напрямую.",
 
   "backups.create": "Создать бэкап",
   "backups.creating": "Создаю…",
