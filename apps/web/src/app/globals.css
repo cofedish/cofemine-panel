@@ -157,20 +157,21 @@
   --ring: 153 27 27;
 }
 .dark.accent-lucifer {
-  --accent: 239 68 68;           /* red-500 */
-  --accent-hover: 248 113 113;   /* red-400 */
-  --accent-soft: 69 10 18;
-  --ring: 239 68 68;
+  --accent: 248 113 113;         /* red-400 — brighter hit on black */
+  --accent-hover: 252 165 165;   /* red-300 */
+  --accent-soft: 87 14 24;
+  --ring: 248 113 113;
 }
-/* In dark+lucifer we push the base darker for the velvet feel. */
+/* In dark+lucifer we push the base darker for the velvet feel, but keep
+ * the borders clearly visible on pitch-black surfaces. */
 .dark.accent-lucifer {
   --bg-base: 6 5 7;
-  --bg-surface-1: 15 10 12;
-  --bg-surface-2: 26 17 21;
-  --bg-surface-3: 40 22 28;
-  --bg-hover: 32 18 23;
-  --border: 48 25 31;
-  --border-strong: 85 35 44;
+  --bg-surface-1: 17 11 13;
+  --bg-surface-2: 30 19 23;
+  --bg-surface-3: 46 25 31;
+  --bg-hover: 38 21 26;
+  --border: 84 34 43;
+  --border-strong: 140 48 60;
 }
 
 .accent-caramel {
