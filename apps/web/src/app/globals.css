@@ -223,6 +223,37 @@ body {
   font-feature-settings: "cv02", "cv03", "cv04", "cv11", "ss01";
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
+  /* Native-app feel: over static text the cursor stays as an arrow
+   * instead of the browser's default I-beam. Elements that legitimately
+   * need another cursor (inputs, links, buttons, textareas) override
+   * this below / via their own UA styles. */
+  cursor: default;
+}
+
+/* Explicit I-beam on actual text-input surfaces — body's `cursor: default`
+ * would otherwise inherit through and make typing fields read as
+ * non-editable. */
+input[type="text"],
+input[type="email"],
+input[type="password"],
+input[type="search"],
+input[type="url"],
+input[type="tel"],
+input[type="number"],
+input:not([type]),
+textarea,
+[contenteditable="true"] {
+  cursor: text;
+}
+
+/* Clickables always show the hand pointer. */
+a[href],
+button:not(:disabled),
+[role="button"]:not([aria-disabled="true"]),
+label[for],
+summary,
+select {
+  cursor: pointer;
 }
 
 ::selection {
