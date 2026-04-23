@@ -364,6 +364,57 @@ export async function serversAgentRoutes(app: FastifyInstance): Promise<void> {
       req.log
     );
 
+    // CurseForge fingerprint lookup — only files that are still unresolved
+    // after both Modrinth passes. Compute CF's custom Murmur2 hash for
+    // each jar (whitespace-stripped, seed=1) and ask the CF API to map
+    // them to mod IDs + icon URLs. Gated on an x-cf-api-key header so we
+    // don't churn a key the operator hasn't configured.
+    const cfApiKey = (req.headers["x-cf-api-key"] as string | undefined) ?? "";
+    const cfByName: Record<string, CfProjectMeta> = {};
+    if (cfApiKey) {
+      const stillUnresolved: Array<{ subdir: string; file: HashedFile }> = [];
+      const groups: Array<{ subdir: string; files: HashedFile[] }> = [
+        { subdir: "mods", files: mods },
+        { subdir: "plugins", files: plugins },
+        { subdir: "world/datapacks", files: datapacks },
+      ];
+      for (const g of groups) {
+        for (const f of g.files) {
+          const resolvedByHash = f.sha1 ? versions[f.sha1] : undefined;
+          if (resolvedByHash) continue;
+          const slug = slugFromFilename(f.name);
+          if (slug && projectsBySlug[slug]) continue;
+          stillUnresolved.push({ subdir: g.subdir, file: f });
+        }
+      }
+      if (stillUnresolved.length > 0) {
+        const fpPairs = await Promise.all(
+          stillUnresolved.map(async ({ subdir, file }) => {
+            const full = path.join(base, subdir, file.name);
+            try {
+              const fp = await cfMurmur2(full);
+              return { name: file.name, fp };
+            } catch {
+              return { name: file.name, fp: null as number | null };
+            }
+          })
+        );
+        const fps = fpPairs
+          .map((p) => p.fp)
+          .filter((x): x is number => typeof x === "number");
+        const cfHits = await curseforgeFingerprintLookup(
+          fps,
+          cfApiKey,
+          req.log
+        );
+        for (const pair of fpPairs) {
+          if (pair.fp == null) continue;
+          const hit = cfHits[pair.fp];
+          if (hit) cfByName[pair.name] = hit;
+        }
+      }
+    }
+
     const enrich = (f: HashedFile): EnrichedFile => {
       const v = f.sha1 ? versions[f.sha1] : undefined;
       const p = v?.project_id ? projects[v.project_id] : undefined;
@@ -397,6 +448,15 @@ export async function serversAgentRoutes(app: FastifyInstance): Promise<void> {
             // No version match without a hash, just skip the version row.
             pageUrl: `https://modrinth.com/${sp.project_type ?? "mod"}/${sp.slug}`,
           },
+        };
+      }
+      const cf = cfByName[f.name];
+      if (cf) {
+        return {
+          name: f.name,
+          size: f.size,
+          mtime: f.mtime,
+          curseforge: cf,
         };
       }
       return { name: f.name, size: f.size, mtime: f.mtime };
@@ -532,6 +592,16 @@ type EnrichedFile = {
     versionNumber?: string;
     pageUrl: string;
   };
+  curseforge?: CfProjectMeta;
+};
+
+type CfProjectMeta = {
+  modId: number;
+  slug?: string;
+  title: string;
+  summary?: string;
+  icon?: string | null;
+  pageUrl?: string;
 };
 
 /**
@@ -723,6 +793,200 @@ function slugFromFilename(name: string): string {
     /^([a-z][a-z-]*?)(?=-\d|-v\d|-mc\d|-neo|-forge|-fabric|-quilt|$)/
   );
   return (m?.[1] ?? s).replace(/-+$/, "");
+}
+
+// CurseForge fingerprint cache — keyed by Murmur2 hash. CF doesn't
+// rename files once published, so the mapping hash → modId is stable
+// forever; a longer TTL here saves API calls when the install list
+// barely changes between polls.
+const cfFpCache = new Map<number, { at: number; meta: CfProjectMeta | null }>();
+const CF_FP_TTL_MS = 60 * 60 * 1000; // 1 hour
+
+/**
+ * Look up CurseForge "fingerprints" (Murmur2 hashes of mod jars with
+ * whitespace removed). Returns a map fingerprint → { modId, icon, … }.
+ *
+ * Flow:
+ *   POST /v1/fingerprints { fingerprints: [...] }
+ *     → list of { id (fingerprint), file: { modId } }
+ *   POST /v1/mods          { modIds: [...] }
+ *     → list of { id, name, slug, logo.url, summary, links.websiteUrl }
+ *
+ * All failures are swallowed and logged — the caller already has
+ * a reasonable fallback (raw filename), so worst case the icon just
+ * doesn't appear.
+ */
+async function curseforgeFingerprintLookup(
+  fingerprints: number[],
+  apiKey: string,
+  log?: { warn: (obj: unknown, msg?: string) => void }
+): Promise<Record<number, CfProjectMeta>> {
+  const now = Date.now();
+  const out: Record<number, CfProjectMeta> = {};
+  const needFetch: number[] = [];
+  for (const fp of fingerprints) {
+    const cached = cfFpCache.get(fp);
+    if (cached && now - cached.at < CF_FP_TTL_MS) {
+      if (cached.meta) out[fp] = cached.meta;
+    } else {
+      needFetch.push(fp);
+    }
+  }
+  if (needFetch.length === 0) return out;
+
+  try {
+    const fpRes = await request(
+      "https://api.curseforge.com/v1/fingerprints",
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          accept: "application/json",
+          "x-api-key": apiKey,
+        },
+        body: JSON.stringify({ fingerprints: needFetch }),
+      }
+    );
+    if (fpRes.statusCode >= 400) {
+      await fpRes.body.dump().catch(() => {});
+      // remember negative so we don't retry every poll
+      for (const fp of needFetch) cfFpCache.set(fp, { at: now, meta: null });
+      return out;
+    }
+    const fpBody = (await fpRes.body.json()) as any;
+    const matches = (fpBody?.data?.exactMatches ?? []) as Array<{
+      id?: number;
+      file?: { modId?: number; id?: number };
+    }>;
+    // Keep the association: fingerprint → modId
+    const fpToMod = new Map<number, number>();
+    for (const m of matches) {
+      const fp = typeof m.id === "number" ? m.id : undefined;
+      const modId = m.file?.modId;
+      if (fp != null && modId != null) fpToMod.set(fp, modId);
+    }
+
+    const modIds = [...new Set(fpToMod.values())];
+    const modsById = new Map<number, any>();
+    if (modIds.length > 0) {
+      const modsRes = await request("https://api.curseforge.com/v1/mods", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          accept: "application/json",
+          "x-api-key": apiKey,
+        },
+        body: JSON.stringify({ modIds }),
+      });
+      if (modsRes.statusCode < 400) {
+        const body = (await modsRes.body.json()) as any;
+        for (const m of body?.data ?? []) {
+          if (typeof m?.id === "number") modsById.set(m.id, m);
+        }
+      } else {
+        await modsRes.body.dump().catch(() => {});
+      }
+    }
+
+    for (const fp of needFetch) {
+      const modId = fpToMod.get(fp);
+      if (modId == null) {
+        cfFpCache.set(fp, { at: now, meta: null });
+        continue;
+      }
+      const m = modsById.get(modId);
+      const meta: CfProjectMeta = {
+        modId,
+        slug: m?.slug,
+        title: (m?.name as string) ?? `CurseForge mod ${modId}`,
+        summary: m?.summary as string | undefined,
+        icon: (m?.logo?.url as string | undefined) ?? null,
+        pageUrl:
+          (m?.links?.websiteUrl as string | undefined) ??
+          (m?.slug
+            ? `https://www.curseforge.com/minecraft/mc-mods/${m.slug}`
+            : undefined),
+      };
+      cfFpCache.set(fp, { at: now, meta });
+      out[fp] = meta;
+    }
+    return out;
+  } catch (err) {
+    log?.warn({ err }, "curseforge fingerprint lookup failed");
+    return out;
+  }
+}
+
+/**
+ * CurseForge's file fingerprint: Murmur2 (seed = 1) over the jar bytes
+ * with all whitespace characters stripped (tab, LF, CR, space). We stream
+ * the file to keep memory bounded even for 50MB packs.
+ */
+async function cfMurmur2(file: string): Promise<number> {
+  const filtered = await readFilteredJar(file);
+  return murmur2(filtered, 1);
+}
+
+function readFilteredJar(file: string): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    const chunks: Buffer[] = [];
+    let total = 0;
+    const s = createReadStream(file);
+    s.on("data", (raw: Buffer | string) => {
+      const chunk = Buffer.isBuffer(raw) ? raw : Buffer.from(raw);
+      const out = Buffer.allocUnsafe(chunk.length);
+      let j = 0;
+      for (let i = 0; i < chunk.length; i++) {
+        const b = chunk[i]!;
+        if (b !== 0x09 && b !== 0x0a && b !== 0x0d && b !== 0x20) {
+          out[j++] = b;
+        }
+      }
+      if (j > 0) {
+        chunks.push(out.subarray(0, j));
+        total += j;
+      }
+    });
+    s.on("error", reject);
+    s.on("end", () => resolve(Buffer.concat(chunks, total)));
+  });
+}
+
+/**
+ * Murmur2 32-bit hash, matching the canonical Java implementation that
+ * CurseForge uses for file fingerprints. Uses Math.imul for 32-bit
+ * multiplication and forces uint32 with `>>> 0` at every step.
+ */
+function murmur2(data: Buffer, seed: number): number {
+  const m = 0x5bd1e995;
+  const r = 24;
+  let len = data.length;
+  let h = (seed ^ len) >>> 0;
+  let i = 0;
+  while (len >= 4) {
+    let k =
+      data[i]! |
+      (data[i + 1]! << 8) |
+      (data[i + 2]! << 16) |
+      (data[i + 3]! << 24);
+    k = Math.imul(k, m) >>> 0;
+    k = (k ^ (k >>> r)) >>> 0;
+    k = Math.imul(k, m) >>> 0;
+    h = Math.imul(h, m) >>> 0;
+    h = (h ^ k) >>> 0;
+    i += 4;
+    len -= 4;
+  }
+  if (len >= 3) h = (h ^ (data[i + 2]! << 16)) >>> 0;
+  if (len >= 2) h = (h ^ (data[i + 1]! << 8)) >>> 0;
+  if (len >= 1) {
+    h = (h ^ data[i]!) >>> 0;
+    h = Math.imul(h, m) >>> 0;
+  }
+  h = (h ^ (h >>> 13)) >>> 0;
+  h = Math.imul(h, m) >>> 0;
+  h = (h ^ (h >>> 15)) >>> 0;
+  return h >>> 0;
 }
 
 /** Demux Docker's multiplexed log stream into a single utf-8 string. */

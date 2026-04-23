@@ -32,7 +32,8 @@ export class NodeClient {
   async call<T = unknown>(
     method: "GET" | "POST" | "PUT" | "DELETE" | "PATCH",
     path: string,
-    body?: unknown
+    body?: unknown,
+    extraHeaders?: Record<string, string>
   ): Promise<T> {
     const url = `${this.host.replace(/\/$/, "")}${path}`;
     // Only set content-type when we actually have a body. Fastify rejects
@@ -41,6 +42,7 @@ export class NodeClient {
     // (start/stop/restart/kill) that take no payload.
     const headers: Record<string, string> = {
       authorization: `Bearer ${this.token}`,
+      ...(extraHeaders ?? {}),
     };
     if (body !== undefined) headers["content-type"] = "application/json";
     const res = await request(url, {

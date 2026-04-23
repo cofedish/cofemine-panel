@@ -19,7 +19,7 @@ export function toContainerName(name: string, id: string): string {
  * lives encrypted in IntegrationSetting, so we decrypt and forward it.
  * Returns null when no key is configured.
  */
-async function readCurseforgeApiKey(): Promise<string | null> {
+export async function readCurseforgeApiKey(): Promise<string | null> {
   const row = await prisma.integrationSetting.findUnique({
     where: { key: "curseforge.apiKey" },
   });

@@ -54,14 +54,23 @@ type ModrinthMeta = {
   pageUrl: string;
 };
 
+type CurseForgeMeta = {
+  modId: number;
+  slug?: string;
+  title: string;
+  summary?: string;
+  icon?: string | null;
+  pageUrl?: string;
+};
+
 /** One jar in /data/mods (or plugins/datapacks), optionally enriched via
- *  Modrinth's SHA1 hash lookup. `modrinth` is undefined when hash isn't
- *  known to Modrinth (CF-only mod, in-pack jar, etc.). */
+ *  Modrinth's SHA1/slug lookup or CurseForge's Murmur2 fingerprint. */
 type InstalledFile = {
   name: string;
   size: number;
   mtime: string;
   modrinth?: ModrinthMeta;
+  curseforge?: CurseForgeMeta;
 };
 
 type InstalledContent = {
@@ -318,14 +327,17 @@ function InstalledCard({
   file: InstalledFile;
   onDelete: () => void;
 }): JSX.Element {
-  const title = file.modrinth?.title ?? prettifyFilename(file.name);
-  const subtitle = file.modrinth?.description;
+  const title =
+    file.modrinth?.title ?? file.curseforge?.title ?? prettifyFilename(file.name);
+  const subtitle = file.modrinth?.description ?? file.curseforge?.summary;
+  const icon = file.modrinth?.icon ?? file.curseforge?.icon ?? null;
+  const pageUrl = file.modrinth?.pageUrl ?? file.curseforge?.pageUrl;
   return (
     <div className="tile p-3.5 flex gap-3 items-start">
-      {file.modrinth?.icon ? (
+      {icon ? (
         // eslint-disable-next-line @next/next/no-img-element
         <img
-          src={file.modrinth.icon}
+          src={icon}
           alt=""
           className="w-12 h-12 rounded-md object-cover flex-shrink-0 bg-surface-2"
           draggable={false}
@@ -338,11 +350,15 @@ function InstalledCard({
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2">
           <div className="font-medium truncate">{title}</div>
-          {file.modrinth && (
+          {file.modrinth ? (
             <span className="chip chip-accent">
               <ModrinthMark size={10} /> Modrinth
             </span>
-          )}
+          ) : file.curseforge ? (
+            <span className="chip chip-accent">
+              <CurseForgeMark size={10} /> CurseForge
+            </span>
+          ) : null}
         </div>
         {subtitle ? (
           <p className="text-xs text-ink-secondary mt-0.5 line-clamp-2">
@@ -358,10 +374,10 @@ function InstalledCard({
             <span className="font-mono">{file.modrinth.versionNumber}</span>
           )}
           <span className="tabular-nums">{formatSize(file.size)}</span>
-          {file.modrinth?.pageUrl && (
+          {pageUrl && (
             <a
               className="link inline-flex items-center gap-1"
-              href={file.modrinth.pageUrl}
+              href={pageUrl}
               target="_blank"
               rel="noreferrer"
             >
@@ -721,14 +737,27 @@ function BrowsePanel({
     ];
     for (const f of files) {
       if (f.modrinth?.slug) set.add(normKey(f.modrinth.slug));
+      if (f.curseforge?.slug) set.add(normKey(f.curseforge.slug));
+      if (f.curseforge?.title) set.add(normKey(f.curseforge.title));
+      if (f.curseforge?.modId)
+        set.add(normKey(String(f.curseforge.modId)));
       set.add(normKey(slugFromFilename(f.name)));
     }
     return set;
   }, [installed]);
 
+  const PAGE_SIZE = 30;
+  const [hasMore, setHasMore] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+
+  // Fetch page 0 whenever filters change. Appending extra pages is
+  // handled separately by `loadMore`. Using a ref to track the current
+  // filter-version so an in-flight request from the previous query
+  // can't clobber results for a newer one.
   useEffect(() => {
     if (provider === "curseforge" && cfDisabled) {
       setResults([]);
+      setHasMore(false);
       return;
     }
     let cancelled = false;
@@ -742,13 +771,15 @@ function BrowsePanel({
           if (gameVersion) qp.set("gameVersion", gameVersion);
           if (loader) qp.set("loader", loader);
           qp.set("projectType", kind);
-          qp.set("limit", "24");
+          qp.set("limit", String(PAGE_SIZE));
+          qp.set("offset", "0");
           const res = await api.get<any>(
             `/integrations/${provider}/search?${qp.toString()}`
           );
           if (cancelled) return;
           const raw: any[] = Array.isArray(res) ? res : (res.results ?? []);
           setResults(raw);
+          setHasMore(raw.length >= PAGE_SIZE);
         } catch (e) {
           if (!cancelled) {
             setErr(e instanceof ApiError ? e.message : String(e));
@@ -764,6 +795,34 @@ function BrowsePanel({
       clearTimeout(t);
     };
   }, [provider, query, gameVersion, loader, kind, cfDisabled]);
+
+  async function loadMore(): Promise<void> {
+    if (loadingMore || !hasMore) return;
+    setLoadingMore(true);
+    setErr(null);
+    try {
+      const qp = new URLSearchParams();
+      if (query) qp.set("query", query);
+      if (gameVersion) qp.set("gameVersion", gameVersion);
+      if (loader) qp.set("loader", loader);
+      qp.set("projectType", kind);
+      qp.set("limit", String(PAGE_SIZE));
+      qp.set("offset", String(results.length));
+      const res = await api.get<any>(
+        `/integrations/${provider}/search?${qp.toString()}`
+      );
+      const raw: any[] = Array.isArray(res) ? res : (res.results ?? []);
+      // Dedup in case the API returns overlapping entries on offset.
+      const seen = new Set(results.map((r) => `${r.provider}:${r.id}`));
+      const fresh = raw.filter((r) => !seen.has(`${r.provider}:${r.id}`));
+      setResults((prev) => [...prev, ...fresh]);
+      setHasMore(raw.length >= PAGE_SIZE);
+    } catch (e) {
+      setErr(e instanceof ApiError ? e.message : String(e));
+    } finally {
+      setLoadingMore(false);
+    }
+  }
 
   async function install(r: Summary): Promise<void> {
     setInstallingId(r.id);
@@ -863,7 +922,9 @@ function BrowsePanel({
         <span className="text-ink-muted">
           {busy
             ? "Searching…"
-            : `${results.length} result${results.length === 1 ? "" : "s"}`}
+            : `${results.length} result${results.length === 1 ? "" : "s"}${
+                hasMore ? "+" : ""
+              }`}
         </span>
         {msg && <span className="text-[rgb(var(--success))]">{msg}</span>}
         {err && <span className="text-[rgb(var(--danger))]">{err}</span>}
@@ -879,31 +940,44 @@ function BrowsePanel({
           </p>
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-          {results.map((r) => {
-            const isInstalled =
-              resultIsInstalled(r, installedKeys) ||
-              (!!r.slug && recentSlugs.has(normKey(r.slug))) ||
-              (!!r.name && recentSlugs.has(normKey(r.name))) ||
-              recentSlugs.has(normKey(String(r.id)));
-            return (
-              <ResultCard
-                key={`${r.provider}:${r.id}`}
-                r={r}
-                installed={isInstalled}
-                installing={installingId === r.id}
-                onInstall={() => install(r)}
-              />
-            );
-          })}
-          {!busy && results.length === 0 && (
-            <div className="md:col-span-2 tile p-8 text-center text-ink-muted text-sm">
-              {query
-                ? "Nothing matches. Try a different query."
-                : "No results available."}
+        <>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            {results.map((r) => {
+              const isInstalled =
+                resultIsInstalled(r, installedKeys) ||
+                (!!r.slug && recentSlugs.has(normKey(r.slug))) ||
+                (!!r.name && recentSlugs.has(normKey(r.name))) ||
+                recentSlugs.has(normKey(String(r.id)));
+              return (
+                <ResultCard
+                  key={`${r.provider}:${r.id}`}
+                  r={r}
+                  installed={isInstalled}
+                  installing={installingId === r.id}
+                  onInstall={() => install(r)}
+                />
+              );
+            })}
+            {!busy && results.length === 0 && (
+              <div className="md:col-span-2 tile p-8 text-center text-ink-muted text-sm">
+                {query
+                  ? "Nothing matches. Try a different query."
+                  : "No results available."}
+              </div>
+            )}
+          </div>
+          {!busy && results.length > 0 && hasMore && (
+            <div className="flex justify-center pt-2">
+              <button
+                className="btn btn-ghost"
+                onClick={loadMore}
+                disabled={loadingMore}
+              >
+                {loadingMore ? "Loading…" : "Load more"}
+              </button>
             </div>
           )}
-        </div>
+        </>
       )}
     </section>
   );

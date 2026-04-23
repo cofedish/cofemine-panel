@@ -15,6 +15,7 @@ import { NodeClient } from "../nodes/node-client.js";
 import {
   createServerRecord,
   provisionServerOnNode,
+  readCurseforgeApiKey,
   reconcileAndReprovision,
 } from "./service.js";
 
@@ -345,7 +346,18 @@ export async function serversRoutes(app: FastifyInstance): Promise<void> {
     await assertServerPermission(req, id, "server.view");
     const server = await prisma.server.findUniqueOrThrow({ where: { id } });
     const client = await NodeClient.forId(server.nodeId);
-    return client.call("GET", `/servers/${id}/installed-content`);
+    // Pass the CurseForge API key via header so the agent can use it to
+    // look up icons / names for jars that aren't on Modrinth. The key
+    // only leaves the API over the internal agent channel, never reaches
+    // the browser.
+    const cfKey = await readCurseforgeApiKey();
+    const extra = cfKey ? { "x-cf-api-key": cfKey } : undefined;
+    return client.call(
+      "GET",
+      `/servers/${id}/installed-content`,
+      undefined,
+      extra
+    );
   });
 
   app.delete("/:id/installed-content", async (req) => {
