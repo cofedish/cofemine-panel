@@ -1,4 +1,4 @@
-import { request } from "undici";
+import { Agent, request } from "undici";
 import type {
   ContentKind,
   ContentProvider,
@@ -11,14 +11,49 @@ import { config } from "../config.js";
 
 const BASE = "https://api.modrinth.com/v2";
 
+// Modrinth's edge sometimes takes >10s to accept a TLS connection from
+// our region; undici's default connect timeout is 10s, which is exactly
+// what users were hitting. Bump it + keep connections alive so repeat
+// calls don't re-handshake.
+const dispatcher = new Agent({
+  connect: { timeout: 30_000 },
+  keepAliveTimeout: 30_000,
+  keepAliveMaxTimeout: 60_000,
+});
+
+/** GET a Modrinth endpoint with retries. Retries on network errors and
+ *  5xx responses, with short exponential backoff. 4xx is returned as-is
+ *  (bad request won't fix itself by retrying). */
 async function call<T>(path: string): Promise<T> {
-  const res = await request(`${BASE}${path}`, {
-    headers: { "user-agent": config.MODRINTH_USER_AGENT },
-  });
-  if (res.statusCode >= 400) {
-    throw new Error(`Modrinth ${path} failed: ${res.statusCode}`);
+  const url = `${BASE}${path}`;
+  let lastErr: unknown;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const res = await request(url, {
+        dispatcher,
+        headers: { "user-agent": config.MODRINTH_USER_AGENT },
+        headersTimeout: 30_000,
+        bodyTimeout: 60_000,
+      });
+      if (res.statusCode >= 500) {
+        lastErr = new Error(`Modrinth ${path} failed: ${res.statusCode}`);
+        // drain + retry
+        await res.body.dump().catch(() => {});
+      } else if (res.statusCode >= 400) {
+        throw new Error(`Modrinth ${path} failed: ${res.statusCode}`);
+      } else {
+        return (await res.body.json()) as T;
+      }
+    } catch (err) {
+      lastErr = err;
+    }
+    if (attempt < 2) {
+      await new Promise((r) => setTimeout(r, 500 * Math.pow(2, attempt)));
+    }
   }
-  return (await res.body.json()) as T;
+  throw lastErr instanceof Error
+    ? new Error(`Modrinth ${path}: ${lastErr.message}`)
+    : new Error(`Modrinth ${path} failed`);
 }
 
 export class ModrinthProvider implements ContentProvider {

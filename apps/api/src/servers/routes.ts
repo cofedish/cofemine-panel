@@ -193,6 +193,42 @@ export async function serversRoutes(app: FastifyInstance): Promise<void> {
     await assertServerPermission(req, id, "server.view");
     const source = await prisma.server.findUniqueOrThrow({ where: { id } });
     const cloneName = `${source.name}-clone`;
+
+    // Clones inherit the source's host ports — if the source is still
+    // running (or any other server on the node claims the same port),
+    // `docker run` fails with "port is already allocated" the moment
+    // the clone tries to start. Pre-shift the host ports to the next
+    // free ones on this node so start just works.
+    const srcPorts = Array.isArray(source.ports)
+      ? (source.ports as Array<{
+          host: number;
+          container: number;
+          protocol: "tcp" | "udp";
+        }>)
+      : [];
+    const peers = await prisma.server.findMany({
+      where: { nodeId: source.nodeId, id: { not: source.id } },
+      select: { ports: true },
+    });
+    const busy = new Set<string>();
+    for (const p of peers) {
+      const arr = Array.isArray(p.ports) ? (p.ports as any[]) : [];
+      for (const pp of arr) {
+        if (pp && typeof pp.host === "number" && typeof pp.protocol === "string") {
+          busy.add(`${pp.protocol}:${pp.host}`);
+        }
+      }
+    }
+    // Always treat the source's live ports as busy — the source might be
+    // running even if no other row claims them.
+    for (const pp of srcPorts) busy.add(`${pp.protocol}:${pp.host}`);
+    const clonePorts = srcPorts.map((pp) => {
+      let host = pp.host;
+      while (busy.has(`${pp.protocol}:${host}`)) host += 1;
+      busy.add(`${pp.protocol}:${host}`);
+      return { ...pp, host };
+    });
+
     const cloned = await prisma.server.create({
       data: {
         name: cloneName,
@@ -202,7 +238,7 @@ export async function serversRoutes(app: FastifyInstance): Promise<void> {
         version: source.version,
         memoryMb: source.memoryMb,
         cpuLimit: source.cpuLimit,
-        ports: source.ports as any,
+        ports: clonePorts as any,
         env: source.env as any,
         eulaAccepted: source.eulaAccepted,
         templateId: source.templateId,

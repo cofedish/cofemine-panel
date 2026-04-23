@@ -689,6 +689,14 @@ function BrowsePanel({
   const [installingId, setInstallingId] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  // Project keys installed during this session. Filename→slug matching
+  // misses for CurseForge jars whose filename doesn't start with the CF
+  // slug (e.g. "JustEnoughItems-…" for slug "jei"), so we augment the
+  // installed-on-disk view with a local record keyed by the search
+  // result's own slug/name/id. Survives until the next page load.
+  const [recentSlugs, setRecentSlugs] = useState<Set<string>>(
+    () => new Set()
+  );
 
   const cfDisabled = integ ? !integ.providers.curseforge.enabled : true;
 
@@ -773,6 +781,13 @@ function BrowsePanel({
           ? `${r.name} installed. Restart the server to apply.`
           : `${r.name} installed. Restart the server to load it.`
       );
+      setRecentSlugs((prev) => {
+        const next = new Set(prev);
+        if (r.slug) next.add(normKey(r.slug));
+        if (r.name) next.add(normKey(r.name));
+        next.add(normKey(String(r.id)));
+        return next;
+      });
       mutate(`/servers/${serverId}/installed-content`);
     } catch (e) {
       setErr(e instanceof ApiError ? e.message : String(e));
@@ -866,7 +881,11 @@ function BrowsePanel({
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           {results.map((r) => {
-            const isInstalled = resultIsInstalled(r, installedKeys);
+            const isInstalled =
+              resultIsInstalled(r, installedKeys) ||
+              (!!r.slug && recentSlugs.has(normKey(r.slug))) ||
+              (!!r.name && recentSlugs.has(normKey(r.name))) ||
+              recentSlugs.has(normKey(String(r.id)));
             return (
               <ResultCard
                 key={`${r.provider}:${r.id}`}
