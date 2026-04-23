@@ -1014,8 +1014,12 @@ function parseCfFailures(text: string): Array<{
   fileId?: number;
   url?: string;
 }> {
+  // Filename can contain spaces (e.g. "DnT-ocean-replacement-v1.2 [NeoForge].jar")
+  // so we anchor on the extension, not on \S+. The `@ ` separator plus the
+  // first `:` after the mod name (which never contains a colon in itzg's
+  // output) is enough structure to pull out the pieces reliably.
   const re =
-    /Retry #(\d+) download of (\S+?) @ ([^:]+):[^\n]*?(?:HTTP request of (\S+))?[^\n]*?403 Forbidden/g;
+    /Retry #(\d+) download of (.+?\.(?:jar|zip)) @ ([^:\n]+):[^\n]*?HTTP request of (\S+)[^\n]*?403 Forbidden/g;
   const dedup = new Map<string, {
     fileName: string;
     modName: string;
