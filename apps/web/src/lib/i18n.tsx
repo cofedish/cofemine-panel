@@ -370,14 +370,16 @@ const en: Dict = {
   "integrations.getKey": "Get a key",
 
   "proxy.title": "Download proxy",
-  "proxy.tagline": "Optional SOCKS / HTTP proxy for modpack install",
+  "proxy.tagline": "Automatic fallback for modpack install downloads",
   "proxy.subtitle":
-    "Optional proxy routed *only* through the Java HTTP client that downloads mod jars during install. The MC server itself keeps its direct connection — not routed through this proxy.",
+    "Auto-fallback proxy. On Start, the panel first tries to download mods directly. If the download aborts with a CDN timeout, it automatically reprovisions the container with JVM proxy flags and retries once. As soon as the server boots, it reprovisions back to a clean direct container — the MC server itself is never routed through the proxy.",
   "proxy.cardDesc":
-    "Use when forgecdn.net / Modrinth CDN is unreliable from your region. Enable per-server via the Retry banner; direct connections are default.",
+    "Set once and forget. Direct is tried first; the panel falls back to this proxy only if the install aborts, then flips back off after boot.",
   "proxy.detailsIntro":
-    "Stored encrypted in the panel database. Applied to a server's install phase only when you opt-in that server (Retry via proxy button).",
-  "proxy.enable": "Enable (available to be used by servers)",
+    "Stored encrypted. Used automatically by the install-watchdog on every modpack server — no per-server toggle.",
+  "proxy.enable": "Enable automatic fallback",
+  "proxy.autoActive":
+    "The install-watchdog has routed the current run through the download proxy. It will automatically switch back to direct once the server boots.",
   "proxy.protocol": "Protocol",
   "proxy.host": "Host",
   "proxy.port": "Port",
@@ -388,15 +390,7 @@ const en: Dict = {
   "proxy.notConfigured": "Not configured",
   "proxy.configuredButOff": "Configured — off",
   "proxy.helperNote":
-    "When this proxy is enabled AND a server is marked to use it, JAVA_TOOL_OPTIONS is injected with the matching JVM flags (SOCKS or HTTP). The MC server's own HTTP traffic goes through these flags too while the flag is on — turn it off after install succeeds to keep MC direct.",
-  "proxy.useOnServer": "Retry install via proxy",
-  "proxy.disableOnServer": "Stop using proxy for this server",
-  "proxy.toggle.busy": "Switching…",
-  "proxy.toggle.needConfigTitle": "Download proxy is not configured",
-  "proxy.toggle.needConfigBody":
-    "Set up host, port and (optionally) credentials in Integrations → Download proxy, enable it, then come back and try again.",
-  "proxy.enabledOnServer":
-    "Install is currently routed through the download proxy. After the server boots, turn it off so MC's own connections stay direct.",
+    "How it works: the watchdog polls each modpack server every 15s while it's starting. If install aborts with a network timeout and this proxy is configured + enabled, the watchdog reprovisions the container with matching JVM flags (SOCKS or HTTP) and restarts. Once the MC server prints its boot marker, the watchdog reprovisions back to a clean container so MC's own HTTP traffic goes direct. One proxy attempt per install session.",
 
   "backups.create": "Create backup",
   "backups.creating": "Creating…",
@@ -812,14 +806,16 @@ const ru: Dict = {
   "integrations.getKey": "Получить ключ",
 
   "proxy.title": "Прокси для скачиваний",
-  "proxy.tagline": "SOCKS / HTTP прокси для установки модпаков",
+  "proxy.tagline": "Автоматический fallback на установке модпаков",
   "proxy.subtitle":
-    "Опциональный прокси, через который ходит Java-клиент при скачивании jar'ов на фазе установки. Сам MC-сервер напрямую, через этот прокси не ходит.",
+    "Прокси-запаска. На Start панель сначала пробует скачать напрямую. Если установка упала с таймаутом — панель автоматически пересобирает контейнер с JVM-флагами прокси и повторяет запуск. Как только сервер поднялся — пересобирает обратно на прямое подключение. Сам MC-сервер через прокси не ходит.",
   "proxy.cardDesc":
-    "Пригодится если forgecdn.net / CDN Modrinth плохо отдают из вашего региона. Включается на сервере кнопкой «Повторить через прокси»; по умолчанию — напрямую.",
+    "Настроил один раз и забыл. Сначала пробуется напрямую, панель сама переключится на прокси только если установка упала, и так же сама вернётся на прямое после загрузки.",
   "proxy.detailsIntro":
-    "Настройки шифруются в БД. Применяются к фазе установки конкретного сервера только если вы явно включили прокси на нём (кнопка «Повторить через прокси»).",
-  "proxy.enable": "Включено (доступно серверам)",
+    "Шифруется в БД. Используется автоматически watchdog'ом установки на всех модпак-серверах — никаких поштучных переключателей.",
+  "proxy.enable": "Включить автоматический fallback",
+  "proxy.autoActive":
+    "Watchdog установки переключил текущий прогон на прокси. Как только сервер загрузится — автоматически вернёт на прямое подключение.",
   "proxy.protocol": "Протокол",
   "proxy.host": "Хост",
   "proxy.port": "Порт",
@@ -830,15 +826,7 @@ const ru: Dict = {
   "proxy.notConfigured": "Не настроен",
   "proxy.configuredButOff": "Настроен — выключен",
   "proxy.helperNote":
-    "Когда прокси включён + конкретный сервер помечен его использовать — в JAVA_TOOL_OPTIONS пробрасываются соответствующие JVM-флаги (SOCKS или HTTP). Пока флаг включён, собственный HTTP-трафик MC-сервера тоже идёт через эти флаги — выключайте после завершения установки.",
-  "proxy.useOnServer": "Повторить установку через прокси",
-  "proxy.disableOnServer": "Отключить прокси для сервера",
-  "proxy.toggle.busy": "Переключаю…",
-  "proxy.toggle.needConfigTitle": "Прокси не настроен",
-  "proxy.toggle.needConfigBody":
-    "Зайдите в «Интеграции → Прокси для скачиваний», заполните хост, порт и (при необходимости) учётку, включите — и возвращайтесь.",
-  "proxy.enabledOnServer":
-    "Установка сейчас идёт через прокси. Как только сервер поднимется — выключите прокси для него, чтобы MC ходил напрямую.",
+    "Как это работает: watchdog опрашивает каждый модпак-сервер раз в 15с, пока он стартует. Если установка упала с сетевым таймаутом, а прокси настроен и включён — watchdog пересобирает контейнер с JVM-флагами (SOCKS или HTTP) и перезапускает. Как только MC напечатает маркер загрузки — watchdog пересобирает обратно на чистый контейнер, чтобы MC ходил напрямую. Одна попытка прокси на установку.",
 
   "backups.create": "Создать бэкап",
   "backups.creating": "Создаю…",

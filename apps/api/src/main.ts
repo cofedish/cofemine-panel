@@ -21,6 +21,7 @@ import { integrationsRoutes } from "./integrations/routes.js";
 import { metaRoutes } from "./meta/routes.js";
 import { registerConsoleWs } from "./ws/console.js";
 import { startScheduler } from "./schedules/scheduler.js";
+import { startInstallWatchdog } from "./servers/install-watchdog.js";
 
 async function bootstrap(): Promise<void> {
   const app = Fastify({
@@ -91,6 +92,7 @@ async function bootstrap(): Promise<void> {
   await registerConsoleWs(app);
 
   await startScheduler();
+  startInstallWatchdog();
 
   app.addHook("onClose", async () => {
     await prisma.$disconnect();

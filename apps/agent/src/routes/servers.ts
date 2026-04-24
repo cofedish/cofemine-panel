@@ -501,18 +501,37 @@ export async function serversAgentRoutes(app: FastifyInstance): Promise<void> {
   app.get("/servers/:id/install-failures", async (req) => {
     const { id } = req.params as { id: string };
     const container = await findContainer(id);
-    if (!container) return { failures: [], interrupt: null };
+    if (!container) {
+      return { failures: [], interrupt: null, booted: false };
+    }
+    // Scope the log read to logs produced since the container's most
+    // recent StartedAt. Without this, a successful boot from an earlier
+    // run would still show its "Done!" marker forever, tricking the
+    // watchdog into thinking every subsequent install also booted.
+    const info = await container.inspect().catch(() => null);
+    const startedAt = info?.State?.StartedAt;
+    const sinceUnix =
+      startedAt && Number.isFinite(new Date(startedAt).getTime())
+        ? Math.floor(new Date(startedAt).getTime() / 1000)
+        : undefined;
     const rawLogs = (await container.logs({
       follow: false,
       stdout: true,
       stderr: true,
       tail: 3000,
       timestamps: false,
-    })) as unknown as Buffer;
+      ...(sinceUnix ? { since: sinceUnix } : {}),
+    } as unknown as { follow: false })) as unknown as Buffer;
     const text = demuxLogBuffer(rawLogs);
+    const interrupt = parseInstallInterrupt(text);
+    const booted = detectBooted(text);
     return {
       failures: parseCfFailures(text),
-      interrupt: parseInstallInterrupt(text),
+      // If the MC server booted AFTER the last install interrupt, the
+      // install obviously succeeded and the interrupt is stale. Suppress
+      // it so UI + watchdog see a clean "booted" state.
+      interrupt: booted ? null : interrupt,
+      booted,
     };
   });
 
@@ -1075,6 +1094,16 @@ type InstallInterrupt = {
  * (usually a network hiccup to CF), and simply pressing Start again
  * resumes because already-downloaded jars are preserved on disk.
  */
+/**
+ * True once the MC server has printed its vanilla "Done!" boot marker
+ * during the *current* container session. Matches both vanilla/paper and
+ * Forge/NeoForge variants that append extra punctuation. Scanning is
+ * cheap — a single regex — so we do it on every /install-failures call.
+ */
+function detectBooted(text: string): boolean {
+  return /Done \([0-9]+(?:\.[0-9]+)?s\)!\s*For help/i.test(text);
+}
+
 function parseInstallInterrupt(text: string): InstallInterrupt | null {
   if (/io\.netty\.handler\.timeout\.ReadTimeoutException/.test(text)) {
     return {

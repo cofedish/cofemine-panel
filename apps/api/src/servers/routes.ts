@@ -19,6 +19,7 @@ import {
   reconcileAndReprovision,
 } from "./service.js";
 import { readDownloadProxy } from "../integrations/download-proxy.js";
+import { resetWatchdogState } from "./install-watchdog.js";
 
 export async function serversRoutes(app: FastifyInstance): Promise<void> {
   // List servers visible to the user.
@@ -106,6 +107,7 @@ export async function serversRoutes(app: FastifyInstance): Promise<void> {
       req.log.warn({ err }, "agent delete failed; continuing with DB cleanup");
     }
     await prisma.server.delete({ where: { id } });
+    resetWatchdogState(id);
     await writeAudit(req, { action: "server.delete", resource: id });
     return { ok: true };
   });
@@ -213,6 +215,12 @@ export async function serversRoutes(app: FastifyInstance): Promise<void> {
           lastStartedAt: action === "start" ? new Date() : undefined,
         },
       });
+      // Reset the install-watchdog attempt counter whenever the user
+      // explicitly (re)starts or stops the server so we get a fresh
+      // proxy-retry budget on the next install session.
+      if (action === "start" || action === "restart" || action === "stop") {
+        resetWatchdogState(id);
+      }
       await writeAudit(req, { action: `server.${action}`, resource: id });
       return { ok: true };
     });
