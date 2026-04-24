@@ -303,6 +303,10 @@ const en: Dict = {
   "wizard.modpack.search": "Search packs…",
   "wizard.modpack.picked": "Picked",
   "wizard.modpack.clear": "Clear",
+  "wizard.packVersion": "Pack version",
+  "wizard.packVersion.latest": "Latest (newest published)",
+  "wizard.packVersion.hint":
+    "Pin a specific pack version if the author recently broke compat. \"Latest\" lets itzg pick the newest upload — fine for most packs but risky when a brand-new version ships a mod that depends on an MC release you're not running.",
   "wizard.resources.memory": "Memory",
   "wizard.resources.cpu": "CPU limit",
   "wizard.resources.cpuHint": "cores (empty = no limit)",
@@ -738,6 +742,10 @@ const ru: Dict = {
   "wizard.modpack.search": "Поиск сборок…",
   "wizard.modpack.picked": "Выбрано",
   "wizard.modpack.clear": "Очистить",
+  "wizard.packVersion": "Версия сборки",
+  "wizard.packVersion.latest": "Последняя (самая новая)",
+  "wizard.packVersion.hint":
+    "Закрепите конкретную версию, если автор недавно сломал совместимость. «Последняя» отдаёт решение itzg — подойдёт для большинства паков, но рискованно, если новая версия тянет моды под MC, которую вы не запускаете.",
   "wizard.resources.memory": "Память",
   "wizard.resources.cpu": "Лимит CPU",
   "wizard.resources.cpuHint": "ядер (пусто = без лимита)",

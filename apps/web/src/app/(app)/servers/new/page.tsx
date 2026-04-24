@@ -112,6 +112,11 @@ export default function CreateServerPage(): JSX.Element {
 
   // Modpack selection
   const [pack, setPack] = useState<ModpackHit | null>(null);
+  /** Pinned pack version — id is what itzg needs (Modrinth version id or
+   *  CurseForge file id as string). `null` keeps the old "latest" behavior. */
+  const [packVersion, setPackVersion] = useState<
+    { id: string; label: string } | null
+  >(null);
 
   // Basics / resources
   const [name, setName] = useState("survival");
@@ -165,6 +170,12 @@ export default function CreateServerPage(): JSX.Element {
           projectId: pack!.id,
           slug: pack!.slug,
           url: pack!.pageUrl,
+          ...(packVersion
+            ? {
+                versionId: packVersion.id,
+                versionLabel: packVersion.label,
+              }
+            : {}),
         };
         body.version = "LATEST";
       }
@@ -284,7 +295,12 @@ export default function CreateServerPage(): JSX.Element {
               <PackPickStep
                 provider={source}
                 pack={pack}
-                onPick={setPack}
+                onPick={(p) => {
+                  setPack(p);
+                  setPackVersion(null);
+                }}
+                packVersion={packVersion}
+                onPickVersion={setPackVersion}
               />
             ))}
           {step === "Resources" && (
@@ -518,10 +534,14 @@ function PackPickStep({
   provider,
   pack,
   onPick,
+  packVersion,
+  onPickVersion,
 }: {
   provider: "modrinth" | "curseforge";
   pack: ModpackHit | null;
   onPick: (p: ModpackHit) => void;
+  packVersion: { id: string; label: string } | null;
+  onPickVersion: (v: { id: string; label: string } | null) => void;
 }): JSX.Element {
   const { t } = useT();
   const [query, setQuery] = useState("");
@@ -671,6 +691,121 @@ function PackPickStep({
             : "No packs available."}
         </div>
       )}
+
+      {pack && (
+        <PackVersionPicker
+          provider={provider}
+          pack={pack}
+          value={packVersion}
+          onPick={onPickVersion}
+        />
+      )}
+    </div>
+  );
+}
+
+type VersionOption = {
+  id: string;
+  label: string;
+  gameVersions: string[];
+  loaders: string[];
+};
+
+/**
+ * Load published versions for the currently-picked pack and let the user
+ * pin one. Default "Latest" maps to versionId=null, which drops
+ * CF_FILE_ID / MODRINTH_VERSION and lets itzg pick the newest upload.
+ * Pinning protects against the "new pack version broke compat" case
+ * where e.g. one mod jumped a major version faster than the rest of the
+ * pack and breaks boot on older MC releases.
+ */
+function PackVersionPicker({
+  provider,
+  pack,
+  value,
+  onPick,
+}: {
+  provider: "modrinth" | "curseforge";
+  pack: ModpackHit;
+  value: { id: string; label: string } | null;
+  onPick: (v: { id: string; label: string } | null) => void;
+}): JSX.Element {
+  const { t } = useT();
+  const [versions, setVersions] = useState<VersionOption[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setErr(null);
+    api
+      .get<any[]>(
+        `/integrations/${provider}/projects/${encodeURIComponent(pack.id)}/versions`
+      )
+      .then((raw) => {
+        if (cancelled) return;
+        const list: VersionOption[] = (raw ?? []).map((v) => ({
+          id: String(v.id),
+          label: String(v.versionNumber ?? v.name ?? v.id),
+          gameVersions: Array.isArray(v.gameVersions) ? v.gameVersions : [],
+          loaders: Array.isArray(v.loaders) ? v.loaders : [],
+        }));
+        setVersions(list);
+      })
+      .catch((e) => {
+        if (!cancelled) {
+          setErr(e instanceof ApiError ? e.message : String(e));
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [provider, pack.id]);
+
+  const selected = value?.id ?? "";
+
+  return (
+    <div className="tile !shadow-none p-4 space-y-3 border-[rgb(var(--accent))]/40">
+      <div className="flex items-center gap-2 text-sm">
+        <span className="font-medium">{t("wizard.packVersion")}</span>
+        {loading && (
+          <span className="text-xs text-ink-muted">
+            {t("common.loading")}
+          </span>
+        )}
+      </div>
+      <select
+        className="select"
+        value={selected}
+        onChange={(e) => {
+          const id = e.target.value;
+          if (!id) {
+            onPick(null);
+            return;
+          }
+          const v = versions.find((x) => x.id === id);
+          if (v) onPick({ id: v.id, label: v.label });
+        }}
+      >
+        <option value="">{t("wizard.packVersion.latest")}</option>
+        {versions.map((v) => (
+          <option key={v.id} value={v.id}>
+            {v.label}
+            {v.gameVersions[0] ? ` · MC ${v.gameVersions[0]}` : ""}
+            {v.loaders[0] ? ` · ${v.loaders[0]}` : ""}
+          </option>
+        ))}
+      </select>
+      {err && (
+        <div className="text-xs text-[rgb(var(--danger))]">{err}</div>
+      )}
+      <p className="text-xs text-ink-muted leading-relaxed">
+        {t("wizard.packVersion.hint")}
+      </p>
     </div>
   );
 }

@@ -73,10 +73,21 @@ async function mergeModpackEnv(
   if (input.type === "MODRINTH" && input.modpack) {
     // itzg accepts either a slug/id or a full version/file URL.
     env.MODRINTH_PROJECT ??= input.modpack.slug ?? input.modpack.projectId;
+    // Pin a specific pack version if requested. Without this, itzg picks
+    // the newest published version, which may include mods incompatible
+    // with the MC version we're actually booting.
+    if (input.modpack.versionId) {
+      env.MODRINTH_VERSION ??= input.modpack.versionId;
+    }
   } else if (input.type === "CURSEFORGE") {
     // Prefer slug; fall back to the CurseForge page URL if only URL was known.
     if (input.modpack?.slug) env.CF_SLUG ??= input.modpack.slug;
     if (input.modpack?.url) env.CF_PAGE_URL ??= input.modpack.url;
+    // Pin a specific pack file if the user picked a version. itzg's
+    // AUTO_CURSEFORGE mode uses CF_FILE_ID to override "latest".
+    if (input.modpack?.versionId) {
+      env.CF_FILE_ID ??= input.modpack.versionId;
+    }
     // Inject the API key from our Integrations store so AUTO_CURSEFORGE
     // can actually download the pack. Without this, itzg logs
     // "API key is not set" and refuses to install.
@@ -195,6 +206,7 @@ function inferModpackHint(
       projectId: env.CF_SLUG ?? env.CF_PAGE_URL ?? "auto",
       ...(env.CF_SLUG ? { slug: env.CF_SLUG } : {}),
       ...(env.CF_PAGE_URL ? { url: env.CF_PAGE_URL } : {}),
+      ...(env.CF_FILE_ID ? { versionId: env.CF_FILE_ID } : {}),
     };
   }
   if (type === "MODRINTH") {
@@ -202,6 +214,7 @@ function inferModpackHint(
       provider: "modrinth",
       projectId: env.MODRINTH_PROJECT ?? "auto",
       ...(env.MODRINTH_PROJECT ? { slug: env.MODRINTH_PROJECT } : {}),
+      ...(env.MODRINTH_VERSION ? { versionId: env.MODRINTH_VERSION } : {}),
     };
   }
   return undefined;

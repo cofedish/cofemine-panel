@@ -65,6 +65,14 @@ const createServerShape = z.object({
       projectId: z.string().min(1).max(128),
       url: z.string().url().optional(),
       slug: z.string().max(128).optional(),
+      /** Pin a specific pack version instead of "latest". For Modrinth
+       *  this is a version id; for CurseForge it's the numeric file id
+       *  (passed as a string so we don't have to juggle Number/BigInt).
+       *  Absent = let itzg pick the newest published version (old behavior). */
+      versionId: z.string().min(1).max(128).optional(),
+      /** Human label for the pinned version ("1.5.3", "v2.0.1") — UI-only,
+       *  ignored by the runtime. Purely for display in the Overview. */
+      versionLabel: z.string().max(128).optional(),
     })
     .optional(),
 });
