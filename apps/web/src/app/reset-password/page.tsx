@@ -1,5 +1,5 @@
 "use client";
-import { useState, type FormEvent } from "react";
+import { Suspense, useState, type FormEvent } from "react";
 import Link from "next/link";
 import { useSearchParams, useRouter } from "next/navigation";
 import { api, ApiError } from "@/lib/api";
@@ -8,12 +8,29 @@ import { LogoMark, Wordmark } from "@/components/logo";
 import { useT } from "@/lib/i18n";
 
 /**
- * Consumes a reset link. The token comes in via ?token=… ; the user only
- * has to type the new password (twice for confirmation). On success we
- * redirect to /login because the API has invalidated all sessions, so
- * the user has to authenticate fresh anyway.
+ * Page-level wrapper. `useSearchParams()` is a Client Component hook that
+ * Next.js 14 requires you to put inside a <Suspense> boundary, otherwise
+ * the static prerender bails out with the missing-suspense-with-csr-bailout
+ * error. We split into outer (Suspense host) + inner (consumer) so the
+ * boundary actually does something.
  */
 export default function ResetPasswordPage(): JSX.Element {
+  return (
+    <Suspense fallback={<ResetFallback />}>
+      <ResetPasswordInner />
+    </Suspense>
+  );
+}
+
+function ResetFallback(): JSX.Element {
+  return (
+    <div className="min-h-screen flex items-center justify-center text-ink-muted text-sm">
+      Loading…
+    </div>
+  );
+}
+
+function ResetPasswordInner(): JSX.Element {
   const router = useRouter();
   const params = useSearchParams();
   const token = params?.get("token") ?? "";
