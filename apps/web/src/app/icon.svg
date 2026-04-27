@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" shape-rendering="crispEdges">
+  <!-- Rounded dark backplate so the silhouette reads on any browser
+       chrome (light/dark/system). -->
+  <rect width="32" height="32" rx="6" fill="#0c0a09"/>
+
+  <!-- Isometric "coffee block" silhouette, same shapes as LogoMark.
+       Colours baked in (not CSS vars) — favicons render outside the
+       theme stylesheet, so we pin to the Minecraft-lime accent palette. -->
+  <!-- Top face (grass) -->
+  <path d="M6 10l10-5 10 5-10 5L6 10z" fill="#84cc16"/>
+  <!-- Left side (dirt, darker) -->
+  <path d="M6 10v13l10 5V15L6 10z" fill="#3f6212"/>
+  <!-- Right side (dirt, mid) -->
+  <path d="M26 10v13l-10 5V15l10-5z" fill="#4d7c0f"/>
+  <!-- Top inner highlight square -->
+  <path d="M16 8.5l-4 2 4 2 4-2-4-2z" fill="#ffffff" fill-opacity="0.45"/>
+
+  <!-- Two little steam wisps over the top face -->
+  <path d="M13 3c0 1.2 1.5 1.2 1.5 2.5M17 2c0 1.2 1.5 1.2 1.5 2.5"
+        stroke="#a3e635" stroke-width="1.4" stroke-linecap="round" fill="none"/>
+</svg>
