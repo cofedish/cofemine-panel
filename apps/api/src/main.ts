@@ -60,6 +60,8 @@ async function bootstrap(): Promise<void> {
       "/auth/setup-status",
       "/auth/setup",
       "/auth/login",
+      "/auth/forgot-password",
+      "/auth/reset-password",
     ]);
     if (open.has(req.routerPath) || req.routerPath?.startsWith("/ws/")) return;
     if (!req.user) return reply.code(401).send({ error: "Unauthorized" });

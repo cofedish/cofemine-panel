@@ -9,7 +9,7 @@ import { PageHeader } from "@/components/page-header";
 import { Drawer } from "@/components/drawer";
 import { Stagger, StaggerItem } from "@/components/motion";
 import { Avatar } from "@/components/avatar";
-import { UserPlus, ClipboardList, Trash2 } from "lucide-react";
+import { UserPlus, ClipboardList, Trash2, KeyRound } from "lucide-react";
 import { useDialog } from "@/components/dialog-provider";
 import { useT } from "@/lib/i18n";
 
@@ -91,6 +91,71 @@ export default function AdministrationPage(): JSX.Element {
 /* Users                                                              */
 /* ------------------------------------------------------------------ */
 
+/**
+ * Owner / admin "reset password for this user" flow. Asks the admin to
+ * pick: type a new password directly (and tell the user OOB), or trigger
+ * the email-link flow. The link mode falls back to copying the link to
+ * the response when SMTP isn't configured — useful for ops setups that
+ * haven't wired email yet.
+ */
+async function resetUserPassword(
+  u: User,
+  dialog: ReturnType<typeof useDialog>,
+  t: ReturnType<typeof useT>["t"]
+): Promise<void> {
+  const choice = await dialog.confirm({
+    tone: "info",
+    title: t("admin.resetPassword.title"),
+    message: t("admin.resetPassword.body", { username: u.username }),
+    okLabel: t("admin.resetPassword.sendLink"),
+    cancelLabel: t("admin.resetPassword.setManually"),
+  });
+  try {
+    if (choice) {
+      const res = await api.post<{
+        mode: "link";
+        mailed: boolean;
+        link: string;
+      }>(`/users/${u.id}/reset-password`);
+      const lines = [
+        res.mailed
+          ? t("admin.resetPassword.sentMail", { email: u.email })
+          : t("admin.resetPassword.notMailed"),
+        "",
+        res.link,
+      ];
+      await dialog.alert({
+        tone: res.mailed ? "success" : "warning",
+        title: t("common.done"),
+        message: lines.join("\n"),
+      });
+    } else {
+      const newPwd = window.prompt(t("admin.resetPassword.setPrompt"));
+      if (!newPwd) return;
+      if (newPwd.length < 8) {
+        await dialog.alert({
+          tone: "danger",
+          title: t("common.error"),
+          message: t("admin.resetPassword.tooShort"),
+        });
+        return;
+      }
+      await api.post(`/users/${u.id}/reset-password`, { newPassword: newPwd });
+      await dialog.alert({
+        tone: "success",
+        title: t("common.done"),
+        message: t("admin.resetPassword.directDone"),
+      });
+    }
+  } catch (e) {
+    await dialog.alert({
+      tone: "danger",
+      title: t("common.error"),
+      message: e instanceof ApiError ? e.message : String(e),
+    });
+  }
+}
+
 function UsersTab(): JSX.Element {
   const { data } = useSWR<User[]>("/users", fetcher);
   const [drawerOpen, setDrawerOpen] = useState(false);
@@ -138,26 +203,36 @@ function UsersTab(): JSX.Element {
                     {new Date(u.createdAt).toLocaleDateString()}
                   </td>
                   <td className="px-5 py-3 text-right">
-                    <button
-                      className="text-ink-muted hover:text-[rgb(var(--danger))] transition-colors"
-                      onClick={async () => {
-                        const ok = await dialog.confirm({
-                          tone: "danger",
-                          danger: true,
-                          title: t("admin.removeUserConfirm.title"),
-                          message: t("admin.removeUserConfirm.body", {
-                            username: u.username,
-                          }),
-                          okLabel: t("common.delete"),
-                        });
-                        if (!ok) return;
-                        await api.del(`/users/${u.id}`);
-                        mutate("/users");
-                      }}
-                      aria-label="Delete user"
-                    >
-                      <Trash2 size={15} />
-                    </button>
+                    <div className="inline-flex items-center gap-3">
+                      <button
+                        className="text-ink-muted hover:text-[rgb(var(--accent))] transition-colors"
+                        onClick={() => resetUserPassword(u, dialog, t)}
+                        aria-label="Reset password"
+                        title={t("admin.resetPassword.title")}
+                      >
+                        <KeyRound size={15} />
+                      </button>
+                      <button
+                        className="text-ink-muted hover:text-[rgb(var(--danger))] transition-colors"
+                        onClick={async () => {
+                          const ok = await dialog.confirm({
+                            tone: "danger",
+                            danger: true,
+                            title: t("admin.removeUserConfirm.title"),
+                            message: t("admin.removeUserConfirm.body", {
+                              username: u.username,
+                            }),
+                            okLabel: t("common.delete"),
+                          });
+                          if (!ok) return;
+                          await api.del(`/users/${u.id}`);
+                          mutate("/users");
+                        }}
+                        aria-label="Delete user"
+                      >
+                        <Trash2 size={15} />
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))}

@@ -36,9 +36,33 @@ model User {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  sessions    Session[]
-  memberships Membership[]
-  auditEvents AuditEvent[]
+  sessions       Session[]
+  memberships    Membership[]
+  auditEvents    AuditEvent[]
+  passwordResets PasswordResetToken[]
+}
+
+model PasswordResetToken {
+  id        String    @id @default(cuid())
+  userId    String
+  /// SHA-256 of the raw token. The raw value is only ever sent in the
+  /// reset link; we never store it. Comparing on lookup uses the same
+  /// hash so we can index this column.
+  tokenHash String    @unique
+  expiresAt DateTime
+  /// Set when the token is consumed by a successful reset. Tokens are
+  /// single-use even within their TTL.
+  usedAt    DateTime?
+  /// Who created the token: the user themselves ("self") via the
+  /// "Forgot password?" form, or an admin ("admin:<userId>") via the
+  /// owner-initiated reset action. Lets us audit / invalidate by source.
+  source    String    @default("self")
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
 }
 
 model Session {

@@ -1,4 +1,5 @@
 import type { FastifyInstance } from "fastify";
+import crypto from "node:crypto";
 import { z } from "zod";
 import { loginSchema, setupSchema } from "@cofemine/shared";
 import { prisma } from "../db.js";
@@ -9,6 +10,12 @@ import { config } from "../config.js";
 import { SESSION_COOKIE } from "./plugin.js";
 import { writeAudit } from "../audit/service.js";
 import { requireUser } from "./context.js";
+import { buildResetLink, sendMail } from "../mail/smtp.js";
+
+/** Reset tokens are valid for 1 hour from issue. */
+const RESET_TOKEN_TTL_MS = 60 * 60 * 1000;
+/** Length in bytes; the hex-encoded form is 2× this. */
+const RESET_TOKEN_BYTES = 32;
 
 const SESSION_COOKIE_OPTS = {
   path: "/",
@@ -82,6 +89,84 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
     return full;
   });
 
+  // ---- Password reset --------------------------------------------------
+  //
+  // Two flows:
+  //   • POST /auth/forgot-password — public. Looks up by email or username;
+  //     if it matches a user, creates a one-shot token and emails the link.
+  //     Always returns 204 so attackers can't probe which addresses exist.
+  //   • POST /auth/reset-password — public. Consumes a valid unused token,
+  //     replaces the user's password, invalidates ALL their sessions.
+
+  app.post("/forgot-password", async (req, reply) => {
+    const body = z
+      .object({ usernameOrEmail: z.string().min(1).max(200) })
+      .parse(req.body);
+    const user = await prisma.user.findFirst({
+      where: {
+        OR: [
+          { email: body.usernameOrEmail.toLowerCase() },
+          { username: body.usernameOrEmail },
+        ],
+      },
+    });
+    // Always pretend success to prevent enumeration. Do the work async only
+    // when we actually found a user.
+    if (user) {
+      try {
+        const link = await issueResetTokenAndEmail(user.id, user.email, "self");
+        req.log.info(
+          { userId: user.id, mailed: link.mailed },
+          "password reset link generated"
+        );
+      } catch (err) {
+        req.log.warn({ err }, "forgot-password processing failed");
+      }
+    }
+    return reply.code(204).send();
+  });
+
+  app.post("/reset-password", async (req, reply) => {
+    const body = z
+      .object({
+        token: z.string().min(16).max(256),
+        newPassword: z
+          .string()
+          .min(8, "Password must be at least 8 characters")
+          .max(200),
+      })
+      .parse(req.body);
+    const tokenHash = sha256Hex(body.token);
+    const row = await prisma.passwordResetToken.findUnique({
+      where: { tokenHash },
+    });
+    if (!row || row.usedAt || row.expiresAt < new Date()) {
+      return reply
+        .code(400)
+        .send({ error: "Reset link is invalid or has expired" });
+    }
+    await prisma.$transaction([
+      prisma.user.update({
+        where: { id: row.userId },
+        data: { password: await hashPassword(body.newPassword) },
+      }),
+      prisma.passwordResetToken.update({
+        where: { id: row.id },
+        data: { usedAt: new Date() },
+      }),
+      // Kill all active sessions — a forced password reset must log
+      // every other browser out, otherwise a stolen session survives
+      // the recovery flow.
+      prisma.session.deleteMany({ where: { userId: row.userId } }),
+    ]);
+    await writeAudit(req, {
+      action: "auth.password-reset",
+      resource: row.userId,
+      metadata: { source: row.source },
+    });
+    return reply.send({ ok: true });
+  });
+
   // Self-service updates (avatar, future: displayName, email, password).
   // Admin-level updates on other users live under /users/:id.
   app.patch("/me", async (req) => {
@@ -111,6 +196,48 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
     await writeAudit(req, { action: "user.self-update", resource: user.id });
     return updated;
   });
+}
+
+/**
+ * Generate a fresh reset token, persist its hash + expiry, and email the
+ * link to the recipient. Returns the raw token + a flag for whether the
+ * email actually went out (false when SMTP is not configured — used by
+ * the admin flow to copy the link into the response so a human can
+ * deliver it manually).
+ */
+export async function issueResetTokenAndEmail(
+  userId: string,
+  email: string,
+  source: string
+): Promise<{ token: string; link: string; mailed: boolean }> {
+  const raw = crypto.randomBytes(RESET_TOKEN_BYTES).toString("hex");
+  const tokenHash = sha256Hex(raw);
+  await prisma.passwordResetToken.create({
+    data: {
+      userId,
+      tokenHash,
+      expiresAt: new Date(Date.now() + RESET_TOKEN_TTL_MS),
+      source,
+    },
+  });
+  const link = await buildResetLink(raw);
+  const subject = "Cofemine Panel — password reset";
+  const text = [
+    "We received a request to reset your password.",
+    "",
+    `Open this link to set a new one (valid for 1 hour):`,
+    link,
+    "",
+    "If you didn't request this, you can ignore this email and your password will stay the same.",
+  ].join("\n");
+  const html = [
+    `<p>We received a request to reset your password.</p>`,
+    `<p>Open this link to set a new one (valid for 1 hour):</p>`,
+    `<p><a href="${link}">${link}</a></p>`,
+    `<p>If you didn't request this, you can ignore this email — your password will stay the same.</p>`,
+  ].join("");
+  const mailed = await sendMail(email, subject, text, html);
+  return { token: raw, link, mailed };
 }
 
 async function issueSession(

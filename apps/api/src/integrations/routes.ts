@@ -21,6 +21,12 @@ import {
   readDownloadProxyForDisplay,
   writeDownloadProxy,
 } from "./download-proxy.js";
+import {
+  clearSmtp,
+  readSmtpForDisplay,
+  sendMail,
+  writeSmtp,
+} from "../mail/smtp.js";
 
 const modrinth = new ModrinthProvider();
 const curseforge = new CurseForgeProvider();
@@ -216,6 +222,84 @@ export async function integrationsRoutes(app: FastifyInstance): Promise<void> {
         action: "integration.download-proxy.clear",
         resource: "download.proxy",
       });
+      return { ok: true };
+    }
+  );
+
+  // SMTP — outgoing email server used by the password-reset flow and
+  // future invite/notification flows. Stored encrypted; password is
+  // never returned, only `hasPassword: true` so the UI can hide the
+  // field behind the same "stored" placeholder we use elsewhere.
+  app.get("/smtp", async () => {
+    return readSmtpForDisplay();
+  });
+
+  const writeSmtpSchema = z.object({
+    enabled: z.boolean().default(false),
+    host: z.string().min(1).max(255),
+    port: z.coerce.number().int().min(1).max(65535),
+    secure: z.boolean().default(false),
+    user: z.string().max(255).optional(),
+    /** undefined keeps existing, "" clears, otherwise overwrite. */
+    password: z.string().max(512).optional(),
+    from: z.string().min(3).max(255),
+    panelUrl: z.string().url().max(255),
+  });
+
+  app.put(
+    "/smtp",
+    { preHandler: requireGlobalPermission("integration.manage") },
+    async (req) => {
+      const body = writeSmtpSchema.parse(req.body);
+      await writeSmtp(body);
+      await writeAudit(req, {
+        action: "integration.smtp.update",
+        resource: "smtp",
+        metadata: {
+          enabled: body.enabled,
+          host: body.host,
+          port: body.port,
+        },
+      });
+      return { ok: true };
+    }
+  );
+
+  app.delete(
+    "/smtp",
+    { preHandler: requireGlobalPermission("integration.manage") },
+    async (req) => {
+      await clearSmtp();
+      await writeAudit(req, {
+        action: "integration.smtp.clear",
+        resource: "smtp",
+      });
+      return { ok: true };
+    }
+  );
+
+  // Send a probe email to verify the configured SMTP works without
+  // requiring the user to trigger a real password reset.
+  app.post(
+    "/smtp/test",
+    { preHandler: requireGlobalPermission("integration.manage") },
+    async (req, reply) => {
+      const body = z
+        .object({ to: z.string().email().max(255) })
+        .parse(req.body);
+      const sent = await sendMail(
+        body.to,
+        "Cofemine Panel — SMTP test",
+        "This is a test email confirming your panel's SMTP settings work.",
+        "<p>This is a test email confirming your panel's SMTP settings work.</p>",
+        req.log
+      );
+      if (!sent) {
+        return reply.code(409).send({
+          error:
+            "SMTP send failed. Check host/port/auth/from in the panel logs and try again.",
+        });
+      }
       return { ok: true };
     }
   );

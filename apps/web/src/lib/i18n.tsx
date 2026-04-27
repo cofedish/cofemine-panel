@@ -245,6 +245,21 @@ const en: Dict = {
   "admin.removeUserConfirm.title": "Remove user?",
   "admin.removeUserConfirm.body":
     "Remove {username} from the panel? This deletes their account.",
+  "admin.resetPassword.title": "Reset password",
+  "admin.resetPassword.body":
+    "Reset password for {username}? Pick how to deliver the new password.",
+  "admin.resetPassword.sendLink": "Email a reset link",
+  "admin.resetPassword.setManually": "Type a new password",
+  "admin.resetPassword.setPrompt":
+    "New password (min 8 characters). The user's other sessions will be signed out.",
+  "admin.resetPassword.tooShort":
+    "Password must be at least 8 characters.",
+  "admin.resetPassword.directDone":
+    "Password updated. The user must sign in again with the new one.",
+  "admin.resetPassword.sentMail":
+    "Reset email sent to {email}. The link below is also valid as a fallback.",
+  "admin.resetPassword.notMailed":
+    "SMTP isn't configured — copy this one-shot link to the user yourself:",
 
   "infra.removeNodeConfirm.title": "Remove node?",
   "infra.removeNodeConfirm.body": "Remove node \"{name}\"?",
@@ -259,6 +274,31 @@ const en: Dict = {
   "auth.login.submit": "Sign in",
   "auth.login.submitting": "Signing in…",
   "auth.login.failed": "Login failed",
+  "auth.login.forgot": "Forgot password?",
+
+  "auth.forgot.title": "Reset password",
+  "auth.forgot.subtitle":
+    "Enter the username or email tied to your account. If we find a match, a reset link goes out shortly.",
+  "auth.forgot.submit": "Send reset link",
+  "auth.forgot.submitting": "Sending…",
+  "auth.forgot.sent":
+    "If that account exists, a reset link has been sent. Check your inbox (and spam folder) — the link is valid for 1 hour.",
+  "auth.forgot.backToLogin": "Back to sign in",
+
+  "auth.reset.title": "Set a new password",
+  "auth.reset.subtitle":
+    "Pick a new password. All your active panel sessions will be signed out.",
+  "auth.reset.newPassword": "New password",
+  "auth.reset.confirmPassword": "Confirm new password",
+  "auth.reset.mismatch": "Passwords do not match.",
+  "auth.reset.submit": "Set new password",
+  "auth.reset.submitting": "Saving…",
+  "auth.reset.success":
+    "Password updated. Redirecting to sign in…",
+  "auth.reset.invalidTitle": "Reset link invalid",
+  "auth.reset.missingToken":
+    "This page needs a token from a reset email. Request a new link below.",
+  "auth.reset.requestNew": "Request a new link",
   "auth.shell.title": "Minecraft servers, without the yak-shaving.",
   "auth.shell.subtitle":
     "Create, scale, and operate containers for Paper, Vanilla, Fabric, Forge and friends — with live consoles, backups, and mod installers built in.",
@@ -395,6 +435,31 @@ const en: Dict = {
   "proxy.configuredButOff": "Configured — off",
   "proxy.helperNote":
     "How it works: the watchdog polls each modpack server every 15s while it's starting. If install aborts with a network timeout and this proxy is configured + enabled, the watchdog reprovisions the container with matching JVM flags (SOCKS or HTTP) and restarts. Once the MC server prints its boot marker, the watchdog reprovisions back to a clean container so MC's own HTTP traffic goes direct. One proxy attempt per install session.",
+
+  "smtp.title": "Outgoing email (SMTP)",
+  "smtp.tagline": "Used by password reset and future invites",
+  "smtp.subtitle":
+    "Set this up so the panel can email password reset links and (later) invitations. Without it, owner-initiated resets fall back to copy-paste links.",
+  "smtp.cardDesc":
+    "Configure once. The forgot-password flow needs this; admin-driven resets work without it but require copying the link manually.",
+  "smtp.detailsIntro":
+    "All fields except password are stored in plaintext (encrypted with the panel's SECRETS_KEY). Use the test below to verify before relying on it.",
+  "smtp.enable": "Enable email delivery",
+  "smtp.host": "Host",
+  "smtp.port": "Port",
+  "smtp.secure": "Encryption",
+  "smtp.user": "Auth username",
+  "smtp.password": "Auth password",
+  "smtp.from": "From address",
+  "smtp.panelUrl": "Panel base URL",
+  "smtp.notConfigured": "Not configured",
+  "smtp.configuredButOff": "Configured — off",
+  "smtp.testTitle": "Send a test email",
+  "smtp.testSend": "Send test",
+  "smtp.testSending": "Sending…",
+  "smtp.testSent": "Test email queued to {to}.",
+  "smtp.helperNote":
+    "Panel base URL is used to build links inside outgoing emails (e.g. /reset-password?token=…). Use the public URL users will hit, not the internal Docker host.",
 
   "backups.create": "Create backup",
   "backups.creating": "Creating…",
@@ -683,6 +748,21 @@ const ru: Dict = {
   "admin.removeUserConfirm.title": "Удалить пользователя?",
   "admin.removeUserConfirm.body":
     "Удалить {username} из панели? Аккаунт будет удалён.",
+  "admin.resetPassword.title": "Сбросить пароль",
+  "admin.resetPassword.body":
+    "Сбросить пароль пользователю {username}? Выберите способ доставки.",
+  "admin.resetPassword.sendLink": "Отправить ссылку на email",
+  "admin.resetPassword.setManually": "Задать пароль вручную",
+  "admin.resetPassword.setPrompt":
+    "Новый пароль (минимум 8 символов). Все активные сессии пользователя будут разлогинены.",
+  "admin.resetPassword.tooShort":
+    "Пароль должен быть минимум 8 символов.",
+  "admin.resetPassword.directDone":
+    "Пароль обновлён. Пользователю нужно войти с новым.",
+  "admin.resetPassword.sentMail":
+    "Письмо со сбросом отправлено на {email}. Ссылка ниже работает как запасной вариант.",
+  "admin.resetPassword.notMailed":
+    "SMTP не настроен — скопируйте одноразовую ссылку и передайте пользователю:",
 
   "infra.removeNodeConfirm.title": "Удалить ноду?",
   "infra.removeNodeConfirm.body": "Удалить ноду «{name}»?",
@@ -697,6 +777,31 @@ const ru: Dict = {
   "auth.login.submit": "Войти",
   "auth.login.submitting": "Вход…",
   "auth.login.failed": "Ошибка входа",
+  "auth.login.forgot": "Забыли пароль?",
+
+  "auth.forgot.title": "Сброс пароля",
+  "auth.forgot.subtitle":
+    "Введите логин или email от своего аккаунта. Если найдём — отправим ссылку на сброс.",
+  "auth.forgot.submit": "Отправить ссылку",
+  "auth.forgot.submitting": "Отправляю…",
+  "auth.forgot.sent":
+    "Если такой аккаунт существует, ссылка отправлена. Проверьте почту (включая спам) — ссылка живёт 1 час.",
+  "auth.forgot.backToLogin": "Назад ко входу",
+
+  "auth.reset.title": "Новый пароль",
+  "auth.reset.subtitle":
+    "Введите новый пароль. Все ваши активные сессии будут разлогинены.",
+  "auth.reset.newPassword": "Новый пароль",
+  "auth.reset.confirmPassword": "Повторите пароль",
+  "auth.reset.mismatch": "Пароли не совпадают.",
+  "auth.reset.submit": "Установить пароль",
+  "auth.reset.submitting": "Сохраняю…",
+  "auth.reset.success":
+    "Пароль обновлён. Перенаправляю на вход…",
+  "auth.reset.invalidTitle": "Ссылка недействительна",
+  "auth.reset.missingToken":
+    "Эта страница ждёт токен из письма-сброса. Запросите новую ссылку ниже.",
+  "auth.reset.requestNew": "Запросить новую ссылку",
   "auth.shell.title": "Minecraft-серверы без лишней возни.",
   "auth.shell.subtitle":
     "Создавайте, масштабируйте и администрируйте контейнеры Paper, Vanilla, Fabric, Forge и других — с живой консолью, бэкапами и установщиком модов из коробки.",
@@ -835,6 +940,31 @@ const ru: Dict = {
   "proxy.configuredButOff": "Настроен — выключен",
   "proxy.helperNote":
     "Как это работает: watchdog опрашивает каждый модпак-сервер раз в 15с, пока он стартует. Если установка упала с сетевым таймаутом, а прокси настроен и включён — watchdog пересобирает контейнер с JVM-флагами (SOCKS или HTTP) и перезапускает. Как только MC напечатает маркер загрузки — watchdog пересобирает обратно на чистый контейнер, чтобы MC ходил напрямую. Одна попытка прокси на установку.",
+
+  "smtp.title": "Исходящая почта (SMTP)",
+  "smtp.tagline": "Используется для сброса пароля и приглашений",
+  "smtp.subtitle":
+    "Настройте, чтобы панель могла отправлять ссылки сброса пароля и (позже) приглашения. Без этого админский сброс работает, но ссылку придётся передавать вручную.",
+  "smtp.cardDesc":
+    "Один раз настроил и забыл. Самостоятельный сброс пароля требует SMTP; админский — нет, но придётся копировать ссылку руками.",
+  "smtp.detailsIntro":
+    "Все поля кроме пароля хранятся в открытом виде (зашифрованы SECRETS_KEY панели). Перед использованием — отправьте тестовое письмо ниже.",
+  "smtp.enable": "Включить отправку email",
+  "smtp.host": "Хост",
+  "smtp.port": "Порт",
+  "smtp.secure": "Шифрование",
+  "smtp.user": "Логин для авторизации",
+  "smtp.password": "Пароль для авторизации",
+  "smtp.from": "Адрес отправителя",
+  "smtp.panelUrl": "Базовый URL панели",
+  "smtp.notConfigured": "Не настроено",
+  "smtp.configuredButOff": "Настроено — выключено",
+  "smtp.testTitle": "Отправить тестовое письмо",
+  "smtp.testSend": "Отправить тест",
+  "smtp.testSending": "Отправляю…",
+  "smtp.testSent": "Тестовое письмо поставлено в очередь на {to}.",
+  "smtp.helperNote":
+    "Базовый URL панели используется для построения ссылок в письмах (например /reset-password?token=…). Указывайте публичный адрес, по которому пользователи реально открывают панель, а не внутренний Docker-хост.",
 
   "backups.create": "Создать бэкап",
   "backups.creating": "Создаю…",

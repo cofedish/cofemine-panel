@@ -13,6 +13,7 @@ import {
   ExternalLink,
   Sparkles,
   Network,
+  Mail,
 } from "lucide-react";
 import { useT } from "@/lib/i18n";
 
@@ -62,15 +63,27 @@ type ProxyDisplay = {
   hasPassword: boolean;
 };
 
+type SmtpDisplay = {
+  enabled: boolean;
+  host: string;
+  port: number;
+  secure: boolean;
+  user: string;
+  hasPassword: boolean;
+  from: string;
+  panelUrl: string;
+};
+
 export default function IntegrationsPage(): JSX.Element {
   const { data } = useSWR<Integrations>("/integrations", fetcher);
   const { data: proxy } = useSWR<ProxyDisplay>(
     "/integrations/download-proxy",
     fetcher
   );
+  const { data: smtp } = useSWR<SmtpDisplay>("/integrations/smtp", fetcher);
   const { t } = useT();
   const [openKey, setOpenKey] = useState<
-    "modrinth" | "curseforge" | "download-proxy" | null
+    "modrinth" | "curseforge" | "download-proxy" | "smtp" | null
   >(null);
 
   return (
@@ -95,6 +108,9 @@ export default function IntegrationsPage(): JSX.Element {
             proxy={proxy ?? null}
             onOpen={() => setOpenKey("download-proxy")}
           />
+        </StaggerItem>
+        <StaggerItem>
+          <SmtpCard smtp={smtp ?? null} onOpen={() => setOpenKey("smtp")} />
         </StaggerItem>
         <StaggerItem>
           <ComingSoonCard />
@@ -124,6 +140,14 @@ export default function IntegrationsPage(): JSX.Element {
         description={t("proxy.subtitle")}
       >
         <DownloadProxyDetails />
+      </Drawer>
+      <Drawer
+        open={openKey === "smtp"}
+        onClose={() => setOpenKey(null)}
+        title={t("smtp.title")}
+        description={t("smtp.subtitle")}
+      >
+        <SmtpDetails />
       </Drawer>
     </div>
   );
@@ -436,6 +460,326 @@ function DownloadProxyDetails(): JSX.Element {
       )}
       <p className="text-xs text-ink-muted leading-relaxed">
         {t("proxy.helperNote")}
+      </p>
+    </div>
+  );
+}
+
+function SmtpCard({
+  smtp,
+  onOpen,
+}: {
+  smtp: SmtpDisplay | null;
+  onOpen: () => void;
+}): JSX.Element {
+  const { t } = useT();
+  const configured = !!smtp && !!smtp.host && !!smtp.from;
+  const enabled = !!smtp?.enabled;
+  return (
+    <motion.button
+      type="button"
+      onClick={onOpen}
+      whileHover={{ y: -3 }}
+      transition={{ duration: 0.18 }}
+      className="tile tile-interactive overflow-hidden h-full flex flex-col text-left"
+    >
+      <div
+        className="relative h-24 grid place-items-center text-white overflow-hidden"
+        style={{ background: "linear-gradient(135deg, #1e3a8a, #2563eb)" }}
+      >
+        <span className="absolute inset-0 bg-grid-pattern opacity-30" />
+        <Mail size={42} className="relative opacity-80" />
+      </div>
+      <div className="p-5 flex-1 flex flex-col">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <div className="heading-md">{t("smtp.title")}</div>
+            <div className="text-xs text-ink-muted mt-0.5">
+              {t("smtp.tagline")}
+            </div>
+          </div>
+          <span
+            className={`chip ${
+              enabled
+                ? "chip-success"
+                : configured
+                  ? "chip-warning"
+                  : "chip-muted"
+            }`}
+          >
+            {enabled && <Check size={10} />}{" "}
+            {enabled
+              ? t("integrations.enabled")
+              : configured
+                ? t("smtp.configuredButOff")
+                : t("smtp.notConfigured")}
+          </span>
+        </div>
+        <p className="text-sm text-ink-secondary mt-3 flex-1">
+          {t("smtp.cardDesc")}
+        </p>
+      </div>
+    </motion.button>
+  );
+}
+
+function SmtpDetails(): JSX.Element {
+  const { t } = useT();
+  const { data } = useSWR<SmtpDisplay>("/integrations/smtp", fetcher);
+  const [enabled, setEnabled] = useState(false);
+  const [host, setHost] = useState("");
+  const [port, setPort] = useState("");
+  const [secure, setSecure] = useState(false);
+  const [user, setUser] = useState("");
+  const [password, setPassword] = useState("");
+  const [passwordDirty, setPasswordDirty] = useState(false);
+  const [from, setFrom] = useState("");
+  const [panelUrl, setPanelUrl] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+  const [testTo, setTestTo] = useState("");
+  const [testBusy, setTestBusy] = useState(false);
+
+  const [hydrated, setHydrated] = useState(false);
+  useEffect(() => {
+    if (data && !hydrated) {
+      setEnabled(data.enabled);
+      setHost(data.host);
+      setPort(data.port ? String(data.port) : "");
+      setSecure(data.secure);
+      setUser(data.user);
+      setFrom(data.from);
+      setPanelUrl(
+        data.panelUrl ||
+          (typeof window !== "undefined"
+            ? `${window.location.protocol}//${window.location.host}`
+            : "")
+      );
+      setHydrated(true);
+    }
+  }, [data, hydrated]);
+
+  async function save(): Promise<void> {
+    setBusy(true);
+    setMsg(null);
+    try {
+      const body: Record<string, unknown> = {
+        enabled,
+        host,
+        port: Number(port),
+        secure,
+        from,
+        panelUrl,
+      };
+      if (user) body.user = user;
+      if (passwordDirty) body.password = password;
+      await api.put("/integrations/smtp", body);
+      setMsg(t("common.success"));
+      setPasswordDirty(false);
+      setPassword("");
+      mutate("/integrations/smtp");
+    } catch (err) {
+      setMsg(err instanceof ApiError ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function clearAll(): Promise<void> {
+    setBusy(true);
+    setMsg(null);
+    try {
+      await api.del("/integrations/smtp");
+      setEnabled(false);
+      setHost("");
+      setPort("");
+      setUser("");
+      setPassword("");
+      setFrom("");
+      mutate("/integrations/smtp");
+    } catch (err) {
+      setMsg(err instanceof ApiError ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function sendTest(): Promise<void> {
+    setTestBusy(true);
+    setMsg(null);
+    try {
+      await api.post("/integrations/smtp/test", { to: testTo });
+      setMsg(t("smtp.testSent", { to: testTo }));
+    } catch (err) {
+      setMsg(err instanceof ApiError ? err.message : String(err));
+    } finally {
+      setTestBusy(false);
+    }
+  }
+
+  return (
+    <div className="space-y-5">
+      <p className="text-sm text-ink-secondary leading-relaxed">
+        {t("smtp.detailsIntro")}
+      </p>
+
+      <label className="flex items-center gap-2.5 text-sm cursor-pointer">
+        <input
+          type="checkbox"
+          checked={enabled}
+          onChange={(e) => setEnabled(e.target.checked)}
+        />
+        <span>{t("smtp.enable")}</span>
+      </label>
+
+      <div className="grid grid-cols-1 sm:grid-cols-[1fr_120px_120px] gap-3">
+        <div className="space-y-1.5">
+          <label className="text-xs font-medium text-ink-secondary">
+            {t("smtp.host")}
+          </label>
+          <input
+            className="input font-mono"
+            placeholder="smtp.example.com"
+            value={host}
+            onChange={(e) => setHost(e.target.value)}
+          />
+        </div>
+        <div className="space-y-1.5">
+          <label className="text-xs font-medium text-ink-secondary">
+            {t("smtp.port")}
+          </label>
+          <input
+            className="input font-mono"
+            type="number"
+            min={1}
+            max={65535}
+            placeholder="587"
+            value={port}
+            onChange={(e) => setPort(e.target.value)}
+          />
+        </div>
+        <div className="space-y-1.5">
+          <label className="text-xs font-medium text-ink-secondary">
+            {t("smtp.secure")}
+          </label>
+          <select
+            className="select"
+            value={secure ? "ssl" : "starttls"}
+            onChange={(e) => setSecure(e.target.value === "ssl")}
+          >
+            <option value="starttls">STARTTLS</option>
+            <option value="ssl">SSL/TLS</option>
+          </select>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <div className="space-y-1.5">
+          <label className="text-xs font-medium text-ink-secondary">
+            {t("smtp.user")}{" "}
+            <span className="text-ink-muted">({t("proxy.optional")})</span>
+          </label>
+          <input
+            className="input"
+            value={user}
+            onChange={(e) => setUser(e.target.value)}
+          />
+        </div>
+        <div className="space-y-1.5">
+          <label className="text-xs font-medium text-ink-secondary">
+            {t("smtp.password")}{" "}
+            <span className="text-ink-muted">
+              ({t("proxy.optional")}
+              {data?.hasPassword && !passwordDirty
+                ? ` · ${t("proxy.passwordStored")}`
+                : ""}
+              )
+            </span>
+          </label>
+          <input
+            className="input font-mono"
+            type="password"
+            placeholder={
+              data?.hasPassword && !passwordDirty ? "••••••••" : ""
+            }
+            value={password}
+            onChange={(e) => {
+              setPassword(e.target.value);
+              setPasswordDirty(true);
+            }}
+          />
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <div className="space-y-1.5">
+          <label className="text-xs font-medium text-ink-secondary">
+            {t("smtp.from")}
+          </label>
+          <input
+            className="input"
+            placeholder='"CofePanel" <panel@example.com>'
+            value={from}
+            onChange={(e) => setFrom(e.target.value)}
+          />
+        </div>
+        <div className="space-y-1.5">
+          <label className="text-xs font-medium text-ink-secondary">
+            {t("smtp.panelUrl")}
+          </label>
+          <input
+            className="input font-mono"
+            placeholder="https://panel.example.com"
+            value={panelUrl}
+            onChange={(e) => setPanelUrl(e.target.value)}
+          />
+        </div>
+      </div>
+
+      <div className="flex gap-2">
+        <button
+          className="btn btn-primary"
+          onClick={save}
+          disabled={busy || !host || !port || !from || !panelUrl}
+        >
+          {busy ? t("integrations.saving") : t("integrations.save")}
+        </button>
+        {data?.host && (
+          <button className="btn btn-ghost" onClick={clearAll} disabled={busy}>
+            {t("integrations.remove")}
+          </button>
+        )}
+      </div>
+
+      <div className="divider" />
+
+      <div className="space-y-2">
+        <label className="text-xs font-medium text-ink-secondary">
+          {t("smtp.testTitle")}
+        </label>
+        <div className="flex gap-2">
+          <input
+            className="input flex-1"
+            type="email"
+            placeholder="you@example.com"
+            value={testTo}
+            onChange={(e) => setTestTo(e.target.value)}
+          />
+          <button
+            className="btn btn-ghost"
+            onClick={sendTest}
+            disabled={!testTo || testBusy}
+          >
+            {testBusy ? t("smtp.testSending") : t("smtp.testSend")}
+          </button>
+        </div>
+      </div>
+
+      {msg && (
+        <div className="text-xs text-ink-secondary">{msg}</div>
+      )}
+      <p className="text-xs text-ink-muted leading-relaxed">
+        {t("smtp.helperNote")}
       </p>
     </div>
   );

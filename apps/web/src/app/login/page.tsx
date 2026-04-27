@@ -1,5 +1,6 @@
 "use client";
 import { useState, useEffect, type FormEvent } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { api, ApiError } from "@/lib/api";
 import { AuthShell } from "@/components/auth-shell";
@@ -73,9 +74,17 @@ export default function LoginPage(): JSX.Element {
             />
           </div>
           <div className="space-y-1.5">
-            <label className="text-xs font-medium text-ink-secondary">
-              {t("auth.login.password")}
-            </label>
+            <div className="flex items-center justify-between">
+              <label className="text-xs font-medium text-ink-secondary">
+                {t("auth.login.password")}
+              </label>
+              <Link
+                href="/forgot-password"
+                className="text-xs link"
+              >
+                {t("auth.login.forgot")}
+              </Link>
+            </div>
             <input
               className="input"
               type="password"
