@@ -102,6 +102,10 @@ export const createNodeSchema = z.object({
   token: z.string().min(16).max(200),
 });
 
+export const updateNodeSchema = z.object({
+  name: z.string().min(2).max(48).optional(),
+});
+
 export const createTemplateSchema = z.object({
   name: z.string().min(2).max(64),
   description: z.string().max(500).optional(),

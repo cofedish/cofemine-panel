@@ -171,7 +171,30 @@ const en: Dict = {
   "infra.subtitle":
     "Docker hosts (nodes) that run your Minecraft server containers. Each node runs its own agent; the panel talks to them over a shared secret.",
   "infra.addNode": "Add node",
+  "infra.adding": "Adding…",
+  "infra.addNode.body":
+    "Register a remote Docker host. The agent on that host must be reachable over HTTPS with the shared token.",
   "infra.online": "{n} / {total} online",
+  "infra.field.name": "Display name",
+  "infra.field.host": "Agent URL",
+  "infra.field.token": "Shared token",
+  "infra.field.token.hint": "Set in AGENT_TOKEN on the remote agent",
+  "infra.stat.servers": "Servers",
+  "infra.stat.lastSeen": "Last seen",
+  "infra.health.check": "Health",
+  "infra.health.checking": "Checking…",
+  "infra.health.ok": "Agent reachable · v{version}",
+  "infra.health.fail": "Agent unreachable: {msg}",
+  "infra.rename.title": "Rename node",
+  "infra.rename.body":
+    "New display name (2–48 characters). Only the panel label changes; the agent host and token stay the same.",
+  "infra.rename.invalid": "Name must be 2–48 characters.",
+  "infra.empty.title": "No nodes registered",
+  "infra.empty.body":
+    "A node is a Docker host with the cofemine agent running on it. The default compose auto-registers the local agent on first boot.",
+  "infra.addAnother.title": "Add another node",
+  "infra.addAnother.body":
+    "Spread your servers across several Docker hosts — local + remote, dev + prod.",
 
   "admin.tabs.users": "Users",
   "admin.tabs.audit": "Audit log",
@@ -674,7 +697,30 @@ const ru: Dict = {
   "infra.subtitle":
     "Docker-хосты (ноды), на которых крутятся контейнеры Minecraft. На каждой ноде свой агент; панель общается с ними по общему секрету.",
   "infra.addNode": "Добавить ноду",
+  "infra.adding": "Добавляю…",
+  "infra.addNode.body":
+    "Регистрация удалённого Docker-хоста. Агент на той стороне должен быть доступен по HTTPS с общим секретом.",
   "infra.online": "{n} / {total} онлайн",
+  "infra.field.name": "Имя",
+  "infra.field.host": "URL агента",
+  "infra.field.token": "Общий секрет",
+  "infra.field.token.hint": "Задаётся в AGENT_TOKEN на удалённом агенте",
+  "infra.stat.servers": "Серверы",
+  "infra.stat.lastSeen": "Последний контакт",
+  "infra.health.check": "Проверить",
+  "infra.health.checking": "Проверяю…",
+  "infra.health.ok": "Агент отвечает · v{version}",
+  "infra.health.fail": "Агент недоступен: {msg}",
+  "infra.rename.title": "Переименовать ноду",
+  "infra.rename.body":
+    "Новое имя (2–48 символов). Меняется только подпись в панели; адрес агента и секрет остаются прежними.",
+  "infra.rename.invalid": "Имя должно быть 2–48 символов.",
+  "infra.empty.title": "Нет зарегистрированных нод",
+  "infra.empty.body":
+    "Нода — это Docker-хост с запущенным агентом cofemine. Дефолтный compose сам регистрирует локального агента при первом запуске.",
+  "infra.addAnother.title": "Добавить ещё ноду",
+  "infra.addAnother.body":
+    "Распределите серверы по нескольким Docker-хостам — локальный + удалённый, dev + prod.",
 
   "admin.tabs.users": "Пользователи",
   "admin.tabs.audit": "Лог действий",

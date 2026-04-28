@@ -1,5 +1,5 @@
 import type { FastifyInstance } from "fastify";
-import { createNodeSchema } from "@cofemine/shared";
+import { createNodeSchema, updateNodeSchema } from "@cofemine/shared";
 import { prisma } from "../db.js";
 import { sha256Hex } from "../crypto.js";
 import { requireGlobalPermission } from "../auth/rbac.js";
@@ -14,6 +14,12 @@ export async function nodesRoutes(app: FastifyInstance): Promise<void> {
     async () => {
       const nodes = await prisma.node.findMany({
         orderBy: { createdAt: "asc" },
+        include: {
+          // We surface a server count per node so the dashboard can
+          // show "3 servers" right on the node card without a second
+          // round-trip per node.
+          _count: { select: { servers: true } },
+        },
       });
       return nodes.map((n) => ({
         id: n.id,
@@ -22,7 +28,26 @@ export async function nodesRoutes(app: FastifyInstance): Promise<void> {
         status: n.status,
         lastSeenAt: n.lastSeenAt,
         createdAt: n.createdAt,
+        serverCount: n._count.servers,
       }));
+    }
+  );
+
+  app.patch(
+    "/:id",
+    { preHandler: requireGlobalPermission("node.manage") },
+    async (req) => {
+      const { id } = req.params as { id: string };
+      const body = updateNodeSchema.parse(req.body);
+      const data: Record<string, unknown> = {};
+      if (body.name !== undefined) data.name = body.name;
+      const node = await prisma.node.update({ where: { id }, data });
+      await writeAudit(req, {
+        action: "node.update",
+        resource: id,
+        metadata: body,
+      });
+      return { ok: true, node };
     }
   );
 
