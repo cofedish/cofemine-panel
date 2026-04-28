@@ -48,6 +48,13 @@ const en: Dict = {
   "theme.mode": "Mode",
   "theme.accent": "Accent",
 
+  "motion.title": "Motion",
+  "motion.subtitle":
+    "Decorative animations — drifting blocks on the login screen, breathing logos, staggered card mounts. Auto follows the OS reduce-motion setting.",
+  "motion.auto": "Auto",
+  "motion.on": "On",
+  "motion.off": "Off",
+
   "menu.settings": "Settings",
   "menu.signOut": "Sign out",
 
@@ -573,6 +580,13 @@ const ru: Dict = {
   "theme.system": "Системная",
   "theme.mode": "Режим",
   "theme.accent": "Акцент",
+
+  "motion.title": "Анимации",
+  "motion.subtitle":
+    "Декоративная анимация — летящие блоки на логине, дышащие логотипы, плавные появления карточек. «Авто» уважает системную настройку «уменьшить движение».",
+  "motion.auto": "Авто",
+  "motion.on": "Включены",
+  "motion.off": "Выключены",
 
   "menu.settings": "Настройки",
   "menu.signOut": "Выйти",

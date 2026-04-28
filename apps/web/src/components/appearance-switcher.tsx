@@ -6,6 +6,7 @@ import { Sun, Moon, Monitor, Check } from "lucide-react";
 import { ACCENTS, useAccent, type Accent } from "./theme-provider";
 import { cn } from "@/lib/cn";
 import { useT } from "@/lib/i18n";
+import { useMotionPref, type MotionPref } from "@/lib/motion-pref";
 
 const ACCENT_PREVIEW: Record<Accent, { label: string; hex: string }> = {
   emerald: { label: "Emerald", hex: "#059669" },
@@ -24,6 +25,7 @@ const ACCENT_PREVIEW: Record<Accent, { label: string; hex: string }> = {
 export function AppearancePanel(): JSX.Element {
   const { theme, setTheme } = useTheme();
   const { accent, setAccent } = useAccent();
+  const { pref: motionPref, setPref: setMotionPref } = useMotionPref();
   const { t } = useT();
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
@@ -84,6 +86,36 @@ export function AppearancePanel(): JSX.Element {
               </button>
             );
           })}
+        </div>
+      </div>
+
+      <div>
+        <h3 className="font-medium mb-1">{t("motion.title")}</h3>
+        <p className="text-sm text-ink-muted mb-3 max-w-xl">
+          {t("motion.subtitle")}
+        </p>
+        <div className="grid grid-cols-3 gap-3 max-w-xl">
+          {(
+            [
+              { v: "auto", labelKey: "motion.auto" },
+              { v: "on", labelKey: "motion.on" },
+              { v: "off", labelKey: "motion.off" },
+            ] as const
+          ).map(({ v, labelKey }) => (
+            <button
+              key={v}
+              type="button"
+              onClick={() => setMotionPref(v as MotionPref)}
+              className={cn(
+                "relative px-4 py-3 rounded-lg border text-sm font-medium transition-colors",
+                motionPref === v
+                  ? "border-accent/60 bg-surface-2 text-ink"
+                  : "border-line text-ink-secondary hover:bg-surface-2"
+              )}
+            >
+              {t(labelKey)}
+            </button>
+          ))}
         </div>
       </div>
     </div>

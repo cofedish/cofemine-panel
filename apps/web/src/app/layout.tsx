@@ -5,6 +5,7 @@ import { Press_Start_2P } from "next/font/google";
 import { ThemeProvider } from "@/components/theme-provider";
 import { DialogProvider } from "@/components/dialog-provider";
 import { I18nProvider } from "@/lib/i18n";
+import { MotionPrefProvider } from "@/lib/motion-pref";
 
 // Press Start 2P — the canonical pixel font, close to Minecraft's title
 // look. Exposed as --font-pixel so .font-pixel (see globals.css) picks it
@@ -36,7 +37,9 @@ export default function RootLayout({
       <body>
         <ThemeProvider>
           <I18nProvider>
-            <DialogProvider>{children}</DialogProvider>
+            <MotionPrefProvider>
+              <DialogProvider>{children}</DialogProvider>
+            </MotionPrefProvider>
           </I18nProvider>
         </ThemeProvider>
       </body>
