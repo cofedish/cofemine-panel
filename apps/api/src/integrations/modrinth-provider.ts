@@ -56,6 +56,53 @@ async function call<T>(path: string): Promise<T> {
     : new Error(`Modrinth ${path} failed`);
 }
 
+// Per-project compatibility cache. Keyed by `<id>|<version>|<loader>` so
+// each (project, MC version, loader) triple is fetched at most once per
+// TTL. Result is true/false. We keep the cache global+process-local so
+// the verify pass on a search of 30 hits reuses lookups across retries
+// and pagination clicks.
+const compatCache = new Map<string, { at: number; ok: boolean }>();
+const COMPAT_TTL_MS = 5 * 60 * 1000;
+
+/**
+ * Fast yes/no check: does this project have at least one published
+ * version that matches BOTH the requested gameVersion AND loader?
+ *
+ * Modrinth's `/v2/project/:id/version` endpoint accepts the same
+ * `game_versions` + `loaders` arrays as the version index, and returns
+ * only versions where every entry in the file's `loaders[]` /
+ * `game_versions[]` includes the requested values. Empty list → not
+ * compatible. Caller treats network errors as "compatible" so a flaky
+ * Modrinth doesn't blank out the whole search.
+ */
+async function hasMatchingVersion(
+  id: string,
+  gameVersion: string,
+  loader: string
+): Promise<boolean> {
+  const key = `${id}|${gameVersion}|${loader}`;
+  const cached = compatCache.get(key);
+  if (cached && Date.now() - cached.at < COMPAT_TTL_MS) {
+    return cached.ok;
+  }
+  try {
+    const params = new URLSearchParams();
+    params.set("game_versions", JSON.stringify([gameVersion]));
+    params.set("loaders", JSON.stringify([loader]));
+    const versions = await call<any[]>(
+      `/project/${encodeURIComponent(id)}/version?${params.toString()}`
+    );
+    const ok = Array.isArray(versions) && versions.length > 0;
+    compatCache.set(key, { at: Date.now(), ok });
+    return ok;
+  } catch {
+    // Don't punish the user for a transient API hiccup — let the entry
+    // through; they'll see the install fail clearly if it's actually
+    // incompatible. Don't cache so a follow-up search can re-check.
+    return true;
+  }
+}
+
 export class ModrinthProvider implements ContentProvider {
   readonly name = "modrinth" as const;
 
@@ -83,7 +130,8 @@ export class ModrinthProvider implements ContentProvider {
     params.set("limit", String(filters.limit ?? 20));
     params.set("offset", String(filters.offset ?? 0));
     const res = await call<{ hits: any[] }>(`/search?${params.toString()}`);
-    return res.hits.map((h) => ({
+
+    const hits = res.hits.map((h) => ({
       id: h.project_id ?? h.slug,
       provider: "modrinth" as const,
       name: h.title,
@@ -97,6 +145,30 @@ export class ModrinthProvider implements ContentProvider {
       projectType: h.project_type as ContentKind,
       pageUrl: `https://modrinth.com/${h.project_type}/${h.slug}`,
     }));
+
+    // Modrinth's `versions:X AND categories:Y` facet is a project-level
+    // match. A project that ships 1.20.1-Forge AND 1.21.1-Fabric matches
+    // both `versions:1.21.1` and `categories:forge` — but those tags
+    // come from DIFFERENT files, so the project is not actually
+    // installable on a 1.21.1 + Forge server. To enforce per-version
+    // compatibility we ask Modrinth's version index for each candidate
+    // whether it has at least one file matching both criteria together.
+    // Skip for modpacks (they're packs, not loader-bound).
+    if (
+      filters.gameVersion &&
+      filters.loader &&
+      filters.projectType !== "modpack" &&
+      hits.length > 0
+    ) {
+      const compat = await Promise.all(
+        hits.map((h) =>
+          hasMatchingVersion(h.id, filters.gameVersion!, filters.loader!)
+        )
+      );
+      return hits.filter((_, i) => compat[i]);
+    }
+
+    return hits;
   }
 
   async getProject(id: string): Promise<ContentSummary> {
