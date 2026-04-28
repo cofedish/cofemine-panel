@@ -68,6 +68,15 @@ export class ModrinthProvider implements ContentProvider {
     if (filters.projectType) facets.push([`project_type:${filters.projectType}`]);
     if (filters.loader) facets.push([`categories:${filters.loader}`]);
     if (filters.gameVersion) facets.push([`versions:${filters.gameVersion}`]);
+    // We're a server-hosting panel — there is no point ever showing
+    // mods that are explicitly client-only (HUD overlays, minimap
+    // tweaks, particle changes, etc.). Modrinth tags every project
+    // with `server_side: required | optional | unsupported`, so we
+    // filter to the first two. The facet is meaningless for modpacks
+    // (they always have it as "required"), but harmless to apply.
+    if (filters.projectType !== "modpack") {
+      facets.push([`server_side:required`, `server_side:optional`]);
+    }
     const params = new URLSearchParams();
     if (filters.query) params.set("query", filters.query);
     if (facets.length) params.set("facets", JSON.stringify(facets));

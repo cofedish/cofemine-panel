@@ -63,11 +63,27 @@ export class CurseForgeProvider implements ContentProvider {
     if (filters.gameVersion) params.set("gameVersion", filters.gameVersion);
     if (filters.projectType)
       params.set("classId", String(mapClassId(filters.projectType)));
-    // CurseForge returns nothing useful without either searchFilter or a
-    // sort. Default to popularity so the wizard shows the same "top packs"
-    // view the real curseforge.com shows on an empty search.
+    // Mod loader filter — narrows results to ones that *can* run on
+    // this server's loader. CF accepts numeric codes only; for plugins
+    // / datapacks the param is ignored on their side, so it's safe to
+    // always pass when we know the loader.
+    if (filters.loader) {
+      const code = mapLoaderType(filters.loader);
+      if (code !== null) params.set("modLoaderType", String(code));
+    }
+    // Sort strategy:
+    //   • No query → "Popularity" so the wizard's empty-state shows
+    //     the same top packs curseforge.com shows.
+    //   • With query → "TotalDownloads". CF's default with a search
+    //     term is fuzzy-name-relevance which is *terrible* (typing
+    //     "Valk" surfaced the same trickle of obscure mods every
+    //     time); ranking by total downloads with the search filter
+    //     applied gives canonical "popular matches first".
     if (!filters.query) {
       params.set("sortField", "2"); // Popularity
+      params.set("sortOrder", "desc");
+    } else {
+      params.set("sortField", "6"); // TotalDownloads
       params.set("sortOrder", "desc");
     }
     params.set("pageSize", String(filters.limit ?? 20));
@@ -175,6 +191,28 @@ function mapClassId(kind: ContentKind): number {
       return 12;
     default:
       return 6; // mods
+  }
+}
+
+/**
+ * Translate our string loader keys into the numeric codes the CF search
+ * API expects in `modLoaderType`. Codes per the CF schema docs:
+ *   1 Forge, 2 Cauldron (deprecated), 3 LiteLoader, 4 Fabric, 5 Quilt, 6 NeoForge.
+ * Returns null for "paper" / "vanilla" — CF's loader filter doesn't
+ * cover those (they're pulled via classId/category instead).
+ */
+function mapLoaderType(loader: string): number | null {
+  switch (loader.toLowerCase()) {
+    case "forge":
+      return 1;
+    case "fabric":
+      return 4;
+    case "quilt":
+      return 5;
+    case "neoforge":
+      return 6;
+    default:
+      return null;
   }
 }
 

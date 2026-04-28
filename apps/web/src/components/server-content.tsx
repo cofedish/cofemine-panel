@@ -944,7 +944,7 @@ function BrowsePanel({
         />
       </div>
 
-      <div className="tile p-4 grid grid-cols-1 md:grid-cols-[1fr_160px_160px_140px] gap-3">
+      <div className="tile p-4 grid grid-cols-1 md:grid-cols-[1fr_140px] gap-3">
         <div className="relative">
           <Search
             size={14}
@@ -960,24 +960,6 @@ function BrowsePanel({
             onChange={(e) => setQuery(e.target.value)}
           />
         </div>
-        <input
-          className="input"
-          placeholder={t("content.browse.mcVersion")}
-          value={gameVersion}
-          onChange={(e) => setGameVersion(e.target.value)}
-        />
-        <select
-          className="select"
-          value={loader}
-          onChange={(e) => setLoader(e.target.value)}
-        >
-          <option value="">{t("content.browse.anyLoader")}</option>
-          <option value="fabric">fabric</option>
-          <option value="forge">forge</option>
-          <option value="neoforge">neoforge</option>
-          <option value="paper">paper</option>
-          <option value="quilt">quilt</option>
-        </select>
         <select
           className="select"
           value={kind}
@@ -988,6 +970,19 @@ function BrowsePanel({
           <option value="plugin">{t("content.browse.kind.plugin")}</option>
           <option value="datapack">{t("content.browse.kind.datapack")}</option>
         </select>
+      </div>
+      {/* Locked filters from the server context. We never show the version
+          / loader pickers here — they belong in the wizard, not on a
+          server that's already running 1.21.1 / NeoForge. The API call
+          already has these baked in via the useEffect below. */}
+      <div className="text-xs text-ink-muted flex items-center gap-2 flex-wrap">
+        <span>{t("content.browse.lockedPrefix")}</span>
+        {gameVersion && (
+          <code className="kbd">MC {gameVersion}</code>
+        )}
+        {loader && <code className="kbd">{loader}</code>}
+        <span>·</span>
+        <span>{t("content.browse.serverInstallableOnly")}</span>
       </div>
 
       <div className="flex items-center justify-between min-h-[20px] text-sm">
