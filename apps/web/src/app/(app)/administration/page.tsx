@@ -130,16 +130,16 @@ async function resetUserPassword(
         message: lines.join("\n"),
       });
     } else {
-      const newPwd = window.prompt(t("admin.resetPassword.setPrompt"));
-      if (!newPwd) return;
-      if (newPwd.length < 8) {
-        await dialog.alert({
-          tone: "danger",
-          title: t("common.error"),
-          message: t("admin.resetPassword.tooShort"),
-        });
-        return;
-      }
+      const newPwd = await dialog.prompt({
+        title: t("admin.resetPassword.title"),
+        message: t("admin.resetPassword.setPrompt"),
+        inputType: "password",
+        placeholder: "••••••••",
+        okLabel: t("common.save"),
+        validate: (v) =>
+          v.length >= 8 ? null : t("admin.resetPassword.tooShort"),
+      });
+      if (newPwd === null) return;
       await api.post(`/users/${u.id}/reset-password`, { newPassword: newPwd });
       await dialog.alert({
         tone: "success",

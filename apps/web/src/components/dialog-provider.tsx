@@ -35,6 +35,19 @@ type ConfirmOpts = AlertOpts & {
   danger?: boolean; // styles OK as danger button
 };
 
+type PromptOpts = AlertOpts & {
+  cancelLabel?: string;
+  /** Initial value pre-filled in the input. */
+  defaultValue?: string;
+  /** Placeholder shown when the input is empty. */
+  placeholder?: string;
+  /** Native input type — "text" or "password" cover everything we need. */
+  inputType?: "text" | "password";
+  /** Optional client-side validator. Return null to accept, or a string
+   *  message to display under the input and block submission. */
+  validate?: (value: string) => string | null;
+};
+
 type ToastOpts = {
   message: string;
   tone?: Tone;
@@ -44,6 +57,7 @@ type ToastOpts = {
 type DialogApi = {
   alert: (opts: AlertOpts | string) => Promise<void>;
   confirm: (opts: ConfirmOpts | string) => Promise<boolean>;
+  prompt: (opts: PromptOpts | string) => Promise<string | null>;
   toast: (opts: ToastOpts | string) => void;
 };
 
@@ -59,7 +73,12 @@ type ModalState =
       kind: "confirm";
       resolve: (v: boolean) => void;
     } & Required<Pick<ConfirmOpts, "tone">> &
-      ConfirmOpts);
+      ConfirmOpts)
+  | ({
+      kind: "prompt";
+      resolve: (v: string | null) => void;
+    } & Required<Pick<PromptOpts, "tone">> &
+      PromptOpts);
 
 type ToastState = {
   id: number;
@@ -102,6 +121,18 @@ export function DialogProvider({
     });
   }, []);
 
+  const prompt = useCallback<DialogApi["prompt"]>((opts) => {
+    const o: PromptOpts = typeof opts === "string" ? { message: opts } : opts;
+    return new Promise<string | null>((resolve) => {
+      setModal({
+        kind: "prompt",
+        tone: o.tone ?? "info",
+        ...o,
+        resolve,
+      });
+    });
+  }, []);
+
   const toast = useCallback<DialogApi["toast"]>((opts) => {
     const o: ToastOpts = typeof opts === "string" ? { message: opts } : opts;
     const id = toastIdRef.current++;
@@ -119,15 +150,46 @@ export function DialogProvider({
   }, []);
 
   const api = useMemo<DialogApi>(
-    () => ({ alert, confirm, toast }),
-    [alert, confirm, toast]
+    () => ({ alert, confirm, prompt, toast }),
+    [alert, confirm, prompt, toast]
   );
 
-  function close(result?: boolean): void {
+  // Prompt-mode local state — typed value + validation message. Reset
+  // every time a new prompt opens so the previous value doesn't leak.
+  const [promptValue, setPromptValue] = useState("");
+  const [promptError, setPromptError] = useState<string | null>(null);
+  const promptInputRef = useRef<HTMLInputElement | null>(null);
+  useEffect(() => {
+    if (modal?.kind === "prompt") {
+      setPromptValue(modal.defaultValue ?? "");
+      setPromptError(null);
+      // Focus the input after the modal mount animation kicks off.
+      setTimeout(() => promptInputRef.current?.focus(), 50);
+    }
+  }, [modal]);
+
+  function close(result?: boolean | string | null): void {
     if (!modal) return;
-    if (modal.kind === "alert") modal.resolve();
-    else modal.resolve(Boolean(result));
+    if (modal.kind === "alert") {
+      modal.resolve();
+    } else if (modal.kind === "confirm") {
+      modal.resolve(Boolean(result));
+    } else {
+      // prompt
+      modal.resolve(typeof result === "string" ? result : null);
+    }
     setModal(null);
+  }
+
+  function submitPrompt(): void {
+    if (!modal || modal.kind !== "prompt") return;
+    const v = promptValue;
+    const err = modal.validate ? modal.validate(v) : null;
+    if (err) {
+      setPromptError(err);
+      return;
+    }
+    close(v);
   }
 
   // Esc = cancel, Enter = confirm. Only binds while a modal is open.
@@ -136,8 +198,12 @@ export function DialogProvider({
     function onKey(e: KeyboardEvent): void {
       if (e.key === "Escape") {
         e.preventDefault();
-        close(false);
+        close(modal!.kind === "prompt" ? null : false);
       } else if (e.key === "Enter") {
+        if (modal!.kind === "prompt") {
+          // Let the form's own onSubmit handle it (validation included).
+          return;
+        }
         e.preventDefault();
         close(true);
       }
@@ -174,50 +240,85 @@ export function DialogProvider({
               role="dialog"
               aria-modal="true"
               className="surface-raised w-full max-w-md shadow-[var(--shadow-popover)]"
+              onClick={(e) => e.stopPropagation()}
             >
-              <div className="p-5 flex gap-3 items-start">
-                <ToneIcon tone={modal.tone} />
-                <div className="flex-1 min-w-0">
-                  {modal.title && (
-                    <h3 className="heading-md">{modal.title}</h3>
-                  )}
-                  {modal.message && (
-                    <div className="text-sm text-ink-secondary mt-1.5 leading-relaxed whitespace-pre-line">
-                      {modal.message}
-                    </div>
-                  )}
-                </div>
-                <button
-                  type="button"
-                  className="btn-icon btn-ghost !h-8 !w-8 shrink-0"
-                  aria-label={t("common.close")}
-                  onClick={() => close(false)}
-                >
-                  <X size={14} />
-                </button>
-              </div>
-              <div className="flex items-center justify-end gap-2 p-3 border-t border-line bg-[rgb(var(--bg-surface-2))]/50">
-                {modal.kind === "confirm" && (
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  if (modal.kind === "prompt") submitPrompt();
+                  else close(true);
+                }}
+              >
+                <div className="p-5 flex gap-3 items-start">
+                  <ToneIcon tone={modal.tone} />
+                  <div className="flex-1 min-w-0">
+                    {modal.title && (
+                      <h3 className="heading-md">{modal.title}</h3>
+                    )}
+                    {modal.message && (
+                      <div className="text-sm text-ink-secondary mt-1.5 leading-relaxed whitespace-pre-line">
+                        {modal.message}
+                      </div>
+                    )}
+                    {modal.kind === "prompt" && (
+                      <div className="mt-3 space-y-1.5">
+                        <input
+                          ref={promptInputRef}
+                          type={modal.inputType ?? "text"}
+                          className="input"
+                          value={promptValue}
+                          placeholder={modal.placeholder}
+                          onChange={(e) => {
+                            setPromptValue(e.target.value);
+                            if (promptError) setPromptError(null);
+                          }}
+                        />
+                        {promptError && (
+                          <div className="text-xs text-[rgb(var(--danger))]">
+                            {promptError}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
                   <button
-                    className="btn btn-ghost"
-                    onClick={() => close(false)}
+                    type="button"
+                    className="btn-icon btn-ghost !h-8 !w-8 shrink-0"
+                    aria-label={t("common.close")}
+                    onClick={() =>
+                      close(modal.kind === "prompt" ? null : false)
+                    }
                   >
-                    {modal.cancelLabel ?? t("common.cancel")}
+                    <X size={14} />
                   </button>
-                )}
-                <button
-                  className={cn(
-                    modal.kind === "confirm" &&
-                      (modal as ConfirmOpts).danger
-                      ? "btn btn-danger"
-                      : "btn btn-primary"
+                </div>
+                <div className="flex items-center justify-end gap-2 p-3 border-t border-line bg-[rgb(var(--bg-surface-2))]/50">
+                  {(modal.kind === "confirm" || modal.kind === "prompt") && (
+                    <button
+                      type="button"
+                      className="btn btn-ghost"
+                      onClick={() =>
+                        close(modal.kind === "prompt" ? null : false)
+                      }
+                    >
+                      {(modal as ConfirmOpts).cancelLabel ??
+                        t("common.cancel")}
+                    </button>
                   )}
-                  onClick={() => close(true)}
-                  autoFocus
-                >
-                  {modal.okLabel ?? t("common.ok")}
-                </button>
-              </div>
+                  <button
+                    type="submit"
+                    className={cn(
+                      modal.kind === "confirm" &&
+                        (modal as ConfirmOpts).danger
+                        ? "btn btn-danger"
+                        : "btn btn-primary"
+                    )}
+                    autoFocus={modal.kind !== "prompt"}
+                  >
+                    {modal.okLabel ?? t("common.ok")}
+                  </button>
+                </div>
+              </form>
             </motion.div>
           </motion.div>
         )}
