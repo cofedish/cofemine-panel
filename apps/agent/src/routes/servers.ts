@@ -466,6 +466,12 @@ export async function serversAgentRoutes(app: FastifyInstance): Promise<void> {
       mods: mods.map(enrich),
       plugins: plugins.map(enrich),
       datapacks: datapacks.map(enrich),
+      // Best-effort detection of the loader + MC version from installed
+      // mod jar names. Useful for modpack-source servers (CURSEFORGE /
+      // MODRINTH) where the static `server.type` only says "CURSEFORGE"
+      // and the actual loader was decided by the pack at install time.
+      // The Browse-and-install search uses this to filter strictly.
+      runtime: detectRuntimeFromMods(mods),
     };
   });
 
@@ -1094,6 +1100,56 @@ type InstallInterrupt = {
  * (usually a network hiccup to CF), and simply pressing Start again
  * resumes because already-downloaded jars are preserved on disk.
  */
+/**
+ * Best-effort heuristic: scan the file names in /data/mods and pick the
+ * loader + MC version that the majority of jars look compatible with.
+ *
+ * The vast majority of mod authors include the loader name and MC
+ * release in their jar filename, e.g.
+ *   `repurposed_structures-7.5.17+1.21.1-neoforge.jar`
+ *   `jei-1.21.1-fabric-19.27.0.340.jar`
+ *
+ * We count occurrences across the whole mods/ folder and return the
+ * most common loader / MC version. Returns nulls if we can't tell —
+ * the UI falls back to the `server.type` mapping in that case. False
+ * positives are tolerable: this is just used as a search filter, the
+ * user still picks what to install.
+ */
+function detectRuntimeFromMods(
+  files: HashedFile[]
+): { loader: string | null; mcVersion: string | null } {
+  if (files.length === 0) return { loader: null, mcVersion: null };
+  // Loaders ordered specifically: "neoforge" must be checked before
+  // "forge" (the latter substring matches the former). Same with
+  // "quilt" before "fabric" if we ever see hybrid names.
+  const loaderTags = ["neoforge", "fabric", "quilt", "forge"] as const;
+  const loaderHits: Record<string, number> = {};
+  const versionHits: Record<string, number> = {};
+  for (const f of files) {
+    const lower = f.name.toLowerCase();
+    for (const tag of loaderTags) {
+      if (lower.includes(tag)) {
+        loaderHits[tag] = (loaderHits[tag] ?? 0) + 1;
+        break;
+      }
+    }
+    // Match patterns like "1.21.1", "1.20.4", "1.21" with version-like
+    // delimiters around them so we don't accidentally pick up "1.0.0"
+    // version numbers of the mod itself.
+    const m = lower.match(
+      /(?:^|[^0-9.])(1\.(?:1[0-9]|2[0-9])(?:\.\d+)?)(?:[^0-9.]|$)/
+    );
+    if (m && m[1]) {
+      versionHits[m[1]] = (versionHits[m[1]] ?? 0) + 1;
+    }
+  }
+  const topLoader =
+    Object.entries(loaderHits).sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
+  const topVersion =
+    Object.entries(versionHits).sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
+  return { loader: topLoader, mcVersion: topVersion };
+}
+
 /**
  * True once the MC server has printed its vanilla "Done!" boot marker
  * during the *current* container session. Matches both vanilla/paper and

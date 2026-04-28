@@ -79,6 +79,11 @@ type InstalledContent = {
   mods: InstalledFile[];
   plugins: InstalledFile[];
   datapacks: InstalledFile[];
+  /** Best-effort loader/MC version derived from installed jar filenames.
+   *  Both fields can be null if the agent couldn't tell. Used for modpack
+   *  source servers where `server.type` is just "CURSEFORGE" and the
+   *  actual loader was decided by the pack itself at install time. */
+  runtime?: { loader: string | null; mcVersion: string | null };
 };
 
 type Failure = {
@@ -757,17 +762,35 @@ function BrowsePanel({
   const [query, setQuery] = useState("");
   const [gameVersion, setGameVersion] = useState("");
   const [loader, setLoader] = useState("");
-  const [versionPinned, setVersionPinned] = useState(false);
+  // Re-derive the locked filters every time the server data, modpack
+  // type, or installed-mods detection updates. For pure mod-loader
+  // servers (NEOFORGE / FABRIC / FORGE / QUILT) `server.type` is enough
+  // to pick the loader. For modpack-source servers (CURSEFORGE /
+  // MODRINTH) the static type only says "this server boots a pack" —
+  // the *actual* loader is whatever the pack picked, so we lean on the
+  // agent's runtime detection (jar-filename heuristic) instead.
   useEffect(() => {
-    if (server && !versionPinned) {
-      if (server.version && server.version !== "LATEST") {
-        setGameVersion(server.version);
-      }
-      const l = typeToLoader(server.type);
-      if (l) setLoader(l);
-      setVersionPinned(true);
+    if (!server) return;
+    const isModpackSource =
+      server.type === "CURSEFORGE" || server.type === "MODRINTH";
+    const detected = installed?.runtime;
+
+    let nextVersion = "";
+    if (server.version && server.version !== "LATEST") {
+      nextVersion = server.version;
     }
-  }, [server, versionPinned]);
+    if (!nextVersion && isModpackSource && detected?.mcVersion) {
+      nextVersion = detected.mcVersion;
+    }
+
+    let nextLoader = typeToLoader(server.type);
+    if (!nextLoader && isModpackSource && detected?.loader) {
+      nextLoader = detected.loader;
+    }
+
+    setGameVersion(nextVersion);
+    setLoader(nextLoader);
+  }, [server, installed?.runtime]);
   const [kind, setKind] = useState<Kind>("mod");
   const [results, setResults] = useState<Summary[]>([]);
   const [busy, setBusy] = useState(false);
