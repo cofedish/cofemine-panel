@@ -466,12 +466,11 @@ export async function serversAgentRoutes(app: FastifyInstance): Promise<void> {
       mods: mods.map(enrich),
       plugins: plugins.map(enrich),
       datapacks: datapacks.map(enrich),
-      // Best-effort detection of the loader + MC version from installed
-      // mod jar names. Useful for modpack-source servers (CURSEFORGE /
-      // MODRINTH) where the static `server.type` only says "CURSEFORGE"
-      // and the actual loader was decided by the pack at install time.
-      // The Browse-and-install search uses this to filter strictly.
-      runtime: detectRuntimeFromMods(mods),
+      // Authoritative loader + MC version, derived from artefacts itzg
+      // (or a manual install) actually drops into /data. Used by the
+      // Browse-and-install search on modpack-source servers where the
+      // panel's static `server.type` doesn't tell us the real loader.
+      runtime: await detectRuntime(base, mods),
     };
   });
 
@@ -1101,27 +1100,126 @@ type InstallInterrupt = {
  * resumes because already-downloaded jars are preserved on disk.
  */
 /**
- * Best-effort heuristic: scan the file names in /data/mods and pick the
- * loader + MC version that the majority of jars look compatible with.
+ * Detect the actual loader + MC version a server is running, using
+ * the files itzg (or a vanilla install) deposits in /data. This is
+ * authoritative — mod jar filenames are not (some mods don't put the
+ * loader in the name; some put both in a "neoforge-fabric" composite
+ * filename without actually supporting both).
  *
- * The vast majority of mod authors include the loader name and MC
- * release in their jar filename, e.g.
- *   `repurposed_structures-7.5.17+1.21.1-neoforge.jar`
- *   `jei-1.21.1-fabric-19.27.0.340.jar`
+ * Sources we consult, in order of trustworthiness:
  *
- * We count occurrences across the whole mods/ folder and return the
- * most common loader / MC version. Returns nulls if we can't tell —
- * the UI falls back to the `server.type` mapping in that case. False
- * positives are tolerable: this is just used as a search filter, the
- * user still picks what to install.
+ *   1. /data/libraries/net/neoforged/neoforge/X.Y.Z/  — installed by
+ *      the NeoForge installer itzg runs. The version dir name maps
+ *      directly to MC (NeoForge `21.1.234` ↔ MC `1.21.1`).
+ *   2. /data/libraries/net/minecraftforge/forge/MC-FV/  — same idea
+ *      for legacy Forge; the dir name embeds MC version.
+ *   3. /data/.fabric/server/MCVERSION/                 — Fabric
+ *      bootstrap state. The folder name IS the MC release.
+ *   4. /data/.quilt/server/MCVERSION/                  — Quilt.
+ *   5. /data/{paper,purpur}-MCVERSION-BUILD.jar        — Paper-family
+ *      drops a versioned launcher jar straight into /data.
+ *   6. Mojang version manifest in the vanilla server jar              ← TODO
+ *   7. Last-resort filename heuristic on /data/mods/*.jar — only used
+ *      if nothing above matched. False-positive prone but better than
+ *      nothing for non-itzg installs.
+ *
+ * Returns nulls when nothing matched; the panel falls back to its
+ * server.type → loader map in that case.
  */
-function detectRuntimeFromMods(
+async function detectRuntime(
+  base: string,
+  modFiles: HashedFile[]
+): Promise<{ loader: string | null; mcVersion: string | null }> {
+  // 1. NeoForge
+  const neo = await readNewestSubdir(
+    path.join(base, "libraries/net/neoforged/neoforge")
+  );
+  if (neo) {
+    // NeoForge versioning: "21.1.234" → MC "1.21.1". Strip the patch.
+    const m = neo.match(/^(\d+)\.(\d+)\.\d+/);
+    if (m) {
+      const major = m[1];
+      const minor = m[2] === "0" ? "" : `.${m[2]}`;
+      return { loader: "neoforge", mcVersion: `1.${major}${minor}` };
+    }
+    return { loader: "neoforge", mcVersion: null };
+  }
+
+  // 2. Forge — folder name is the canonical "MC-FORGEVER" string,
+  // e.g. "1.20.1-47.3.0". MC is the part before the dash.
+  const forge = await readNewestSubdir(
+    path.join(base, "libraries/net/minecraftforge/forge")
+  );
+  if (forge) {
+    const m = forge.match(/^(\d+\.\d+(?:\.\d+)?)-/);
+    return { loader: "forge", mcVersion: m?.[1] ?? null };
+  }
+
+  // 3. Fabric — Fabric server bootstrap creates one folder per MC
+  // release it has installed. We pick the newest if more than one.
+  const fabric = await readNewestSubdir(path.join(base, ".fabric/server"));
+  if (fabric && /^\d+\.\d+(?:\.\d+)?$/.test(fabric)) {
+    return { loader: "fabric", mcVersion: fabric };
+  }
+
+  // 4. Quilt — same shape.
+  const quilt = await readNewestSubdir(path.join(base, ".quilt/server"));
+  if (quilt && /^\d+\.\d+(?:\.\d+)?$/.test(quilt)) {
+    return { loader: "quilt", mcVersion: quilt };
+  }
+
+  // 5. Paper / Purpur / Mohist — versioned launcher jar at /data root.
+  try {
+    const entries = await fs.readdir(base);
+    for (const name of entries) {
+      const m = name.match(
+        /^(paper|purpur|mohist)-(\d+\.\d+(?:\.\d+)?)-[\w.+-]+\.jar$/i
+      );
+      if (m && m[1] && m[2]) {
+        return { loader: m[1].toLowerCase(), mcVersion: m[2] };
+      }
+    }
+  } catch {
+    /* /data missing or unreadable — drop through. */
+  }
+
+  // 6. Heuristic last resort. Same logic the previous version of this
+  // function used wholesale; here it only runs when none of the
+  // authoritative sources matched (e.g. a manually-uploaded server
+  // that doesn't follow itzg's layout).
+  if (modFiles.length > 0) {
+    return heuristicRuntimeFromFilenames(modFiles);
+  }
+
+  return { loader: null, mcVersion: null };
+}
+
+/**
+ * Read a directory and return the newest (lex-largest, which on
+ * version-numbered dirs is also semver-largest for our shapes) child
+ * name. Returns null when the directory is missing or empty.
+ */
+async function readNewestSubdir(dir: string): Promise<string | null> {
+  try {
+    const entries = await fs.readdir(dir, { withFileTypes: true });
+    const names = entries.filter((e) => e.isDirectory()).map((e) => e.name);
+    if (names.length === 0) return null;
+    names.sort((a, b) => b.localeCompare(a, undefined, { numeric: true }));
+    return names[0] ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Filename-based last-resort detection. Same shape as the original
+ * heuristic — kept around so non-itzg installs (manual dumps into
+ * /data/mods) still get *some* filter, even if the detection is
+ * imprecise.
+ */
+function heuristicRuntimeFromFilenames(
   files: HashedFile[]
 ): { loader: string | null; mcVersion: string | null } {
-  if (files.length === 0) return { loader: null, mcVersion: null };
-  // Loaders ordered specifically: "neoforge" must be checked before
-  // "forge" (the latter substring matches the former). Same with
-  // "quilt" before "fabric" if we ever see hybrid names.
   const loaderTags = ["neoforge", "fabric", "quilt", "forge"] as const;
   const loaderHits: Record<string, number> = {};
   const versionHits: Record<string, number> = {};
@@ -1133,9 +1231,6 @@ function detectRuntimeFromMods(
         break;
       }
     }
-    // Match patterns like "1.21.1", "1.20.4", "1.21" with version-like
-    // delimiters around them so we don't accidentally pick up "1.0.0"
-    // version numbers of the mod itself.
     const m = lower.match(
       /(?:^|[^0-9.])(1\.(?:1[0-9]|2[0-9])(?:\.\d+)?)(?:[^0-9.]|$)/
     );
