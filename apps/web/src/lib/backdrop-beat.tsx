@@ -137,10 +137,12 @@ export function BackdropBeatProvider({
         // a flat plateau. 1024 bins per band lets us actually
         // distinguish neighbouring frequency content.
         an.fftSize = 2048;
-        // Light in-thread smoothing. We do peak-hold + decay in the
-        // visualiser, and we want the consumer to see real frame-by-
-        // frame transients, not an average that's already pre-blurred.
-        an.smoothingTimeConstant = 0.5;
+        // Moderate in-thread smoothing. The visualiser does peak-hold
+        // + decay on top, but if THIS layer is too low the bars
+        // jitter on noise-floor wiggle even with the visualiser's
+        // own hysteresis. 0.75 wipes single-frame jitter without
+        // washing out percussive transients.
+        an.smoothingTimeConstant = 0.75;
         sourceNodeRef.current.connect(an);
         an.connect(audioCtxRef.current.destination);
         analyserRef.current = an;

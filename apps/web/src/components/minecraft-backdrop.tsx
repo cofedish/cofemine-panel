@@ -61,14 +61,29 @@ const POWER = 1.8;
 
 // Float-space peak-hold smoothing.
 const ATTACK = 0.6; // one-pole low-pass on rise (~3-4 frames to peak)
-const DECAY = 0.9; // multiplicative tail per frame
+// Slower than before (was 0.9). Tail halves in ~17 frames (~280 ms),
+// bars actually HOLD their height for a moment before stepping down
+// instead of collapsing every frame. WE-style sustain.
+const DECAY = 0.96;
+// Hysteresis on the integer cell rounding. Without it, a float that
+// hovers near 5.5 oscillates rounded value between 5 and 6 each
+// frame, which reads as the column "shaking". With a 0.6-cell
+// deadband, the displayed integer only steps once the float has
+// moved meaningfully past its current level.
+const HYSTERESIS = 0.6;
 
 export function MinecraftBackdrop(): JSX.Element {
   const motionOn = useMotionEnabled();
   const { getAnalyser, playing } = useBackdropBeat();
   // Smoothed per-column levels in [0..1] — float so peaks lerp
-  // smoothly. The integer cell count is derived at render time.
+  // smoothly. The integer cell count is derived at render time via a
+  // hysteresis pass — see `displayedRef`.
   const levelsRef = useRef<Float32Array>(new Float32Array(COLS));
+  // Integer cell counts actually shown on screen. Tracked separately
+  // from the smoothed float so we can apply hysteresis: the displayed
+  // integer only steps when the float has crossed a deadband around
+  // it. Stops the half-cell jitter the float-then-round path produced.
+  const displayedRef = useRef<Int8Array>(new Int8Array(COLS));
   // Reusable Float32 buffer for getFloatFrequencyData. Sized for
   // fftSize=2048 → 1024 bins. Float data is dBFS, much better
   // dynamic range than the byte version. Using `new ArrayBuffer(...)`
@@ -210,6 +225,24 @@ export function MinecraftBackdrop(): JSX.Element {
           lv[i] = cur + (target - cur) * 0.05;
         }
       }
+      // Hysteresis pass: convert each smoothed float level into an
+      // integer cell count, but only step the displayed integer when
+      // the float has crossed past its deadband. This is what kills
+      // the "vibrating" look — without it, a float oscillating in
+      // [5.45, 5.55] would flicker render between 5 and 6 each frame.
+      const disp = displayedRef.current;
+      for (let i = 0; i < COLS; i++) {
+        const blocksFloat = lv[i]! * MAX_HEIGHT;
+        const cur = disp[i]!;
+        if (blocksFloat - cur > HYSTERESIS) {
+          // Float has moved meaningfully above current — snap to the
+          // new integer floor.
+          disp[i] = Math.min(MAX_HEIGHT, Math.floor(blocksFloat));
+        } else if (cur - blocksFloat > HYSTERESIS) {
+          disp[i] = Math.max(0, Math.ceil(blocksFloat));
+        }
+        // else: stay at current integer (within deadband — no flicker).
+      }
       setFrame((f) => (f + 1) % 1024);
       raf = requestAnimationFrame(tick);
     };
@@ -256,19 +289,13 @@ export function MinecraftBackdrop(): JSX.Element {
         </defs>
 
         {Array.from({ length: COLS }).map((_, i) => {
-          const lvl = levelsRef.current[i] ?? 0;
-          // Snap the smoothed float to integer cells. The float drives
-          // smooth motion; round() guarantees the bar's top edge sits
-          // exactly on a cell boundary, so the "grass" cap is always
-          // fully inside one cell. No forced floor — bands below the
-          // noise gate render at zero height (invisible), so the
-          // overall row reads with high WE-style contrast: most flat,
-          // a few peaks tall.
-          const blocks = Math.min(
-            MAX_HEIGHT,
-            Math.max(0, Math.round(lvl * MAX_HEIGHT))
-          );
-          if (blocks === 0) return null;
+          // Heights come from displayedRef — already integer cells +
+          // hysteresis applied in the rAF tick. The grass cap is
+          // therefore always fully aligned with one grid cell, and
+          // float wobble around half-cell boundaries can no longer
+          // make the bar flicker between two values.
+          const blocks = displayedRef.current[i] ?? 0;
+          if (blocks <= 0) return null;
           const heightPx = blocks * BLOCK;
           const y = TOTAL_H - heightPx;
           const x = i * BLOCK + BAR_INSET;
