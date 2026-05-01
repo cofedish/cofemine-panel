@@ -32,7 +32,7 @@ import { useBackdropBeat } from "@/lib/backdrop-beat";
 
 const COLS = 80;
 const BLOCK = 10; // viewBox px per cell (vertical AND horizontal)
-const BAR_WIDTH = 7; // bar visible width — leaves a 3px gap between bars
+const BAR_WIDTH = 5; // 50/50 bar/gap — visually distinct columns
 const BAR_INSET = (BLOCK - BAR_WIDTH) / 2;
 const MAX_HEIGHT = 24; // in cells
 const TOTAL_W = COLS * BLOCK; // 800
@@ -45,13 +45,19 @@ const MIN_HZ = 60;
 const MAX_HZ = 6000;
 
 // dB normalisation window. Float frequency data from the analyser is
-// in dBFS — typically -100 (silence) to 0 (full scale). For musical
-// content we squish ~[-85..-25] dB to the bar's height. NOISE_FLOOR_DB
-// is a hard cut-off: anything below this just becomes 0, no baseline,
-// no noise twitching.
-const MIN_DB = -85;
-const MAX_DB = -25;
-const NOISE_FLOOR_DB = -75;
+// in dBFS — typically -100 (silence) to 0 (full scale).
+//
+// Window is intentionally narrow ([-65..-20]) and the power curve is
+// steep (1.8). The previous wider window + 1.3 power had quiet ambient
+// content sitting at 4-5 cells and peaks at 7-8 cells — a 2× range,
+// not enough contrast. WE-style references have ~10× range: most
+// bars at the floor (1 cell or invisible), occasional peaks reaching
+// the top of the viewport. Tighter window pushes mid signals up and
+// the steep curve crushes everything below mid into the noise.
+const MIN_DB = -65;
+const MAX_DB = -20;
+const NOISE_FLOOR_DB = -60;
+const POWER = 1.8;
 
 // Float-space peak-hold smoothing.
 const ATTACK = 0.6; // one-pole low-pass on rise (~3-4 frames to peak)
@@ -179,10 +185,13 @@ export function MinecraftBackdrop(): JSX.Element {
           let target = (peakDb - MIN_DB) / (MAX_DB - MIN_DB);
           if (target < 0) target = 0;
           else if (target > 1) target = 1;
-          // Power 1.3 squashes small signals further (they barely
-          // clear the noise floor) so columns with real content stand
-          // out sharply. WE-style high contrast.
-          target = Math.pow(target, 1.3);
+          // Power curve squashes small signals further so they don't
+          // pile up at the same baseline height. With POWER=1.8 a
+          // mid-quiet signal at norm=0.4 collapses to 0.18 (~4 cells)
+          // while a near-peak at norm=0.9 stays at 0.83 (~20 cells)
+          // — that 5× spread is what gives the visualiser the
+          // "mostly flat with a few sharp peaks" look.
+          target = Math.pow(target, POWER);
           const cur = lv[i]!;
           if (target > cur) {
             lv[i] = cur + (target - cur) * ATTACK;
