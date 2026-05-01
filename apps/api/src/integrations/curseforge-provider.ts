@@ -148,12 +148,25 @@ export class CurseForgeProvider implements ContentProvider {
       `/mods/${id}/files?${params.toString()}`,
       key
     );
-    return res.data.map((f) => ({
+    return res.data.map((f) => {
+      const rawGameVersions: string[] = Array.isArray(f.gameVersions)
+        ? f.gameVersions
+        : [];
+      // CurseForge mixes loader labels and MC versions in the same
+      // `gameVersions` array (e.g. `["Forge", "1.20.1", "Server"]`),
+      // and the order isn't stable. Splitting them up here so the
+      // wizard / install layer downstream can do `gameVersions[0]`
+      // and trust it's a real MC version, not "Forge". Without this
+      // filter the dynmap auto-install was passing `gameVersion=Forge`
+      // to Modrinth, getting no filter match, and falling back to the
+      // newest dynmap build — which then refused to load on the
+      // user's older modpack.
+      return {
       id: String(f.id),
       versionNumber: f.displayName,
       name: f.fileName,
-      gameVersions: f.gameVersions ?? [],
-      loaders: extractLoaders(f.gameVersions ?? []),
+      gameVersions: rawGameVersions.filter(isMinecraftVersion),
+      loaders: extractLoaders(rawGameVersions),
       // CurseForge returns `downloadUrl: null` (and sometimes empty
       // string) when the project author has disabled third-party
       // distribution. itzg's auto-installer can't fetch those, so
@@ -168,7 +181,8 @@ export class CurseForgeProvider implements ContentProvider {
           size: f.fileLength,
         },
       ],
-    }));
+      };
+    });
   }
 
   async planInstall(
@@ -288,4 +302,16 @@ function extractLoaders(gameVersions: string[]): string[] {
     }
   }
   return [...loaders];
+}
+
+/**
+ * True only for entries that look like an actual Minecraft release
+ * version (e.g. "1.20.1", "1.21", "1.7.10"). Used to strip loader
+ * labels ("Forge", "NeoForge"), client/server tags ("Client",
+ * "Server"), and Java version markers ("Java 17") out of CF's mixed
+ * `gameVersions` arrays before we surface them to the UI.
+ */
+function isMinecraftVersion(v: string): boolean {
+  // Major.Minor[.Patch] starting with 1.
+  return /^1\.\d+(?:\.\d+)?$/.test(v);
 }
