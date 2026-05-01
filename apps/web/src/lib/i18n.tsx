@@ -412,6 +412,10 @@ const en: Dict = {
   "wizard.packVersion.hint":
     "Pin a specific pack version if the author recently broke compat. \"Latest\" lets itzg pick the newest upload — fine for most packs but risky when a brand-new version ships a mod that depends on an MC release you're not running.",
   "wizard.resources.memory": "Memory",
+  "wizard.resources.java": "Java version",
+  "wizard.resources.javaAuto": "Auto (recommended)",
+  "wizard.resources.javaHint":
+    "Pick the Java major version the server runs on. Auto uses whatever the itzg image ships with; if your modpack/plugins crash with native errors (SIGSEGV / async-profiler / language provider mismatch), pin to the version your MC release expects.",
   "wizard.resources.cpu": "CPU limit",
   "wizard.resources.cpuHint": "cores (empty = no limit)",
   "wizard.resources.port": "Host port",
@@ -983,6 +987,10 @@ const ru: Dict = {
   "wizard.packVersion.hint":
     "Закрепите конкретную версию, если автор недавно сломал совместимость. «Последняя» отдаёт решение itzg — подойдёт для большинства паков, но рискованно, если новая версия тянет моды под MC, которую вы не запускаете.",
   "wizard.resources.memory": "Память",
+  "wizard.resources.java": "Версия Java",
+  "wizard.resources.javaAuto": "Авто (рекомендуется)",
+  "wizard.resources.javaHint":
+    "Выбери major-версию Java, на которой запустится сервер. «Авто» оставит ту, что в itzg-образе по умолчанию; если сборка/моды падают с native-ошибками (SIGSEGV / async-profiler / language provider mismatch) — зафиксируй версию под свой MC.",
   "wizard.resources.cpu": "Лимит CPU",
   "wizard.resources.cpuHint": "ядер (пусто = без лимита)",
   "wizard.resources.port": "Порт хоста",

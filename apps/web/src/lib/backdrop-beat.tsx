@@ -80,6 +80,11 @@ export function BackdropBeatProvider({
   const audioCtxRef = useRef<AudioContext | null>(null);
   const sourceNodeRef = useRef<MediaElementAudioSourceNode | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
+  // Tracks "user has explicitly paused" so re-renders, route changes,
+  // SWR refetches and the like don't auto-resume music against the
+  // user's wishes. Set on pause(), cleared on play(). The first-load
+  // auto-play effect respects it.
+  const userPausedRef = useRef(false);
 
   const current = tracks[trackIdx] ?? null;
 
@@ -219,6 +224,7 @@ export function BackdropBeatProvider({
 
   const play = useCallback(async (): Promise<void> => {
     if (!current) return;
+    userPausedRef.current = false;
     ensureAudioGraph();
     const a = getAudioElement();
     if (!a.src && current) a.src = current.url;
@@ -231,6 +237,7 @@ export function BackdropBeatProvider({
   }, [current, ensureAudioGraph, getAudioElement]);
 
   const pause = useCallback((): void => {
+    userPausedRef.current = true;
     audioRef.current?.pause();
   }, []);
 
@@ -249,7 +256,12 @@ export function BackdropBeatProvider({
   // First-load auto-play attempt when pref is already "on" from
   // localStorage. Works as long as the page got any user interaction
   // by the time the manifest loaded; otherwise needsGesture flips.
+  // Skipped if the user manually paused since the last play() —
+  // otherwise opening another panel route (e.g. the dedicated map
+  // page) would re-trigger this effect and resume audio against the
+  // user's intent.
   useEffect(() => {
+    if (userPausedRef.current) return;
     if (pref === "on" && current && !playing) {
       void play();
     }

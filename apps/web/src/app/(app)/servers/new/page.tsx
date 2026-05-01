@@ -1164,6 +1164,30 @@ function ResourcesStep({
             />
           </div>
         </Field>
+        <Field
+          label={t("wizard.resources.java")}
+          hint={t("wizard.resources.javaHint")}
+        >
+          <select
+            className="select"
+            value={env.__COFEMINE_JAVA_VERSION ?? "auto"}
+            onChange={(e) => {
+              const v = e.target.value;
+              const next = { ...env };
+              if (v === "auto") {
+                delete next.__COFEMINE_JAVA_VERSION;
+              } else {
+                next.__COFEMINE_JAVA_VERSION = v;
+              }
+              setEnv(next);
+            }}
+          >
+            <option value="auto">{t("wizard.resources.javaAuto")}</option>
+            <option value="8">Java 8 (1.7 – 1.16)</option>
+            <option value="17">Java 17 (1.18 – 1.20.4)</option>
+            <option value="21">Java 21 (1.20.5+, recommended)</option>
+          </select>
+        </Field>
       </div>
 
       <div className="tile p-7 space-y-5">

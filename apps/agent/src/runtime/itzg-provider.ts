@@ -7,6 +7,35 @@ import type {
 
 const IMAGE = process.env.AGENT_MC_IMAGE ?? "itzg/minecraft-server:latest";
 
+/**
+ * Resolve the itzg image tag for a given Java major version. itzg
+ * publishes pre-baked variants (`:java8`, `:java17`, `:java21`,
+ * `:java21-graalvm`, etc.) that boot much faster than asking the
+ * `:latest` image to install Java on first start. We map only the
+ * versions we expose in the wizard dropdown — anything else falls
+ * back to the agent-default IMAGE so a brand-new MC version can run
+ * before the panel learns about its Java requirement.
+ *
+ * Without this, the user's modpack on MC 1.20.1 was crashing at
+ * boot because :latest currently ships Java 25, and spark's async
+ * profiler's native lib SIGSEGVs on it.
+ */
+function imageForJavaHint(hint: string | undefined): string {
+  if (!hint || hint === "auto") return IMAGE;
+  switch (hint) {
+    case "8":
+      return "itzg/minecraft-server:java8";
+    case "11":
+      return "itzg/minecraft-server:java11";
+    case "17":
+      return "itzg/minecraft-server:java17";
+    case "21":
+      return "itzg/minecraft-server:java21";
+    default:
+      return IMAGE;
+  }
+}
+
 /** Map our abstract types onto itzg's TYPE env. */
 const TYPE_MAP: Record<string, string> = {
   VANILLA: "VANILLA",
@@ -51,6 +80,10 @@ export class ItzgRuntimeProvider implements MinecraftRuntimeProvider {
       ...installRetryDefaults,
       ...spec.env,
     };
+    // The Java-version hint is panel-internal — we strip it from the
+    // env passed to itzg below, but read it here first to decide
+    // which image variant to start the container with.
+    const javaImage = imageForJavaHint(spec.env.__COFEMINE_JAVA_VERSION);
     // Panel-internal state flags that should never leak into the itzg
     // container. Used for bookkeeping (e.g. "use install proxy") and
     // consumed by the API before hitting the agent.
@@ -88,7 +121,7 @@ export class ItzgRuntimeProvider implements MinecraftRuntimeProvider {
 
     return {
       name: spec.containerName,
-      Image: IMAGE,
+      Image: javaImage,
       Env: env,
       ExposedPorts: exposed,
       Tty: false,
