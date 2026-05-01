@@ -53,9 +53,13 @@ type Ctx = {
   next: () => void;
   /** Jump straight to a specific track. */
   selectTrack: (idx: number) => void;
-  /** The HTMLAudioElement, lazily created on first call. The
-   *  visualiser uses this as its `source`. */
+  /** The HTMLAudioElement, lazily created on first call. */
   getAudioElement: () => HTMLAudioElement;
+  /** AnalyserNode for the visualiser to read FFT data from each
+   *  frame. Returns null until first play (audio graph is built
+   *  lazily inside the user-gesture chain so AudioContext doesn't
+   *  start in suspended state). */
+  getAnalyser: () => AnalyserNode | null;
 };
 
 const BeatContext = createContext<Ctx | null>(null);
@@ -73,6 +77,9 @@ export function BackdropBeatProvider({
   const [needsGesture, setNeedsGesture] = useState(false);
 
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const audioCtxRef = useRef<AudioContext | null>(null);
+  const sourceNodeRef = useRef<MediaElementAudioSourceNode | null>(null);
+  const analyserRef = useRef<AnalyserNode | null>(null);
 
   const current = tracks[trackIdx] ?? null;
 
@@ -108,6 +115,52 @@ export function BackdropBeatProvider({
     }
     return audioRef.current;
   }, []);
+
+  const getAnalyser = useCallback(() => analyserRef.current, []);
+
+  /**
+   * Build the Web Audio graph (context + source + analyser) the first
+   * time we need it, then reuse for the lifetime of the page.
+   * `createMediaElementSource` can only be called once per element,
+   * so this MUST be idempotent. Called from `play()` so it runs
+   * inside a user-gesture chain — required for AudioContext to be
+   * allowed to leave the "suspended" state on Chrome / Safari.
+   */
+  const ensureAudioGraph = useCallback((): void => {
+    const a = getAudioElement();
+    if (!audioCtxRef.current) {
+      const Ctor =
+        window.AudioContext ||
+        (window as unknown as { webkitAudioContext?: typeof AudioContext })
+          .webkitAudioContext;
+      if (!Ctor) return;
+      audioCtxRef.current = new Ctor();
+    }
+    if (!sourceNodeRef.current) {
+      try {
+        const src = audioCtxRef.current.createMediaElementSource(a);
+        const an = audioCtxRef.current.createAnalyser();
+        // 2048 → 1024 bins (~21 Hz/bin at 44.1k). Plenty of
+        // resolution for 120 perceptual columns to each get their
+        // own slice of the spectrum without sharing.
+        an.fftSize = 2048;
+        // Heavy-ish in-thread smoothing. The visualiser does
+        // peak-hold + decay on top, but if this layer is too low
+        // the bars jitter on noise floor wiggle. 0.75 is the sweet
+        // spot.
+        an.smoothingTimeConstant = 0.75;
+        src.connect(an);
+        an.connect(audioCtxRef.current.destination);
+        sourceNodeRef.current = src;
+        analyserRef.current = an;
+      } catch {
+        /* already connected — fine */
+      }
+    }
+    if (audioCtxRef.current.state === "suspended") {
+      void audioCtxRef.current.resume();
+    }
+  }, [getAudioElement]);
 
   // Persistent <audio> event listeners. Bound once on mount.
   useEffect(() => {
@@ -166,6 +219,7 @@ export function BackdropBeatProvider({
 
   const play = useCallback(async (): Promise<void> => {
     if (!current) return;
+    ensureAudioGraph();
     const a = getAudioElement();
     if (!a.src && current) a.src = current.url;
     try {
@@ -174,7 +228,7 @@ export function BackdropBeatProvider({
     } catch {
       setNeedsGesture(true);
     }
-  }, [current, getAudioElement]);
+  }, [current, ensureAudioGraph, getAudioElement]);
 
   const pause = useCallback((): void => {
     audioRef.current?.pause();
@@ -214,6 +268,7 @@ export function BackdropBeatProvider({
       next,
       selectTrack,
       getAudioElement,
+      getAnalyser,
     }),
     [
       playing,
@@ -226,6 +281,7 @@ export function BackdropBeatProvider({
       next,
       selectTrack,
       getAudioElement,
+      getAnalyser,
     ]
   );
 
