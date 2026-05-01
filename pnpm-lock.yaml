@@ -135,6 +135,9 @@ importers:
       '@cofemine/shared':
         specifier: workspace:*
         version: link:../../packages/shared
+      audiomotion-analyzer:
+        specifier: ^4.5.4
+        version: 4.5.4
       clsx:
         specifier: ^2.1.1
         version: 2.1.1
@@ -651,6 +654,9 @@ packages:
   atomic-sleep@1.0.0:
     resolution: {integrity: sha512-kNOjDqAh7px0XWNI+4QbzoiR/nTkHAWNud2uvnJquD1/x5a7EQZMJT0AczqK0Qn67oY/TTQ1LbUKajZpp3I9tQ==}
     engines: {node: '>=8.0.0'}
+
+  audiomotion-analyzer@4.5.4:
+    resolution: {integrity: sha512-bBTIFr0VgM764MJN3ATIyKrv2BzGTfQgJugulIHNEIFT0+zbz7lb+2CvFTPvk6n3J06wwWiJBPZFEIt9OSxzfQ==}
 
   autoprefixer@10.5.0:
     resolution: {integrity: sha512-FMhOoZV4+qR6aTUALKX2rEqGG+oyATvwBt9IIzVR5rMa2HRWPkxf+P+PAJLD1I/H5/II+HuZcBJYEFBpq39ong==}
@@ -1929,6 +1935,8 @@ snapshots:
       safer-buffer: 2.1.2
 
   atomic-sleep@1.0.0: {}
+
+  audiomotion-analyzer@4.5.4: {}
 
   autoprefixer@10.5.0(postcss@8.5.10):
     dependencies:
