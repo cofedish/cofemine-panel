@@ -351,41 +351,59 @@ function Gallery({ items }: { items: GalleryItem[] }): JSX.Element {
       ),
     [items]
   );
-  const [idx, setIdx] = useState(0);
+  // `dir` records which direction the next mount should slide in from
+  // (+1 = entered from the right, -1 = entered from the left). Drives
+  // the AnimatePresence variants below so user intent maps to motion.
+  const [[idx, dir], setState] = useState<[number, number]>([0, 0]);
   const cur = ordered[idx];
 
   if (!cur) return <></>;
-  const next = (): void => setIdx((i) => (i + 1) % ordered.length);
-  const prev = (): void =>
-    setIdx((i) => (i - 1 + ordered.length) % ordered.length);
+  const go = (delta: number): void =>
+    setState(([i]) => [
+      (i + delta + ordered.length) % ordered.length,
+      delta,
+    ]);
+  const next = (): void => go(1);
+  const prev = (): void => go(-1);
 
   return (
     <div className="space-y-2">
       <div className="relative rounded-lg overflow-hidden bg-surface-2 aspect-video">
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img
-          src={cur.url}
-          alt={cur.title ?? ""}
-          className="w-full h-full object-contain"
-          draggable={false}
-        />
+        <AnimatePresence initial={false} mode="popLayout" custom={dir}>
+          <motion.img
+            key={idx}
+            src={cur.url}
+            alt={cur.title ?? ""}
+            custom={dir}
+            variants={slideVariants}
+            initial="enter"
+            animate="center"
+            exit="exit"
+            transition={{
+              x: { type: "spring", stiffness: 280, damping: 32 },
+              opacity: { duration: 0.18 },
+            }}
+            draggable={false}
+            className="absolute inset-0 w-full h-full object-contain"
+          />
+        </AnimatePresence>
         {ordered.length > 1 && (
           <>
             <button
               onClick={prev}
-              className="absolute left-2 top-1/2 -translate-y-1/2 w-8 h-8 grid place-items-center rounded-full bg-black/40 text-white hover:bg-black/60"
+              className="absolute left-2 top-1/2 -translate-y-1/2 w-8 h-8 grid place-items-center rounded-full bg-black/40 text-white hover:bg-black/60 z-10"
               aria-label="Previous"
             >
               <ChevronLeft size={16} />
             </button>
             <button
               onClick={next}
-              className="absolute right-2 top-1/2 -translate-y-1/2 w-8 h-8 grid place-items-center rounded-full bg-black/40 text-white hover:bg-black/60"
+              className="absolute right-2 top-1/2 -translate-y-1/2 w-8 h-8 grid place-items-center rounded-full bg-black/40 text-white hover:bg-black/60 z-10"
               aria-label="Next"
             >
               <ChevronRight size={16} />
             </button>
-            <span className="absolute bottom-2 right-2 text-[10px] text-white bg-black/50 rounded-full px-2 py-0.5 tabular-nums">
+            <span className="absolute bottom-2 right-2 text-[10px] text-white bg-black/50 rounded-full px-2 py-0.5 tabular-nums z-10">
               {idx + 1} / {ordered.length}
             </span>
           </>
@@ -402,6 +420,18 @@ function Gallery({ items }: { items: GalleryItem[] }): JSX.Element {
     </div>
   );
 }
+
+const slideVariants = {
+  enter: (dir: number) => ({
+    x: dir >= 0 ? "100%" : "-100%",
+    opacity: 0,
+  }),
+  center: { x: 0, opacity: 1 },
+  exit: (dir: number) => ({
+    x: dir >= 0 ? "-100%" : "100%",
+    opacity: 0,
+  }),
+};
 
 function BodyRender({
   body,

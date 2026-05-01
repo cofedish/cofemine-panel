@@ -1,6 +1,5 @@
 "use client";
 
-import { motion } from "framer-motion";
 import { useMemo } from "react";
 import { useMotionEnabled } from "@/lib/motion-pref";
 
@@ -11,10 +10,13 @@ import { useMotionEnabled } from "@/lib/motion-pref";
  * stays identical between SSR and the client hydration pass, and so the
  * user sees the same silhouette across reloads.
  *
- * When motion is enabled the skyline gets two subtle treatments:
- *   • slow horizontal parallax drift on the whole strip,
- *   • per-column vertical "breathing" via CSS keyframes (phase-shifted
- *     by index so the silhouette undulates like wind across grass).
+ * Animation, when motion is enabled: each column pulses vertically like
+ * an audio equalizer — the column's *height* oscillates while its base
+ * stays anchored to the floor. Implemented via SMIL `<animate>` on the
+ * rect's `y` and `height` attributes (no transforms, so the grass slabs
+ * stay perfectly square at every frame). Per-column duration, amplitude
+ * and delay are seeded so neighbours fall out of phase and you see a
+ * wave-like ripple instead of every column bouncing in unison.
  *
  * Sits behind all content (fixed, z-0, pointer-events: none) and picks
  * up the active theme accent through CSS variables.
@@ -24,28 +26,54 @@ const COLS = 80;
 const BLOCK = 20; // px in the viewBox
 const MAX_HEIGHT = 14; // in blocks
 const SEED = 1337;
+const TOTAL_W = COLS * BLOCK;
+const TOTAL_H = MAX_HEIGHT * BLOCK;
 
-function seededHeights(): number[] {
-  const arr: number[] = [];
+type Column = {
+  x: number;
+  baseH: number; // pixels
+  baseY: number; // pixels (top of column)
+  ampl: number; // pixels of vertical pulse
+  dur: number; // seconds
+  delay: number; // seconds (negative — start mid-cycle)
+};
+
+function seededColumns(): Column[] {
+  // Single LCG fed from `SEED` produces every per-column value
+  // deterministically. SSR and client hydration land on the same shape.
+  const out: Column[] = [];
   let s = SEED;
-  for (let i = 0; i < COLS; i++) {
+  const rand = (): number => {
     s = (s * 9301 + 49297) % 233280;
-    const r = s / 233280;
+    return s / 233280;
+  };
+  for (let i = 0; i < COLS; i++) {
+    const r = rand();
     const base = 0.55 + 0.45 * Math.sin(i / 4 + r * 1.5);
-    const bump = Math.floor(base * MAX_HEIGHT);
-    arr.push(Math.max(2, Math.min(MAX_HEIGHT, bump)));
+    const heightBlocks = Math.max(2, Math.min(MAX_HEIGHT, Math.floor(base * MAX_HEIGHT)));
+    const baseH = heightBlocks * BLOCK;
+    const baseY = TOTAL_H - baseH;
+    // Pulse amplitude: 0.4–1.2 blocks. Clamped so a column never grows
+    // taller than MAX_HEIGHT (top of viewBox).
+    const headroom = baseY; // pixels we can grow upward before hitting 0
+    const wantedAmpl = (0.4 + rand() * 0.8) * BLOCK;
+    const ampl = Math.max(2, Math.min(wantedAmpl, headroom));
+    // Per-column duration in [2.4s, 4.8s] so the row reads as an
+    // equalizer with multiple frequencies, not a single uniform wave.
+    const dur = 2.4 + rand() * 2.4;
+    // Negative offset so the column starts mid-cycle on first paint.
+    const delay = -rand() * dur;
+    out.push({ x: i * BLOCK, baseH, baseY, ampl, dur, delay });
   }
-  return arr;
+  return out;
 }
 
 export function MinecraftBackdrop(): JSX.Element {
-  const heights = useMemo(seededHeights, []);
+  const cols = useMemo(seededColumns, []);
   const motionOn = useMotionEnabled();
-  const totalW = COLS * BLOCK;
-  const totalH = MAX_HEIGHT * BLOCK;
 
   return (
-    <motion.div
+    <div
       aria-hidden
       className="pointer-events-none fixed inset-x-0 bottom-0 z-0 select-none opacity-[0.18] dark:opacity-[0.22]"
       style={{
@@ -55,17 +83,11 @@ export function MinecraftBackdrop(): JSX.Element {
         maskImage:
           "linear-gradient(to top, black 0%, black 35%, transparent 100%)",
       }}
-      animate={motionOn ? { x: [0, -16, 0, 12, 0] } : undefined}
-      transition={
-        motionOn
-          ? { duration: 60, repeat: Infinity, ease: "easeInOut" }
-          : undefined
-      }
     >
       <svg
         width="100%"
         height="100%"
-        viewBox={`0 0 ${totalW} ${totalH}`}
+        viewBox={`0 0 ${TOTAL_W} ${TOTAL_H}`}
         preserveAspectRatio="xMidYMax slice"
       >
         <defs>
@@ -87,51 +109,93 @@ export function MinecraftBackdrop(): JSX.Element {
           </pattern>
         </defs>
 
-        {heights.map((h, i) => {
-          const x = i * BLOCK;
-          const heightPx = h * BLOCK;
-          const y = totalH - heightPx;
-          // Stagger the breathing across columns so the wave reads as
-          // motion travelling left → right rather than every block
-          // bouncing in unison. Negative delays so the wave is mid-cycle
-          // on first paint, not flat.
-          const delay = motionOn ? -((i % 14) * 0.5).toFixed(2) : 0;
-          return (
-            <g
-              key={i}
-              className={motionOn ? "mc-col" : undefined}
-              style={motionOn ? { animationDelay: `${delay}s` } : undefined}
-            >
-              {/* Body of the column — the "dirt" */}
-              <rect
-                x={x}
-                y={y}
-                width={BLOCK}
-                height={heightPx}
-                fill="rgb(var(--accent))"
-                opacity="0.55"
-              />
-              {/* Brighter top slab — the "grass". One block tall. */}
-              <rect
-                x={x}
-                y={y}
-                width={BLOCK}
-                height={BLOCK}
-                fill="rgb(var(--accent))"
-              />
-            </g>
-          );
-        })}
+        {cols.map((c, i) => (
+          <Column key={i} c={c} animated={motionOn} />
+        ))}
 
-        {/* Grid overlay on top of everything so block seams are visible */}
+        {/* Grid overlay on top of everything so block seams are visible. */}
         <rect
           x={0}
           y={0}
-          width={totalW}
-          height={totalH}
+          width={TOTAL_W}
+          height={TOTAL_H}
           fill="url(#mc-grid)"
         />
       </svg>
-    </motion.div>
+    </div>
+  );
+}
+
+function Column({ c, animated }: { c: Column; animated: boolean }): JSX.Element {
+  // Animated values: column grows by `ampl` upward (y shrinks, height grows
+  // by the same amount). Bottom edge stays pinned to TOTAL_H so blocks
+  // never separate from the floor.
+  const minY = c.baseY - c.ampl;
+  const maxH = c.baseH + c.ampl;
+  // Two-phase keyframe pattern so the up/down ramps spend equal time —
+  // a 0→1→0 sin-ish triangle. `keyTimes` smooths the apex.
+  const yValues = `${c.baseY};${minY};${c.baseY}`;
+  const hValues = `${c.baseH};${maxH};${c.baseH}`;
+  const grassY = `${c.baseY};${minY};${c.baseY}`;
+
+  return (
+    <g>
+      {/* Body of the column — the "dirt" */}
+      <rect
+        x={c.x}
+        y={c.baseY}
+        width={BLOCK}
+        height={c.baseH}
+        fill="rgb(var(--accent))"
+        opacity="0.55"
+      >
+        {animated && (
+          <>
+            <animate
+              attributeName="y"
+              values={yValues}
+              keyTimes="0;0.5;1"
+              dur={`${c.dur}s`}
+              begin={`${c.delay}s`}
+              repeatCount="indefinite"
+              calcMode="spline"
+              keySplines="0.4 0 0.6 1; 0.4 0 0.6 1"
+            />
+            <animate
+              attributeName="height"
+              values={hValues}
+              keyTimes="0;0.5;1"
+              dur={`${c.dur}s`}
+              begin={`${c.delay}s`}
+              repeatCount="indefinite"
+              calcMode="spline"
+              keySplines="0.4 0 0.6 1; 0.4 0 0.6 1"
+            />
+          </>
+        )}
+      </rect>
+      {/* Brighter top slab — the "grass". Always exactly one block tall so
+          the square shape never distorts; only its `y` follows the body. */}
+      <rect
+        x={c.x}
+        y={c.baseY}
+        width={BLOCK}
+        height={BLOCK}
+        fill="rgb(var(--accent))"
+      >
+        {animated && (
+          <animate
+            attributeName="y"
+            values={grassY}
+            keyTimes="0;0.5;1"
+            dur={`${c.dur}s`}
+            begin={`${c.delay}s`}
+            repeatCount="indefinite"
+            calcMode="spline"
+            keySplines="0.4 0 0.6 1; 0.4 0 0.6 1"
+          />
+        )}
+      </rect>
+    </g>
   );
 }

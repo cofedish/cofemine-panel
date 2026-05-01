@@ -637,23 +637,6 @@ select:disabled {
   }
 }
 
-/* Skyline column "breathing": each block-column gets a slow vertical
-   wobble; the per-column delay (set inline on the element) phase-shifts
-   neighbours so the silhouette undulates like wind passing across grass.
-   Pure CSS so 80 columns animate cheaply on the GPU. */
-@keyframes mc-skyline-breath {
-  0%, 100% { transform: translateY(0); }
-  50%      { transform: translateY(-3px); }
-}
-.mc-col {
-  animation: mc-skyline-breath 7s ease-in-out infinite;
-  transform-box: fill-box;
-  transform-origin: 50% 100%;
-  will-change: transform;
-}
-@media (prefers-reduced-motion: reduce) {
-  .mc-col { animation: none; }
-}
 
 /* ======================================================================
    5. Utility extensions
