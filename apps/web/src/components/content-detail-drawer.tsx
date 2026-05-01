@@ -458,56 +458,52 @@ function BodyRender({
       </p>
     );
   }
-  if (format === "html") {
-    // CurseForge returns its own pre-sanitised HTML. We pass it through
-    // a light cleaner that strips <script>, on*= handlers, and javascript:
-    // hrefs as a defence-in-depth measure, and force every <a> to open
-    // in a new tab.
-    const safe = sanitizeHtml(body);
-    return (
-      <div
-        className="content-body text-sm leading-relaxed"
-        dangerouslySetInnerHTML={{ __html: safe }}
-      />
-    );
-  }
+  // Both Modrinth (markdown, but CommonMark allows raw HTML) and
+  // CurseForge (HTML) end up as an HTML string, then through the same
+  // sanitiser, then dangerouslySetInnerHTML. The unified path is what
+  // makes mods like Geckolib / Jade — whose Modrinth bodies are mostly
+  // <center> / <img> / <h1 style=...> raw HTML — render correctly
+  // instead of showing the literal markup as text.
+  const raw = format === "html" ? body : markdownToHtml(body);
+  const safe = sanitizeHtml(raw);
   return (
-    <div className="content-body text-sm leading-relaxed">
-      {renderMarkdown(body)}
-    </div>
+    <div
+      className="content-body text-sm leading-relaxed"
+      dangerouslySetInnerHTML={{ __html: safe }}
+    />
   );
 }
 
 /* ============================ MARKDOWN MINI ============================ */
 
 /**
- * Minimal block-level markdown renderer. Handles:
- *   - ATX headings (#, ##, ###)
+ * Minimal markdown → HTML string converter. Handles:
+ *   - ATX headings (#, ##, ###, ####)
  *   - fenced code blocks (```)
  *   - bullet and numbered lists
  *   - blockquotes (>)
- *   - paragraphs
  *   - horizontal rules
- * Inline syntax (bold, italic, code, links, images) is handled by
- * `renderInline`. Anything we don't recognise falls through as a
- * paragraph with inline parsing — good enough for Modrinth bodies, which
- * are mostly screenshots, headings, and bullet lists.
+ *   - paragraphs (with inline images, links, code, bold, italic)
+ *   - raw HTML blocks (CommonMark explicitly allows them — Modrinth
+ *     bodies in the wild lean on this heavily, e.g. <center><img/>)
+ * Output is plain HTML and is then run through `sanitizeHtml`, so any
+ * unsafe markup that slips through the markdown layer still gets
+ * scrubbed (script tags, on* handlers, javascript: hrefs).
  */
-function renderMarkdown(src: string): JSX.Element[] {
+function markdownToHtml(src: string): string {
   const lines = src.replace(/\r\n/g, "\n").split("\n");
-  const blocks: JSX.Element[] = [];
+  const out: string[] = [];
   let i = 0;
-  let key = 0;
 
   while (i < lines.length) {
     const line = lines[i]!;
-
     if (line.trim() === "") {
       i++;
       continue;
     }
 
-    // Fenced code block
+    // Fenced code block — content is escaped so it shows verbatim
+    // instead of being interpreted as HTML.
     const fence = line.match(/^```(\w+)?\s*$/);
     if (fence) {
       const buf: string[] = [];
@@ -517,14 +513,7 @@ function renderMarkdown(src: string): JSX.Element[] {
         i++;
       }
       i++; // skip closing fence
-      blocks.push(
-        <pre
-          key={key++}
-          className="rounded-md bg-surface-2 border border-line p-3 text-xs overflow-x-auto"
-        >
-          <code>{buf.join("\n")}</code>
-        </pre>
-      );
+      out.push(`<pre><code>${escapeHtml(buf.join("\n"))}</code></pre>`);
       continue;
     }
 
@@ -532,27 +521,14 @@ function renderMarkdown(src: string): JSX.Element[] {
     const heading = line.match(/^(#{1,4})\s+(.*)$/);
     if (heading) {
       const level = heading[1]!.length;
-      const text = heading[2]!;
-      const cls =
-        level === 1
-          ? "heading-lg mt-4"
-          : level === 2
-            ? "heading-md mt-4"
-            : "font-semibold text-ink mt-3";
-      blocks.push(
-        <div key={key++} className={cls}>
-          {renderInline(text)}
-        </div>
-      );
+      out.push(`<h${level}>${inlineToHtml(heading[2]!)}</h${level}>`);
       i++;
       continue;
     }
 
     // Horizontal rule
     if (/^---+\s*$/.test(line)) {
-      blocks.push(
-        <hr key={key++} className="border-line my-3" />
-      );
+      out.push("<hr>");
       i++;
       continue;
     }
@@ -564,12 +540,8 @@ function renderMarkdown(src: string): JSX.Element[] {
         items.push(lines[i]!.replace(/^\s*[-*+]\s+/, ""));
         i++;
       }
-      blocks.push(
-        <ul key={key++} className="list-disc pl-5 space-y-1">
-          {items.map((it, j) => (
-            <li key={j}>{renderInline(it)}</li>
-          ))}
-        </ul>
+      out.push(
+        `<ul>${items.map((t) => `<li>${inlineToHtml(t)}</li>`).join("")}</ul>`
       );
       continue;
     }
@@ -581,12 +553,8 @@ function renderMarkdown(src: string): JSX.Element[] {
         items.push(lines[i]!.replace(/^\s*\d+\.\s+/, ""));
         i++;
       }
-      blocks.push(
-        <ol key={key++} className="list-decimal pl-5 space-y-1">
-          {items.map((it, j) => (
-            <li key={j}>{renderInline(it)}</li>
-          ))}
-        </ol>
+      out.push(
+        `<ol>${items.map((t) => `<li>${inlineToHtml(t)}</li>`).join("")}</ol>`
       );
       continue;
     }
@@ -598,14 +566,22 @@ function renderMarkdown(src: string): JSX.Element[] {
         buf.push(lines[i]!.replace(/^\s*>\s?/, ""));
         i++;
       }
-      blocks.push(
-        <blockquote
-          key={key++}
-          className="border-l-2 border-line pl-3 italic text-ink-secondary"
-        >
-          {renderInline(buf.join(" "))}
-        </blockquote>
-      );
+      out.push(`<blockquote>${inlineToHtml(buf.join(" "))}</blockquote>`);
+      continue;
+    }
+
+    // Raw HTML block — line starts with `<` followed by a tag name (or
+    // a closing tag). Collect consecutive non-blank lines as the block
+    // and pass the markup through verbatim. Without this, Modrinth
+    // descriptions that lean on <center>, <img>, <h1 style=…> show up
+    // as literal source text.
+    if (/^\s*<\/?\w/.test(line)) {
+      const buf: string[] = [];
+      while (i < lines.length && lines[i]!.trim() !== "") {
+        buf.push(lines[i]!);
+        i++;
+      }
+      out.push(buf.join("\n"));
       continue;
     }
 
@@ -614,36 +590,29 @@ function renderMarkdown(src: string): JSX.Element[] {
     while (
       i < lines.length &&
       lines[i]!.trim() !== "" &&
-      !/^(#{1,4}\s|\s*[-*+]\s|\s*\d+\.\s|\s*>\s?|---+\s*$|```)/.test(lines[i]!)
+      !/^(#{1,4}\s|\s*[-*+]\s|\s*\d+\.\s|\s*>\s?|---+\s*$|```|\s*<\/?\w)/.test(
+        lines[i]!
+      )
     ) {
       buf.push(lines[i]!);
       i++;
     }
-    blocks.push(
-      <p key={key++} className="text-ink-secondary">
-        {renderInline(buf.join(" "))}
-      </p>
-    );
+    out.push(`<p>${inlineToHtml(buf.join(" "))}</p>`);
   }
 
-  return blocks;
+  return out.join("\n");
 }
 
 /**
- * Inline markdown parser for the subset we care about: images, links,
- * inline code, bold, italic. Returns React fragments. Anything that
- * doesn't match falls through as plain text, so unparseable input is
- * always shown verbatim, never silently dropped.
+ * Inline markdown → HTML. Handles images, links, inline code, bold,
+ * italic. Recognised matches are emitted as HTML; everything else
+ * passes through as plain text (and gets escaped). Greedy first-match
+ * ordering: image > link > code > bold > italic.
  */
-function renderInline(src: string): React.ReactNode {
-  // Tokenise greedily by scanning for the first match of any pattern,
-  // emit the preceding plain text + the matched node, then continue.
-  const out: React.ReactNode[] = [];
+function inlineToHtml(src: string): string {
   let s = src;
-  let key = 0;
+  let out = "";
 
-  // Pattern matching priority (image > link > inline-code > bold > italic).
-  // Using anchored regexes so we can re-scan from the new offset.
   const imgRe = /!\[([^\]]*)\]\(([^)\s]+)(?:\s+"[^"]*")?\)/;
   const linkRe = /\[([^\]]+)\]\(([^)\s]+)(?:\s+"[^"]*")?\)/;
   const codeRe = /`([^`]+)`/;
@@ -651,78 +620,69 @@ function renderInline(src: string): React.ReactNode {
   const italicRe = /\*([^*]+)\*|_([^_]+)_/;
 
   while (s.length > 0) {
-    const matches = [
+    const candidates = [
       { kind: "img" as const, m: imgRe.exec(s) },
       { kind: "link" as const, m: linkRe.exec(s) },
       { kind: "code" as const, m: codeRe.exec(s) },
       { kind: "bold" as const, m: boldRe.exec(s) },
       { kind: "italic" as const, m: italicRe.exec(s) },
-    ].filter((x) => x.m) as Array<{
-      kind: "img" | "link" | "code" | "bold" | "italic";
-      m: RegExpExecArray;
-    }>;
-    if (matches.length === 0) {
-      out.push(s);
+    ].filter((x): x is { kind: typeof x.kind; m: RegExpExecArray } =>
+      x.m !== null
+    );
+    if (candidates.length === 0) {
+      // No more markdown — pass through. We DON'T escape here because
+      // raw HTML inside a paragraph (e.g. `<a href="x">y</a>` mixed
+      // with prose) is allowed by CommonMark and the sanitiser handles
+      // safety. Escaping would break valid links.
+      out += s;
       break;
     }
-    matches.sort((a, b) => a.m.index - b.m.index);
-    const { kind, m } = matches[0]!;
-    if (m.index > 0) out.push(s.slice(0, m.index));
+    candidates.sort((a, b) => a.m.index - b.m.index);
+    const { kind, m } = candidates[0]!;
+    if (m.index > 0) out += s.slice(0, m.index);
     const after = m.index + m[0].length;
+
     if (kind === "img") {
       const [, alt, url] = m;
       if (isSafeUrl(url ?? "")) {
-        out.push(
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
-            key={key++}
-            src={url}
-            alt={alt ?? ""}
-            className="rounded-md max-w-full my-2"
-            loading="lazy"
-          />
-        );
+        out += `<img src="${escapeAttr(url!)}" alt="${escapeAttr(
+          alt ?? ""
+        )}" loading="lazy"/>`;
       }
     } else if (kind === "link") {
       const [, text, url] = m;
       if (isSafeUrl(url ?? "")) {
-        out.push(
-          <a
-            key={key++}
-            href={url}
-            target="_blank"
-            rel="noreferrer"
-            className="link"
-          >
-            {text}
-          </a>
-        );
+        out += `<a href="${escapeAttr(url!)}">${escapeHtml(text!)}</a>`;
       } else {
-        out.push(text);
+        out += escapeHtml(text!);
       }
     } else if (kind === "code") {
-      out.push(
-        <code
-          key={key++}
-          className="kbd text-[11px] px-1 py-0.5"
-        >
-          {m[1]}
-        </code>
-      );
+      out += `<code>${escapeHtml(m[1]!)}</code>`;
     } else if (kind === "bold") {
-      out.push(
-        <strong key={key++} className="text-ink">
-          {m[1]}
-        </strong>
-      );
+      out += `<strong>${escapeHtml(m[1]!)}</strong>`;
     } else {
-      out.push(
-        <em key={key++}>{m[1] ?? m[2]}</em>
-      );
+      out += `<em>${escapeHtml(m[1] ?? m[2]!)}</em>`;
     }
     s = s.slice(after);
   }
   return out;
+}
+
+function escapeHtml(s: string): string {
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function escapeAttr(s: string): string {
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/"/g, "&quot;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
 }
 
 /* ============================== HELPERS ============================== */
