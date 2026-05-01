@@ -181,7 +181,12 @@ export default function CreateServerPage(): JSX.Element {
           projectId: pack!.id,
           slug: pack!.slug,
           url: pack!.pageUrl,
-          ...(packVersion
+          // packVersion is now always set after the picker auto-fills
+          // with "Latest"-with-metadata. Only forward versionId when
+          // it's actually pinned (non-empty) — the shared schema
+          // rejects empty strings, and itzg interprets a missing
+          // versionId as "use the newest pack release" anyway.
+          ...(packVersion?.id
             ? {
                 versionId: packVersion.id,
                 versionLabel: packVersion.label,
@@ -207,7 +212,7 @@ export default function CreateServerPage(): JSX.Element {
       // Best-effort overall: a failure here doesn't tear down the
       // newly-created server — the user can install manually from
       // the Content tab later.
-      const dynmapSlug = dynmapSlugFor(effectiveType);
+      const dynmapSlug = dynmapSlugFor(effectiveType, packVersion?.loader);
       if (installDynmap && dynmapSlug) {
         const { gameVersion, loader } = resolveRuntimeFilters(
           source,
@@ -373,6 +378,7 @@ export default function CreateServerPage(): JSX.Element {
               nodeName={nodes?.find((n) => n.id === nodeId)?.name}
               envCount={Object.keys(env).length}
               pack={pack}
+              packLoader={packVersion?.loader ?? null}
               eula={eula}
               onEula={setEula}
               installDynmap={installDynmap}
@@ -1190,6 +1196,7 @@ function ReviewStep({
   nodeName,
   envCount,
   pack,
+  packLoader,
   eula,
   onEula,
   installDynmap,
@@ -1204,6 +1211,11 @@ function ReviewStep({
   nodeName?: string;
   envCount: number;
   pack: ModpackHit | null;
+  /** Resolved loader from the picked modpack version. For modpack
+   *  servers `type` is just MODRINTH/CURSEFORGE — the actual loader
+   *  is whatever the pack uses, and that's what determines which
+   *  Dynmap variant we'd install. */
+  packLoader: string | null;
   eula: boolean;
   onEula: (v: boolean) => void;
   installDynmap: boolean;
@@ -1274,7 +1286,7 @@ function ReviewStep({
 
       {/* Auto-install Dynmap. Hidden for Vanilla — vanilla can't load
           plugins/mods, so the option would silently no-op. */}
-      {dynmapSlugFor(type) && (
+      {dynmapSlugFor(type, packLoader) && (
         <label className="flex items-start gap-3 text-sm">
           <input
             type="checkbox"
@@ -1298,16 +1310,25 @@ function ReviewStep({
 }
 
 /**
- * Pick the right Modrinth project slug for dynmap based on the
- * server type. Returns null for loaders that can't load mods/plugins
- * at all (Vanilla) so the wizard hides the toggle.
+ * Pick the right Modrinth project slug for dynmap. For plain
+ * servers the loader is in the type itself (PAPER → bukkit dynmap,
+ * FORGE → dynmapforge, etc.); for modpack servers the type string
+ * is just "MODRINTH" / "CURSEFORGE" — the *actual* loader comes
+ * from the pack's version metadata, which the picker already
+ * captured into `packVersion.loader`. Falls through to null when
+ * we can't pick (Vanilla, or modpack without a resolved loader yet)
+ * so the wizard can hide the toggle.
  *
- * The Modrinth slugs themselves are canonical:
- *   - dynmap          (Bukkit / Paper / Spigot / Purpur / Mohist)
- *   - dynmapforge     (Forge / NeoForge — same project covers both)
- *   - dynmap-fabric   (Fabric / Quilt)
+ * Modrinth slugs:
+ *   dynmap          — Bukkit / Paper / Spigot / Purpur / Mohist
+ *   dynmapforge     — Forge / NeoForge
+ *   dynmap-fabric   — Fabric / Quilt
  */
-function dynmapSlugFor(type: ServerTypeKey): string | null {
+function dynmapSlugFor(
+  type: ServerTypeKey,
+  packLoader?: string | null
+): string | null {
+  // Plain server → loader == type.
   switch (type) {
     case "PAPER":
     case "PURPUR":
@@ -1319,9 +1340,15 @@ function dynmapSlugFor(type: ServerTypeKey): string | null {
     case "FABRIC":
     case "QUILT":
       return "dynmap-fabric";
-    default:
-      return null;
   }
+  // Modpack source → use the resolved pack loader.
+  const loader = packLoader?.toLowerCase();
+  if (!loader) return null;
+  if (loader === "forge" || loader === "neoforge") return "dynmapforge";
+  if (loader === "fabric" || loader === "quilt") return "dynmap-fabric";
+  if (loader === "paper" || loader === "spigot" || loader === "bukkit")
+    return "dynmap";
+  return null;
 }
 
 /**
