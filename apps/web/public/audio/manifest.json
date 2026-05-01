@@ -1,3 +1,13 @@
 {
-  "tracks": []
+  "tracks": [
+    { "url": "/audio/C418_-_Sweden_81268827.mp3",            "title": "Sweden",            "bpm": 88 },
+    { "url": "/audio/C418_-_Mice_on_Venus_79632808.mp3",     "title": "Mice on Venus",     "bpm": 91 },
+    { "url": "/audio/C418_-_Subwoofer_Lullaby_80916521.mp3", "title": "Subwoofer Lullaby", "bpm": 76 },
+    { "url": "/audio/C418_-_Wet_Hands_80350532.mp3",         "title": "Wet Hands",         "bpm": 80 },
+    { "url": "/audio/C418_-_Haggstrom_80916530.mp3",         "title": "Haggstrom",         "bpm": 76 },
+    { "url": "/audio/C418_-_Minecraft_80916531.mp3",         "title": "Minecraft",         "bpm": 80 },
+    { "url": "/audio/C418_-_Aria_Math_80800525.mp3",         "title": "Aria Math",         "bpm": 100 },
+    { "url": "/audio/C418_-_Strad_80809786.mp3",             "title": "Strad",             "bpm": 115 },
+    { "url": "/audio/C418_-_Key_81174009.mp3",               "title": "Key",               "bpm": 120 }
+  ]
 }
