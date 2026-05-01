@@ -186,6 +186,8 @@ const en: Dict = {
   "content.curseforge": "CurseForge",
   "content.installRepairFailed":
     "Install succeeded but repair failed: {msg}",
+  "content.exclusions.applied":
+    "Exclusion list saved ({n} mod(s) skipped). Container is rebuilding.",
 
   "diagnostics.title": "Crash reports",
   "diagnostics.subtitle":
@@ -252,7 +254,10 @@ const en: Dict = {
   "server.delete": "Delete",
   "server.deleteConfirm.title": "Delete server?",
   "server.deleteConfirm.body":
-    "Server \"{name}\" will be stopped and completely removed. This is irreversible.",
+    "Server \"{name}\" will be stopped, its container removed, and ALL of its data — worlds, configs, mods, backups inside the data dir — wiped from disk. This cannot be undone.\nType the server name below to confirm:",
+  "server.deleteConfirm.mismatch":
+    "Type \"{name}\" exactly to confirm deletion.",
+  "server.deleteConfirm.done": "Server \"{name}\" deleted.",
   "server.repairConfirm.title": "Rebuild the container?",
   "server.repairConfirm.body":
     "Reprovision the container with current integration keys. The world and /data are preserved — only the container itself is recreated.",
@@ -758,6 +763,8 @@ const ru: Dict = {
   "content.curseforge": "CurseForge",
   "content.installRepairFailed":
     "Установка прошла, но пересборка упала: {msg}",
+  "content.exclusions.applied":
+    "Список исключений сохранён ({n} мод(а) пропущено). Контейнер пересобирается.",
 
   "diagnostics.title": "Отчёты о крэшах",
   "diagnostics.subtitle":
@@ -823,8 +830,11 @@ const ru: Dict = {
   "server.repair": "Починить",
   "server.delete": "Удалить",
   "server.deleteConfirm.title": "Удалить сервер?",
+  "server.deleteConfirm.mismatch":
+    "Введи «{name}» точь-в-точь, чтобы подтвердить удаление.",
+  "server.deleteConfirm.done": "Сервер «{name}» удалён.",
   "server.deleteConfirm.body":
-    "Сервер «{name}» будет остановлен и полностью удалён. Это действие необратимо.",
+    "Сервер «{name}» будет остановлен, его контейнер снесён, и ВСЕ его данные — миры, конфиги, моды, бэкапы внутри data-папки — удалены с диска. Это действие необратимо.\nВведи имя сервера, чтобы подтвердить:",
   "server.repairConfirm.title": "Пересобрать контейнер?",
   "server.repairConfirm.body":
     "Пересоздать контейнер с текущими ключами интеграций. Мир и /data сохраняются — пересоздаётся только сам контейнер.",

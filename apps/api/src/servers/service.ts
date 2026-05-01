@@ -80,9 +80,26 @@ async function mergeModpackEnv(
       env.MODRINTH_VERSION ??= input.modpack.versionId;
     }
   } else if (input.type === "CURSEFORGE") {
-    // Prefer slug; fall back to the CurseForge page URL if only URL was known.
+    // itzg's AUTO_CURSEFORGE expects ONE of: CF_SLUG, CF_PAGE_URL,
+    // CF_MOD_ID. We set every identifier we can derive — that way
+    // even if the CF search hit had a missing slug/URL (rare but
+    // happens), the numeric project id always gets through. Without
+    // this, the container would crash with
+    // "A modpack page URL or slug identifier is required" the moment
+    // itzg's helper tried to install.
     if (input.modpack?.slug) env.CF_SLUG ??= input.modpack.slug;
     if (input.modpack?.url) env.CF_PAGE_URL ??= input.modpack.url;
+    // Numeric project id — always present; we generate it from the
+    // CF search response. Belt-and-braces fallback for the cases
+    // where slug/URL are absent.
+    if (input.modpack?.projectId) {
+      env.CF_MOD_ID ??= String(input.modpack.projectId);
+    }
+    // Synthesise CF_PAGE_URL from slug when only slug is known so the
+    // installer always has a URL too.
+    if (env.CF_SLUG && !env.CF_PAGE_URL) {
+      env.CF_PAGE_URL = `https://www.curseforge.com/minecraft/modpacks/${env.CF_SLUG}`;
+    }
     // Pin a specific pack file if the user picked a version. itzg's
     // AUTO_CURSEFORGE mode uses CF_FILE_ID to override "latest".
     if (input.modpack?.versionId) {
@@ -203,7 +220,12 @@ function inferModpackHint(
   if (type === "CURSEFORGE") {
     return {
       provider: "curseforge",
-      projectId: env.CF_SLUG ?? env.CF_PAGE_URL ?? "auto",
+      // CF_MOD_ID is the most stable identifier — slug can collide
+      // with renamed projects, URLs change, but the numeric mod id
+      // is forever. Prefer it as the projectId; reprovision still
+      // sets all three env vars so itzg has its pick.
+      projectId:
+        env.CF_MOD_ID ?? env.CF_SLUG ?? env.CF_PAGE_URL ?? "auto",
       ...(env.CF_SLUG ? { slug: env.CF_SLUG } : {}),
       ...(env.CF_PAGE_URL ? { url: env.CF_PAGE_URL } : {}),
       ...(env.CF_FILE_ID ? { versionId: env.CF_FILE_ID } : {}),

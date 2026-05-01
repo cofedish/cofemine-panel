@@ -154,16 +154,30 @@ export default function ServerDetailPage(): JSX.Element {
   }
   async function remove(): Promise<void> {
     if (!data) return;
-    const ok = await dialog.confirm({
+    // Typed confirmation. Server delete also nukes /data on the
+    // agent (worlds, configs, mods — everything), and we don't
+    // want a stray click to wipe months of progress. The user has
+    // to retype the server name verbatim before the dialog returns.
+    const typed = await dialog.prompt({
       tone: "danger",
-      danger: true,
       title: t("server.deleteConfirm.title"),
       message: t("server.deleteConfirm.body", { name: data.name }),
+      placeholder: data.name,
       okLabel: t("common.delete"),
+      validate: (v) =>
+        v.trim() === data.name
+          ? null
+          : t("server.deleteConfirm.mismatch", { name: data.name }),
     });
-    if (!ok) return;
+    if (typed === null) return; // cancelled
     try {
       await api.del(`/servers/${id}`);
+      // Pop a toast on the dashboard so the user gets a clear
+      // "yes, it's gone" signal after navigation.
+      dialog.toast({
+        tone: "success",
+        message: t("server.deleteConfirm.done", { name: data.name }),
+      });
       router.push("/");
     } catch (err) {
       dialog.alert({

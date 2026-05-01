@@ -14,6 +14,7 @@ import {
   AlertTriangle,
   ExternalLink,
   RefreshCw,
+  Ban,
 } from "lucide-react";
 import { ModrinthMark, CurseForgeMark } from "./brand-icons";
 import { useDialog } from "./dialog-provider";
@@ -180,7 +181,11 @@ export function ServerContent({ serverId }: { serverId: string }): JSX.Element {
       </div>
 
       {tab === "installed" ? (
-        <InstalledPanel installed={installed} serverId={serverId} />
+        <InstalledPanel
+          installed={installed}
+          serverId={serverId}
+          server={server}
+        />
       ) : (
         <BrowsePanel
           serverId={serverId}
@@ -236,9 +241,11 @@ function TabButton({
 function InstalledPanel({
   installed,
   serverId,
+  server,
 }: {
   installed: InstalledContent | undefined;
   serverId: string;
+  server: ServerContext | undefined;
 }): JSX.Element {
   const dialog = useDialog();
   const { t } = useT();
@@ -255,6 +262,54 @@ function InstalledPanel({
   };
   const visible = groups[sub];
   const [query, setQuery] = useState("");
+
+  // CurseForge exclusion list — staged in local state so the user
+  // can add/remove multiple mods in one go and apply once. Reading
+  // from server.env.CF_EXCLUDE_MODS (CSV of numeric mod IDs).
+  const isCFModpack = server?.type === "CURSEFORGE";
+  const initialExcluded = useMemo(
+    () => parseExcludedIds(server?.env?.CF_EXCLUDE_MODS),
+    [server?.env?.CF_EXCLUDE_MODS]
+  );
+  const [excludedDraft, setExcludedDraft] =
+    useState<Set<string>>(initialExcluded);
+  useEffect(() => {
+    setExcludedDraft(initialExcluded);
+  }, [initialExcluded]);
+  const exclusionsDirty = !setsEqual(excludedDraft, initialExcluded);
+
+  function toggleExclude(modId: string, exclude: boolean): void {
+    const next = new Set(excludedDraft);
+    if (exclude) next.add(modId);
+    else next.delete(modId);
+    setExcludedDraft(next);
+  }
+
+  async function applyExclusions(): Promise<void> {
+    if (!server) return;
+    try {
+      const csv = serializeExcludedIds(excludedDraft);
+      const nextEnv: Record<string, string> = { ...server.env };
+      if (csv) nextEnv.CF_EXCLUDE_MODS = csv;
+      else delete nextEnv.CF_EXCLUDE_MODS;
+      await api.patch(`/servers/${serverId}`, { env: nextEnv });
+      await api.post(`/servers/${serverId}/repair`);
+      mutate(`/servers/${serverId}`);
+      mutate(`/servers/${serverId}/installed-content`);
+      dialog.toast({
+        tone: "success",
+        message: t("content.exclusions.applied", {
+          n: excludedDraft.size,
+        }),
+      });
+    } catch (e) {
+      dialog.alert({
+        tone: "danger",
+        title: t("common.error"),
+        message: e instanceof ApiError ? e.message : String(e),
+      });
+    }
+  }
 
   async function remove(file: InstalledFile): Promise<void> {
     const ok = await dialog.confirm({
@@ -340,6 +395,20 @@ function InstalledPanel({
         </div>
       </div>
 
+      {/* CF exclusions panel — only relevant for AUTO_CURSEFORGE
+          servers, where mods that itzg's pack-installer can't fetch
+          go on a permanent skip-list. Without a UI the user had to
+          edit env CSV by hand, which is what this widget replaces. */}
+      {isCFModpack && (
+        <ExclusionsPanel
+          excluded={excludedDraft}
+          installedMods={installed?.mods ?? []}
+          dirty={exclusionsDirty}
+          onToggle={toggleExclude}
+          onApply={applyExclusions}
+        />
+      )}
+
       {filtered.length === 0 ? (
         <div className="tile p-10 text-center text-ink-muted">
           {installed === undefined
@@ -350,17 +419,29 @@ function InstalledPanel({
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-          {filtered.map((f) => (
-            <InstalledCard
-              key={f.name}
-              file={f}
-              onDelete={() => remove(f)}
-              onOpen={() => {
-                const det = installedDetailKey(f);
-                if (det) setDetail(det);
-              }}
-            />
-          ))}
+          {filtered.map((f) => {
+            const cfId = f.curseforge?.modId
+              ? String(f.curseforge.modId)
+              : null;
+            const isExcluded = cfId != null && excludedDraft.has(cfId);
+            return (
+              <InstalledCard
+                key={f.name}
+                file={f}
+                onDelete={() => remove(f)}
+                onOpen={() => {
+                  const det = installedDetailKey(f);
+                  if (det) setDetail(det);
+                }}
+                onToggleExclude={
+                  isCFModpack && cfId
+                    ? () => toggleExclude(cfId, !isExcluded)
+                    : undefined
+                }
+                isExcluded={isExcluded}
+              />
+            );
+          })}
         </div>
       )}
 
@@ -419,10 +500,19 @@ function InstalledCard({
   file,
   onDelete,
   onOpen,
+  onToggleExclude,
+  isExcluded,
 }: {
   file: InstalledFile;
   onDelete: () => void;
   onOpen: () => void;
+  /** Defined only on AUTO_CURSEFORGE servers when the file has a
+   *  resolvable CF mod id. Toggles the mod into / out of the
+   *  CF_EXCLUDE_MODS skip-list. The actual env patch + reprovision
+   *  is staged by the parent panel's "Apply" button so the user can
+   *  toggle several mods in one go. */
+  onToggleExclude?: () => void;
+  isExcluded: boolean;
 }): JSX.Element {
   const title =
     file.modrinth?.title ?? file.curseforge?.title ?? prettifyFilename(file.name);
@@ -500,18 +590,148 @@ function InstalledCard({
           )}
         </div>
       </div>
-      <button
-        className="btn-icon btn-ghost !h-8 !w-8 shrink-0"
-        onClick={(e) => {
-          e.stopPropagation();
-          onDelete();
-        }}
-        aria-label="Delete"
-        title="Delete"
-      >
-        <Trash2 size={14} />
-      </button>
+      <div className="flex items-center gap-1 shrink-0">
+        {onToggleExclude && (
+          <button
+            type="button"
+            className={cn(
+              "btn-icon !h-8 !w-8",
+              isExcluded
+                ? "bg-[rgb(var(--warning-soft))] text-[rgb(var(--warning))]"
+                : "btn-ghost"
+            )}
+            onClick={(e) => {
+              e.stopPropagation();
+              onToggleExclude();
+            }}
+            aria-label={isExcluded ? "Unexclude" : "Exclude from pack"}
+            title={
+              isExcluded
+                ? "Restore — remove this mod from CF_EXCLUDE_MODS"
+                : "Exclude — skip this mod on the next pack install"
+            }
+          >
+            <Ban size={14} />
+          </button>
+        )}
+        <button
+          className="btn-icon btn-ghost !h-8 !w-8"
+          onClick={(e) => {
+            e.stopPropagation();
+            onDelete();
+          }}
+          aria-label="Delete"
+          title="Delete"
+        >
+          <Trash2 size={14} />
+        </button>
+      </div>
     </div>
+  );
+}
+
+/**
+ * Sticky panel above the installed grid that summarises the active
+ * CF_EXCLUDE_MODS skip-list and gives the user a single "Apply"
+ * affordance after toggling exclusions. The toggle itself happens
+ * on individual InstalledCards (Ban button), or on entries already
+ * in this panel via the unbutton.
+ *
+ * Apply triggers a server PATCH (env update) followed by a repair
+ * (reprovision) — both wrapped in the toast/error path of the
+ * parent. Skipped mods stay skipped across rebuilds because the
+ * value lives in env, not in /data.
+ */
+function ExclusionsPanel({
+  excluded,
+  installedMods,
+  dirty,
+  onToggle,
+  onApply,
+}: {
+  excluded: Set<string>;
+  installedMods: InstalledFile[];
+  dirty: boolean;
+  onToggle: (modId: string, exclude: boolean) => void;
+  onApply: () => void | Promise<void>;
+}): JSX.Element | null {
+  // Resolve mod-id → human title via the installed-mods list. Files
+  // that match an excluded id by `curseforge.modId` give us the name;
+  // entries whose mods aren't in the current installed list (they
+  // were never actually installed because they were excluded already)
+  // just show the numeric id.
+  const titleByModId = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const f of installedMods) {
+      const mid = f.curseforge?.modId;
+      if (!mid) continue;
+      const title =
+        f.curseforge?.title ?? f.modrinth?.title ?? prettifyFilename(f.name);
+      map.set(String(mid), title);
+    }
+    return map;
+  }, [installedMods]);
+
+  if (excluded.size === 0 && !dirty) {
+    // Hide entirely until the user starts staging exclusions —
+    // saves vertical space on a clean install.
+    return null;
+  }
+
+  return (
+    <section className="tile p-4 space-y-3 border-[rgb(var(--warning))]/30">
+      <header className="flex items-center gap-2 flex-wrap">
+        <Ban size={14} className="text-[rgb(var(--warning))] shrink-0" />
+        <h3 className="text-sm font-medium">CF excluded mods</h3>
+        <span className="text-[10px] text-ink-muted tabular-nums">
+          {excluded.size}
+        </span>
+        <p className="text-xs text-ink-muted flex-1 min-w-[200px]">
+          These mod ids are skipped when the modpack reinstalls.
+          Useful when an author disables third-party download for one
+          mod and you've replaced it with a Modrinth alternative.
+        </p>
+        {dirty && (
+          <button
+            type="button"
+            className="btn btn-primary"
+            onClick={() => void onApply()}
+            title="Patch env + rebuild the container"
+          >
+            Apply &amp; rebuild
+          </button>
+        )}
+      </header>
+      {excluded.size > 0 && (
+        <ul className="flex flex-wrap gap-1.5">
+          {[...excluded].map((modId) => {
+            const title = titleByModId.get(modId);
+            return (
+              <li
+                key={modId}
+                className="inline-flex items-center gap-1.5 px-2 py-1 rounded-md bg-[rgb(var(--warning-soft))] text-[rgb(var(--warning))] text-xs"
+              >
+                <span className="font-medium">
+                  {title ?? `#${modId}`}
+                </span>
+                {title && (
+                  <span className="opacity-60 tabular-nums">#{modId}</span>
+                )}
+                <button
+                  type="button"
+                  onClick={() => onToggle(modId, false)}
+                  className="hover:opacity-70"
+                  aria-label="Remove from exclusions"
+                  title="Remove from exclusions"
+                >
+                  ×
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </section>
   );
 }
 
@@ -1397,6 +1617,29 @@ function prettifyFilename(name: string): string {
   const cut = s.search(/-\d|-v\d|-mc\d|-neo|-forge|-fabric|-quilt/i);
   if (cut > 0) s = s.slice(0, cut);
   return s.replace(/-/g, " ").trim() || name;
+}
+
+/** Parse the comma-separated mod-id CSV that itzg's AUTO_CURSEFORGE
+ *  reads from `CF_EXCLUDE_MODS`. Whitespace and empties are trimmed
+ *  so a freshly-edited env value with stray commas still works. */
+function parseExcludedIds(csv: string | undefined): Set<string> {
+  if (!csv) return new Set();
+  return new Set(
+    csv
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean)
+  );
+}
+
+function serializeExcludedIds(set: Set<string>): string {
+  return [...set].sort().join(",");
+}
+
+function setsEqual<T>(a: Set<T>, b: Set<T>): boolean {
+  if (a.size !== b.size) return false;
+  for (const v of a) if (!b.has(v)) return false;
+  return true;
 }
 
 /**
