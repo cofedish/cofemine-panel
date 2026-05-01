@@ -43,11 +43,16 @@ type Manifest = { tracks: Track[] };
 type Ctx = {
   playing: boolean;
   current: Track | null;
+  /** Index of the current track in `tracks`. Useful for the picker
+   *  to highlight which entry is active. */
+  currentIndex: number;
   tracks: Track[];
   needsGesture: boolean;
   play: () => Promise<void>;
   pause: () => void;
   next: () => void;
+  /** Jump straight to a specific track. */
+  selectTrack: (idx: number) => void;
   /** The HTMLAudioElement, lazily created on first call. The
    *  visualiser uses this as its `source`. */
   getAudioElement: () => HTMLAudioElement;
@@ -179,6 +184,14 @@ export function BackdropBeatProvider({
     setTrackIdx((i) => (tracks.length > 0 ? (i + 1) % tracks.length : 0));
   }, [tracks.length]);
 
+  const selectTrack = useCallback(
+    (idx: number): void => {
+      if (idx < 0 || idx >= tracks.length) return;
+      setTrackIdx(idx);
+    },
+    [tracks.length]
+  );
+
   // First-load auto-play attempt when pref is already "on" from
   // localStorage. Works as long as the page got any user interaction
   // by the time the manifest loaded; otherwise needsGesture flips.
@@ -193,14 +206,27 @@ export function BackdropBeatProvider({
     () => ({
       playing,
       current,
+      currentIndex: trackIdx,
       tracks,
       needsGesture,
       play,
       pause,
       next,
+      selectTrack,
       getAudioElement,
     }),
-    [playing, current, tracks, needsGesture, play, pause, next, getAudioElement]
+    [
+      playing,
+      current,
+      trackIdx,
+      tracks,
+      needsGesture,
+      play,
+      pause,
+      next,
+      selectTrack,
+      getAudioElement,
+    ]
   );
 
   return <BeatContext.Provider value={value}>{children}</BeatContext.Provider>;
