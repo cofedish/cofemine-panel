@@ -85,7 +85,16 @@ type DynmapWorldUpdate = {
 const TILE_SIZE = 128; // dynmap default
 const POLL_INTERVAL = 2000;
 
-export function ServerMap({ serverId }: { serverId: string }): JSX.Element {
+export function ServerMap({
+  serverId,
+  fullHeight,
+}: {
+  serverId: string;
+  /** Make the map fill the viewport (minus header). Used by the
+   *  dedicated /servers/:id/map page; the in-tab version stays
+   *  compact at 560px. */
+  fullHeight?: boolean;
+}): JSX.Element {
   // --- Configuration fetch ---
   const {
     data: configData,
@@ -124,7 +133,13 @@ export function ServerMap({ serverId }: { serverId: string }): JSX.Element {
     );
   }
 
-  return <MapView serverId={serverId} config={configData} />;
+  return (
+    <MapView
+      serverId={serverId}
+      config={configData}
+      fullHeight={!!fullHeight}
+    />
+  );
 }
 
 // ============================== MAP VIEW ==============================
@@ -132,9 +147,11 @@ export function ServerMap({ serverId }: { serverId: string }): JSX.Element {
 function MapView({
   serverId,
   config,
+  fullHeight,
 }: {
   serverId: string;
   config: DynmapConfig;
+  fullHeight: boolean;
 }): JSX.Element {
   // --- World + map selection ---
   const [worldIdx, setWorldIdx] = useState(() => {
@@ -296,7 +313,14 @@ function MapView({
         <div
           ref={containerRef}
           className="w-full rounded-lg overflow-hidden border border-line bg-surface-2"
-          style={{ height: "560px" }}
+          style={{
+            // In-tab compact view stays at 560px; the dedicated page
+            // gets the rest of the viewport so the map can breathe.
+            height: fullHeight
+              ? "calc(100vh - 200px)"
+              : "560px",
+            minHeight: "420px",
+          }}
         />
       </div>
 

@@ -357,6 +357,23 @@ function Gallery({ items }: { items: GalleryItem[] }): JSX.Element {
   const [[idx, dir], setState] = useState<[number, number]>([0, 0]);
   const cur = ordered[idx];
 
+  // Preload the next + previous images in the carousel. Without this
+  // every prev/next click visibly shows the new image loading from
+  // network — the slide animation looks janky because the <img>
+  // mounts mid-transition with no decoded data. Browsers de-dupe
+  // these requests with the actual <img> render, so it's free.
+  useEffect(() => {
+    const around = [
+      ordered[(idx + 1) % ordered.length],
+      ordered[(idx - 1 + ordered.length) % ordered.length],
+      ordered[(idx + 2) % ordered.length],
+    ].filter((v): v is GalleryItem => Boolean(v));
+    for (const it of around) {
+      const img = new Image();
+      img.src = it.url;
+    }
+  }, [idx, ordered]);
+
   if (!cur) return <></>;
   const go = (delta: number): void =>
     setState(([i]) => [

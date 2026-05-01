@@ -67,6 +67,12 @@ export interface ContentVersion {
   id: string;
   versionNumber?: string;
   name?: string;
+  /** True when CurseForge's `allowModDistribution` flag was false on
+   *  the project, so files have no `downloadUrl` and itzg can't
+   *  fetch them automatically. UI surfaces this as a warning, the
+   *  install endpoint refuses with a clean error rather than letting
+   *  the container endlessly retry. */
+  distributionBlocked?: boolean;
   gameVersions: string[];
   loaders: string[];
   files: Array<{ url: string; filename: string; primary: boolean; size?: number }>;

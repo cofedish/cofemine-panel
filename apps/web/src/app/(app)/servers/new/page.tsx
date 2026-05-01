@@ -132,6 +132,12 @@ export default function CreateServerPage(): JSX.Element {
   /** Optional server-icon PNG uploaded through ImageUpload. Uploaded to
    *  /servers/:id/icon *after* server creation (no id to target before). */
   const [iconDataUrl, setIconDataUrl] = useState<string | null>(null);
+  /** Auto-install dynmap right after the server is created. Hits the
+   *  same /integrations/servers/:id/install/* endpoints the Content
+   *  tab uses, with the right Modrinth slug for the chosen loader.
+   *  Off by default — Vanilla can't load it, and not everyone wants
+   *  the live map. */
+  const [installDynmap, setInstallDynmap] = useState(false);
   const [eula, setEula] = useState(false);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -188,6 +194,21 @@ export default function CreateServerPage(): JSX.Element {
           await api.post(`/servers/${res.id}/icon`, { data: iconDataUrl });
         } catch (e) {
           console.warn("Failed to upload icon after create:", e);
+        }
+      }
+      // Optional dynmap auto-install. Best-effort: if the loader
+      // doesn't support it (e.g. Vanilla) or Modrinth is down, the
+      // server itself is already created and the user can install
+      // dynmap manually from the Content tab later.
+      const dynmapSlug = dynmapSlugFor(effectiveType);
+      if (installDynmap && dynmapSlug) {
+        try {
+          await api.post(
+            `/integrations/servers/${res.id}/install/modrinth`,
+            { projectId: dynmapSlug, kind: "plugin" }
+          );
+        } catch (e) {
+          console.warn("Dynmap auto-install failed:", e);
         }
       }
       router.push(`/servers/${res.id}`);
@@ -336,43 +357,59 @@ export default function CreateServerPage(): JSX.Element {
               pack={pack}
               eula={eula}
               onEula={setEula}
+              installDynmap={installDynmap}
+              onInstallDynmap={setInstallDynmap}
               err={err}
             />
           )}
         </motion.div>
       </AnimatePresence>
 
-      {/* Sticky nav bar — keeps Back/Next reachable without scrolling
-          past the modpack grid + version picker, which got long enough
-          for users to lose the buttons. Sits above the global footer
-          (z-20) and sticks to the viewport bottom. */}
-      <div className="sticky bottom-0 z-20 -mx-6 px-6 py-3 bg-[rgb(var(--bg-surface-1))]/85 backdrop-blur-sm border-t border-line flex items-center justify-between">
-        <button
-          type="button"
-          onClick={() => (idx === 0 ? router.back() : prev())}
-          className="btn btn-ghost"
-        >
-          <ChevronLeft size={15} /> {idx === 0 ? t("common.cancel") : t("wizard.back")}
-        </button>
-        {step !== "Review" ? (
+      {/* Spacer so the floating nav bar at the bottom of the viewport
+          doesn't overlap the last bit of step content. */}
+      <div className="h-20" aria-hidden />
+
+      {/* Floating action bar. Was `sticky bottom-0` with negative side
+          margins and sharp corners — that made it look like it was
+          flying around the page when content was short, and the
+          square edges clashed with the rest of the panel's tile/card
+          look. Now it's a rounded raised pill fixed to the viewport,
+          centred horizontally inside the wizard's max-width. */}
+      <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-30 w-[calc(min(64rem,100%-2rem))] max-w-5xl">
+        <div className="surface-raised rounded-2xl shadow-[var(--shadow-popover)] px-4 py-2.5 flex items-center justify-between gap-3 backdrop-blur-md bg-[rgb(var(--bg-surface-1))]/95">
           <button
             type="button"
-            onClick={next}
-            className="btn btn-primary"
-            disabled={!canNext}
+            onClick={() => (idx === 0 ? router.back() : prev())}
+            className="btn btn-ghost"
           >
-            {t("wizard.next")} <ChevronRight size={15} />
+            <ChevronLeft size={15} /> {idx === 0 ? t("common.cancel") : t("wizard.back")}
           </button>
-        ) : (
-          <button
-            type="button"
-            onClick={submit}
-            className="btn btn-primary"
-            disabled={busy || !canNext}
-          >
-            {busy ? t("wizard.creating") : t("wizard.create")}
-          </button>
-        )}
+          <span className="text-xs text-ink-muted hidden sm:inline">
+            {t(stepKey(step))}
+            <span className="text-ink-muted/60 ml-2">
+              {idx + 1} / {STEPS.length}
+            </span>
+          </span>
+          {step !== "Review" ? (
+            <button
+              type="button"
+              onClick={next}
+              className="btn btn-primary"
+              disabled={!canNext}
+            >
+              {t("wizard.next")} <ChevronRight size={15} />
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={submit}
+              className="btn btn-primary"
+              disabled={busy || !canNext}
+            >
+              {busy ? t("wizard.creating") : t("wizard.create")}
+            </button>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -796,6 +833,10 @@ type VersionOption = {
   label: string;
   gameVersions: string[];
   loaders: string[];
+  /** CF disables auto-download for some modpacks; we surface the
+   *  flag here so the picker can warn the user before they hit
+   *  "Use this pack" and the install fails inside the container. */
+  distributionBlocked?: boolean;
 };
 
 /**
@@ -837,6 +878,7 @@ function PackVersionPicker({
           label: String(v.versionNumber ?? v.name ?? v.id),
           gameVersions: Array.isArray(v.gameVersions) ? v.gameVersions : [],
           loaders: Array.isArray(v.loaders) ? v.loaders : [],
+          distributionBlocked: Boolean(v.distributionBlocked),
         }));
         setVersions(list);
       })
@@ -881,12 +923,25 @@ function PackVersionPicker({
         <option value="">{t("wizard.packVersion.latest")}</option>
         {versions.map((v) => (
           <option key={v.id} value={v.id}>
+            {v.distributionBlocked ? "⚠ " : ""}
             {v.label}
             {v.gameVersions[0] ? ` · MC ${v.gameVersions[0]}` : ""}
             {v.loaders[0] ? ` · ${v.loaders[0]}` : ""}
+            {v.distributionBlocked ? " · " + t("wizard.packVersion.blocked") : ""}
           </option>
         ))}
       </select>
+      {(() => {
+        const sel = versions.find((v) => v.id === selected);
+        if (sel?.distributionBlocked) {
+          return (
+            <div className="text-xs text-[rgb(var(--warning))] leading-relaxed">
+              {t("wizard.packVersion.blockedHint")}
+            </div>
+          );
+        }
+        return null;
+      })()}
       {err && (
         <div className="text-xs text-[rgb(var(--danger))]">{err}</div>
       )}
@@ -1029,6 +1084,8 @@ function ReviewStep({
   pack,
   eula,
   onEula,
+  installDynmap,
+  onInstallDynmap,
   err,
 }: {
   type: ServerTypeKey;
@@ -1041,6 +1098,8 @@ function ReviewStep({
   pack: ModpackHit | null;
   eula: boolean;
   onEula: (v: boolean) => void;
+  installDynmap: boolean;
+  onInstallDynmap: (v: boolean) => void;
   err: string | null;
 }): JSX.Element {
   const { t } = useT();
@@ -1105,9 +1164,56 @@ function ReviewStep({
         </span>
       </label>
 
+      {/* Auto-install Dynmap. Hidden for Vanilla — vanilla can't load
+          plugins/mods, so the option would silently no-op. */}
+      {dynmapSlugFor(type) && (
+        <label className="flex items-start gap-3 text-sm">
+          <input
+            type="checkbox"
+            checked={installDynmap}
+            onChange={(e) => onInstallDynmap(e.target.checked)}
+            className="mt-1"
+          />
+          <span>
+            <span className="font-medium">{t("wizard.dynmap.label")}</span>
+            <br />
+            <span className="text-xs text-ink-muted leading-relaxed">
+              {t("wizard.dynmap.hint")}
+            </span>
+          </span>
+        </label>
+      )}
+
       {err && <div className="chip chip-danger !h-auto !py-2 !px-3">{err}</div>}
     </div>
   );
+}
+
+/**
+ * Pick the right Modrinth project slug for dynmap based on the
+ * server type. Returns null for loaders that can't load mods/plugins
+ * at all (Vanilla) so the wizard hides the toggle.
+ *
+ * The Modrinth slugs themselves are canonical:
+ *   - dynmap          (Bukkit / Paper / Spigot / Purpur / Mohist)
+ *   - dynmapforge     (Forge / NeoForge — same project covers both)
+ *   - dynmap-fabric   (Fabric / Quilt)
+ */
+function dynmapSlugFor(type: ServerTypeKey): string | null {
+  switch (type) {
+    case "PAPER":
+    case "PURPUR":
+    case "MOHIST":
+      return "dynmap";
+    case "FORGE":
+    case "NEOFORGE":
+      return "dynmapforge";
+    case "FABRIC":
+    case "QUILT":
+      return "dynmap-fabric";
+    default:
+      return null;
+  }
 }
 
 function Field({

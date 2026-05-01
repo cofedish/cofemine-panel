@@ -154,6 +154,12 @@ export class CurseForgeProvider implements ContentProvider {
       name: f.fileName,
       gameVersions: f.gameVersions ?? [],
       loaders: extractLoaders(f.gameVersions ?? []),
+      // CurseForge returns `downloadUrl: null` (and sometimes empty
+      // string) when the project author has disabled third-party
+      // distribution. itzg's auto-installer can't fetch those, so
+      // we flag them up the chain.
+      distributionBlocked:
+        !f.downloadUrl || String(f.downloadUrl).length === 0,
       files: [
         {
           url: f.downloadUrl ?? "",
@@ -171,14 +177,20 @@ export class CurseForgeProvider implements ContentProvider {
   ): Promise<InstallPlan> {
     if (kind === "modpack") {
       const file = version.files[0];
-      if (!file?.url) {
-        return {
-          target: "modpack-env",
-          files: [],
-          notes: [
-            "CurseForge did not return a direct download URL for this modpack. Use the manual ZIP upload flow.",
-          ],
-        };
+      if (!file?.url || version.distributionBlocked) {
+        // The pack author has disabled third-party distribution, so
+        // CF returns no downloadUrl. itzg's installer can't fetch it
+        // and the container would loop forever retrying. Refuse the
+        // install up-front with an actionable error — we'd need a
+        // manual-ZIP-upload flow to support these packs, and that's
+        // a feature we don't have yet.
+        const err = new Error(
+          "This CurseForge modpack disables third-party downloads. " +
+            "Pick another version that allows it, install via manual ZIP " +
+            "upload, or use a Modrinth alternative."
+        );
+        (err as any).statusCode = 409;
+        throw err;
       }
       return {
         target: "modpack-env",

@@ -116,6 +116,9 @@ const en: Dict = {
   "server.tabs.overview": "Overview",
   "server.tabs.console": "Console",
   "server.tabs.map": "Map",
+  "server.map.title": "Live map",
+  "server.map.backToServer": "Back to server",
+  "server.map.openInNewTab": "Open in new tab",
   "server.tabs.files": "Files",
   "server.tabs.properties": "Properties",
   "server.tabs.backups": "Backups",
@@ -403,6 +406,9 @@ const en: Dict = {
   "wizard.modpack.selected": "Selected pack",
   "wizard.packVersion": "Pack version",
   "wizard.packVersion.latest": "Latest (newest published)",
+  "wizard.packVersion.blocked": "auto-download disabled",
+  "wizard.packVersion.blockedHint":
+    "The pack author disabled third-party distribution on CurseForge for this version. The container won't be able to fetch it automatically. Pick a different version, or use a Modrinth alternative.",
   "wizard.packVersion.hint":
     "Pin a specific pack version if the author recently broke compat. \"Latest\" lets itzg pick the newest upload — fine for most packs but risky when a brand-new version ships a mod that depends on an MC release you're not running.",
   "wizard.resources.memory": "Memory",
@@ -410,6 +416,9 @@ const en: Dict = {
   "wizard.resources.cpuHint": "cores (empty = no limit)",
   "wizard.resources.port": "Host port",
   "wizard.eula": "Accept Minecraft EULA",
+  "wizard.dynmap.label": "Install Dynmap (live web map)",
+  "wizard.dynmap.hint":
+    "Drops the right Dynmap plugin/mod into the server's content folder right after creation. Once the server starts and finishes its initial render, the Map page in this panel goes live with player skins and positions.",
   "wizard.eulaDesc":
     "By checking this you agree to the Minecraft EULA. Required to boot the server.",
   "wizard.env": "Extra environment variables",
@@ -675,6 +684,9 @@ const ru: Dict = {
   "server.tabs.overview": "Обзор",
   "server.tabs.console": "Консоль",
   "server.tabs.map": "Карта",
+  "server.map.title": "Живая карта",
+  "server.map.backToServer": "К серверу",
+  "server.map.openInNewTab": "Открыть в новой вкладке",
   "server.tabs.files": "Файлы",
   "server.tabs.properties": "Свойства",
   "server.tabs.backups": "Бэкапы",
@@ -965,6 +977,9 @@ const ru: Dict = {
   "wizard.modpack.selected": "Выбранная сборка",
   "wizard.packVersion": "Версия сборки",
   "wizard.packVersion.latest": "Последняя (самая новая)",
+  "wizard.packVersion.blocked": "автозагрузка отключена",
+  "wizard.packVersion.blockedHint":
+    "Автор сборки отключил скачивание сторонними сервисами на CurseForge для этой версии. Контейнер не сможет загрузить её автоматически. Выбери другую версию или возьми аналог с Modrinth.",
   "wizard.packVersion.hint":
     "Закрепите конкретную версию, если автор недавно сломал совместимость. «Последняя» отдаёт решение itzg — подойдёт для большинства паков, но рискованно, если новая версия тянет моды под MC, которую вы не запускаете.",
   "wizard.resources.memory": "Память",
@@ -972,6 +987,9 @@ const ru: Dict = {
   "wizard.resources.cpuHint": "ядер (пусто = без лимита)",
   "wizard.resources.port": "Порт хоста",
   "wizard.eula": "Принять Minecraft EULA",
+  "wizard.dynmap.label": "Установить Dynmap (живая web-карта)",
+  "wizard.dynmap.hint":
+    "Сразу после создания сервера панель докинет нужный плагин/мод Dynmap в папку содержимого. Как только сервер запустится и сгенерит карту, страница «Карта» в этой панели заживёт — со скинами и координатами игроков.",
   "wizard.eulaDesc":
     "Отметка подтверждает согласие с Minecraft EULA. Обязательно для запуска сервера.",
   "wizard.env": "Дополнительные переменные окружения",

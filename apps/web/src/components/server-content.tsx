@@ -1,5 +1,6 @@
 "use client";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Loader2 } from "lucide-react";
 import useSWR, { mutate } from "swr";
 import { motion } from "framer-motion";
 import { api, ApiError, fetcher } from "@/lib/api";
@@ -1136,16 +1137,13 @@ function BrowsePanel({
               </div>
             )}
           </div>
-          {!busy && results.length > 0 && hasMore && (
-            <div className="flex justify-center pt-2">
-              <button
-                className="btn btn-ghost"
-                onClick={loadMore}
-                disabled={loadingMore}
-              >
-                {loadingMore ? t("content.browse.loadingMore") : t("content.browse.loadMore")}
-              </button>
-            </div>
+          {results.length > 0 && hasMore && (
+            <InfiniteScrollSentinel
+              onVisible={loadMore}
+              disabled={loadingMore || busy}
+              loadingLabel={t("content.browse.loadingMore")}
+              loading={loadingMore}
+            />
           )}
         </>
       )}
@@ -1382,4 +1380,63 @@ function prettifyFilename(name: string): string {
   const cut = s.search(/-\d|-v\d|-mc\d|-neo|-forge|-fabric|-quilt/i);
   if (cut > 0) s = s.slice(0, cut);
   return s.replace(/-/g, " ").trim() || name;
+}
+
+/**
+ * Bottom-of-list sentinel that fires `onVisible` once it scrolls into
+ * view. Used to drive infinite-scroll on the modpack browser without
+ * a "Load more" button. Re-arms each time the parent re-renders with
+ * a new `onVisible` (i.e. after a new page lands and `results.length`
+ * changed), so the user can keep scrolling forever as long as
+ * upstream still has matches.
+ *
+ * Disabled state turns the sentinel into a passive label (in-flight
+ * fetch indicator) so it can't fire while we're already loading.
+ */
+function InfiniteScrollSentinel({
+  onVisible,
+  disabled,
+  loading,
+  loadingLabel,
+}: {
+  onVisible: () => void;
+  disabled: boolean;
+  loading: boolean;
+  loadingLabel: string;
+}): JSX.Element {
+  const ref = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (disabled) return;
+    const el = ref.current;
+    if (!el) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          if (entry.isIntersecting) {
+            onVisible();
+            // Once we've fired, the parent re-renders with the new
+            // results — observer is recreated by the useEffect deps,
+            // so we don't need to manually re-arm here.
+            return;
+          }
+        }
+      },
+      // 200px rootMargin so we fetch the next page while the user is
+      // still scrolling — the new rows appear before they hit the
+      // visual bottom.
+      { rootMargin: "200px" }
+    );
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [onVisible, disabled]);
+
+  return (
+    <div
+      ref={ref}
+      className="flex justify-center items-center gap-2 py-4 text-xs text-ink-muted"
+    >
+      {loading && <Loader2 size={12} className="animate-spin" />}
+      {loading ? loadingLabel : null}
+    </div>
+  );
 }
