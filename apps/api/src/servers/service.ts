@@ -80,25 +80,28 @@ async function mergeModpackEnv(
       env.MODRINTH_VERSION ??= input.modpack.versionId;
     }
   } else if (input.type === "CURSEFORGE") {
-    // itzg's AUTO_CURSEFORGE expects ONE of: CF_SLUG, CF_PAGE_URL,
-    // CF_MOD_ID. We set every identifier we can derive — that way
-    // even if the CF search hit had a missing slug/URL (rare but
-    // happens), the numeric project id always gets through. Without
-    // this, the container would crash with
-    // "A modpack page URL or slug identifier is required" the moment
-    // itzg's helper tried to install.
+    // itzg's AUTO_CURSEFORGE accepts CF_SLUG OR CF_PAGE_URL as the
+    // project identifier — those are the only two supported values
+    // (CF_FILE_ID pins a specific file but isn't a project id). If
+    // neither survives into the container env, mc-image-helper
+    // crashes with "A modpack page URL or slug identifier is
+    // required".
+    //
+    // The wizard collects both `slug` and `pageUrl` from the CF
+    // search hit. We mirror them into env, AND synthesise the URL
+    // from the slug as a belt-and-braces fallback so even a
+    // glitchy CF response (slug present, websiteUrl null) doesn't
+    // strand the install.
     if (input.modpack?.slug) env.CF_SLUG ??= input.modpack.slug;
     if (input.modpack?.url) env.CF_PAGE_URL ??= input.modpack.url;
-    // Numeric project id — always present; we generate it from the
-    // CF search response. Belt-and-braces fallback for the cases
-    // where slug/URL are absent.
-    if (input.modpack?.projectId) {
-      env.CF_MOD_ID ??= String(input.modpack.projectId);
-    }
-    // Synthesise CF_PAGE_URL from slug when only slug is known so the
-    // installer always has a URL too.
     if (env.CF_SLUG && !env.CF_PAGE_URL) {
       env.CF_PAGE_URL = `https://www.curseforge.com/minecraft/modpacks/${env.CF_SLUG}`;
+    }
+    if (env.CF_PAGE_URL && !env.CF_SLUG) {
+      // Reverse synthesis: the modpack URL is always the slug at the
+      // tail. Pull it out so itzg always has a slug too.
+      const m = /\/modpacks\/([a-z0-9-]+)/i.exec(env.CF_PAGE_URL);
+      if (m?.[1]) env.CF_SLUG = m[1];
     }
     // Pin a specific pack file if the user picked a version. itzg's
     // AUTO_CURSEFORGE mode uses CF_FILE_ID to override "latest".
@@ -111,6 +114,21 @@ async function mergeModpackEnv(
     if (!env.CF_API_KEY) {
       const key = await readCurseforgeApiKey();
       if (key) env.CF_API_KEY = key;
+    }
+    // Safety net: refuse to provision if we'd hand the agent a
+    // CURSEFORGE spec with no usable project identifier. Better to
+    // fail fast in the panel with an actionable message than have
+    // the container crash-loop with a cryptic error.
+    if (!env.CF_SLUG && !env.CF_PAGE_URL) {
+      const err = new Error(
+        "CurseForge server is missing both CF_SLUG and CF_PAGE_URL. " +
+          "The modpack identifier wasn't preserved in the server's env. " +
+          "Edit the server's env to add one of them (find the slug at " +
+          "the end of the pack URL: " +
+          "https://www.curseforge.com/minecraft/modpacks/<slug>)."
+      );
+      (err as { statusCode?: number }).statusCode = 400;
+      throw err;
     }
   }
   return env;
@@ -218,14 +236,20 @@ function inferModpackHint(
   env: Record<string, string>
 ): CreateServerInput["modpack"] | undefined {
   if (type === "CURSEFORGE") {
+    // CF_MOD_ID isn't an itzg-recognised env var (mc-image-helper
+    // only accepts --slug / --modpack-page-url / --file-id), so
+    // we don't read it here — earlier I tried to use it as a
+    // fallback but it's dead env from itzg's POV.
+    const projectId = env.CF_SLUG ?? env.CF_PAGE_URL;
+    if (!projectId) {
+      // No modpack identifier surviving in env — the merge step
+      // below will error out cleanly. Returning an empty hint
+      // lets the merge handle the error path uniformly.
+      return undefined;
+    }
     return {
       provider: "curseforge",
-      // CF_MOD_ID is the most stable identifier — slug can collide
-      // with renamed projects, URLs change, but the numeric mod id
-      // is forever. Prefer it as the projectId; reprovision still
-      // sets all three env vars so itzg has its pick.
-      projectId:
-        env.CF_MOD_ID ?? env.CF_SLUG ?? env.CF_PAGE_URL ?? "auto",
+      projectId,
       ...(env.CF_SLUG ? { slug: env.CF_SLUG } : {}),
       ...(env.CF_PAGE_URL ? { url: env.CF_PAGE_URL } : {}),
       ...(env.CF_FILE_ID ? { versionId: env.CF_FILE_ID } : {}),
