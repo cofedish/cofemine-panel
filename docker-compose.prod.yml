@@ -83,11 +83,16 @@ services:
     depends_on: [api]
     volumes:
       # Background-music drop-in. AUDIO_DIR points to a host directory
-      # holding manifest.json + your mp3/ogg/etc. The image ships with
-      # an empty manifest, so without this mount the music section in
-      # Settings will say "no tracks configured". Mounted read-only
-      # since the panel never writes audio.
-      - ${AUDIO_DIR:-/var/lib/cofemine/audio}:/app/apps/web/public/audio:ro
+      # holding manifest.json + your mp3/ogg/etc. Default resolves to
+      # the project's apps/web/public/audio relative to this compose
+      # file — works out of the box when prod deploy lives next to the
+      # cloned repo. Override with AUDIO_DIR=/some/path in .env if the
+      # files live elsewhere. Mounted :ro since the panel never writes.
+      # NOTE: this path must EXIST on the host, otherwise Docker
+      # creates an empty dir and mounts it on top of whatever the
+      # image baked in — that hides the in-image manifest.json and
+      # /audio/manifest.json starts returning 404.
+      - ${AUDIO_DIR:-./apps/web/public/audio}:/app/apps/web/public/audio:ro
     # No ports published on the host. Caddy (running in Docker) reaches the
     # panel via the shared external network below as `web:3000`. The default
     # shared network name is `caddy` — it's expected to already exist (the

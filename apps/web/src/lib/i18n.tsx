@@ -67,7 +67,7 @@ const en: Dict = {
   "music.tracksAvailable": "{n} track(s) available — turn on to start.",
   "music.gestureNeeded": "Click to enable music",
   "music.noTracksHint":
-    "No tracks configured.\nDrop ogg/mp3 files into apps/web/public/audio/ and list them in manifest.json with their BPM. See the README in that folder for details. Without tracks the skyline still pulses at a fallback 90 BPM.",
+    "No tracks configured, or /audio/manifest.json returned 404.\nLikely cause on prod: the AUDIO_DIR bind-mount in docker-compose.prod.yml points to a directory that doesn't exist on the host, so an empty volume hides the in-image manifest. Fix: drop your mp3/ogg files into apps/web/public/audio/ next to the compose file (or set AUDIO_DIR in .env to where they really live), then `docker compose up -d --force-recreate web`.",
 
   "menu.settings": "Settings",
   "menu.signOut": "Sign out",
@@ -617,7 +617,7 @@ const ru: Dict = {
   "music.tracksAvailable": "Треков в манифесте: {n}. Включи, чтобы запустить.",
   "music.gestureNeeded": "Нажми, чтобы включить музыку",
   "music.noTracksHint":
-    "Треки не настроены.\nПоложи ogg/mp3 в apps/web/public/audio/ и пропиши их в manifest.json с указанием BPM. Подробности в README в той же папке. Без треков силуэт всё равно пульсирует — на запасных 90 BPM.",
+    "Треки не настроены или /audio/manifest.json отдаёт 404.\nЧастая причина на проде: AUDIO_DIR в docker-compose.prod.yml указывает на несуществующую папку на хосте, Docker монтирует поверх каталога образа пустой volume и manifest.json «исчезает». Решение: положи mp3/ogg в apps/web/public/audio/ рядом с compose-файлом (или укажи AUDIO_DIR=/реальный/путь в .env) и пересоздай контейнер: `docker compose up -d --force-recreate web`.",
 
   "menu.settings": "Настройки",
   "menu.signOut": "Выйти",
