@@ -92,6 +92,13 @@ services:
       - api
     ports:
       - "${WEB_PORT:-3000}:3000"
+    volumes:
+      # Background-music drop-in. Put mp3/ogg files + manifest.json on
+      # the host at $AUDIO_DIR (defaults to ./apps/web/public/audio in
+      # the repo) and they show up at /audio/* inside the panel
+      # without rebuilding the image. See apps/web/public/audio/README
+      # for the manifest format.
+      - ${AUDIO_DIR:-./apps/web/public/audio}:/app/apps/web/public/audio:ro
     networks:
       - cofemine_internal
 

@@ -1,28 +1,64 @@
 Cofemine Panel — фоновая музыка
 ================================
 
-Сюда складываются ogg/mp3 для проигрывания на заднем фоне панели.
-Файлы саундтреков Minecraft (C418, Lena Raine) НЕ распространяются
-вместе с проектом — это собственность Mojang. Положи свои файлы
-самостоятельно.
+Сюда складываются музыкальные файлы для проигрывания на заднем фоне
+панели. Любой формат, который умеет браузер: mp3, ogg, wav, m4a, flac.
 
-Как добавить трек:
+Файлы саундтреков Minecraft (C418, Lena Raine) НЕ распространяются с
+проектом — авторские права у композиторов. Покупай Volume Alpha /
+Beta на c418.bandcamp.com и клади свои файлы сюда.
 
-1. Скопируй ogg/mp3 в эту папку (apps/web/public/audio).
-2. Узнай BPM трека (sweden = 88, mice on venus = 91, otherside = 100,
-   pigstep = 124 — округлённо). Можно прогнать через aubiotrack или
-   tunebat.com.
-3. Допиши его в manifest.json:
+КАК ДОБАВИТЬ ТРЕК
+-----------------
 
-   {
-     "tracks": [
-       { "url": "/audio/sweden.ogg", "title": "Sweden", "bpm": 88 },
-       { "url": "/audio/mice.ogg",   "title": "Mice on Venus", "bpm": 91 }
-     ]
-   }
+1. Скопируй mp3 (или ogg/wav/...) в эту папку.
 
-4. Включи музыку в Настройки → Музыка. Анимация заднего фона
-   автоматически синхронизируется с битом текущего трека.
+2. Узнай BPM трека. Округлённо для основных:
+     Sweden            ~ 88
+     Mice on Venus     ~ 91
+     Subwoofer Lullaby ~ 76
+     Wet Hands         ~ 80
+     Otherside         ~ 100
+     Pigstep           ~ 124
+   Не уверен — прогони через https://tunebat.com или `aubiotrack`.
 
-Если manifest.json пустой или файлы не указаны — анимация работает
-от внутреннего таймера на 90 BPM, звука нет.
+3. Допиши трек в manifest.json:
+
+     {
+       "tracks": [
+         { "url": "/audio/sweden.mp3",  "title": "Sweden",       "bpm": 88 },
+         { "url": "/audio/pigstep.mp3", "title": "Pigstep",      "bpm": 124 }
+       ]
+     }
+
+4. Включи музыку в Настройки → Внешний вид → Фоновая музыка.
+   Силуэт блоков внизу страницы синхронизируется с битом текущего
+   трека. Если manifest.json пустой — анимация работает на запасных
+   90 BPM, без звука.
+
+ГДЕ ИМЕННО КЛАСТЬ ФАЙЛЫ
+-----------------------
+
+Зависит от того как у тебя запущена панель.
+
+* Локальный dev (pnpm dev):
+    apps/web/public/audio/<твой файл>.mp3
+  Next.js подхватывает файлы из public/ на лету, ребилд не нужен.
+
+* Docker (docker-compose.yml — dev compose):
+  В web-сервисе уже есть bind-mount:
+    ${AUDIO_DIR:-./apps/web/public/audio}:/app/apps/web/public/audio:ro
+  По умолчанию это та же папка в репе — можно класть сюда. Если
+  хочешь хранить треки отдельно от исходников, поставь в .env:
+    AUDIO_DIR=/path/to/your/music
+  и положи туда manifest.json + файлы.
+
+* Production (docker-compose.prod.yml):
+  По умолчанию монтируется хостовая папка /var/lib/cofemine/audio.
+  Создай её, положи туда manifest.json и треки, перезапусти контейнер
+  web (docker compose restart web). Ребилд образа не нужен — bind-
+  mount вступает в силу при старте контейнера.
+  Чтобы поменять путь: AUDIO_DIR=/your/path в .env.
+
+Файлы (.mp3/.ogg/.wav/...) в apps/web/public/audio/ занесены в
+.gitignore, чтобы случайно не закоммитить в публичный репо.

@@ -13,3 +13,16 @@ pnpm-lock.yaml.bak
 apps/*/prisma/migrations/dev.db*
 /data/
 /backups/
+
+# Background-music files. The panel ships with an empty manifest +
+# README in apps/web/public/audio/, but the audio itself is the user's
+# responsibility — C418 / Lena Raine retain rights to the actual
+# Minecraft tracks, so bundling them in a public repo would be
+# redistribution without licence. Drop your own files in the dir
+# locally; git won't track them.
+apps/web/public/audio/*.mp3
+apps/web/public/audio/*.ogg
+apps/web/public/audio/*.wav
+apps/web/public/audio/*.m4a
+apps/web/public/audio/*.flac
+apps/web/public/audio/*.aac

@@ -81,6 +81,13 @@ services:
       NODE_ENV: production
       API_INTERNAL_URL: http://api:4000
     depends_on: [api]
+    volumes:
+      # Background-music drop-in. AUDIO_DIR points to a host directory
+      # holding manifest.json + your mp3/ogg/etc. The image ships with
+      # an empty manifest, so without this mount the music section in
+      # Settings will say "no tracks configured". Mounted read-only
+      # since the panel never writes audio.
+      - ${AUDIO_DIR:-/var/lib/cofemine/audio}:/app/apps/web/public/audio:ro
     # No ports published on the host. Caddy (running in Docker) reaches the
     # panel via the shared external network below as `web:3000`. The default
     # shared network name is `caddy` — it's expected to already exist (the
