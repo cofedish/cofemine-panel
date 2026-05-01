@@ -186,6 +186,55 @@ export async function serversAgentRoutes(app: FastifyInstance): Promise<void> {
     return { ok: true };
   });
 
+  /**
+   * Lightweight batch state endpoint for the panel-API's status
+   * reconciler. Returns docker `State.Status` for every container
+   * the agent manages (filtered by our label), keyed by serverId.
+   *
+   * Lightweight = no `docker stats` call (which is slow because it
+   * polls the kernel cgroups). Just `listContainers` which Docker
+   * answers from its own state.
+   */
+  app.get("/servers/state", async () => {
+    const containers = await docker.listContainers({
+      all: true,
+      filters: JSON.stringify({
+        label: [`${config.AGENT_LABEL_PREFIX}.managed=true`],
+      }),
+    });
+    const states: Record<
+      string,
+      { status: string; state: string; startedAt?: string | null }
+    > = {};
+    for (const c of containers) {
+      const id = c.Labels?.[`${config.AGENT_LABEL_PREFIX}.serverId`];
+      if (!id) continue;
+      states[id] = {
+        // `c.State` from listContainers is one of: created / restarting /
+        // running / removing / paused / exited / dead. Match against
+        // it directly — this is what Docker daemon reports.
+        state: c.State,
+        status: c.Status, // human-readable like "Up 4 minutes"
+      };
+    }
+    return states;
+  });
+
+  /** Single-container variant of /servers/state. Used by the API
+   *  detail endpoint when the user opens one server's page so we
+   *  don't pull in every other container's state too. */
+  app.get("/servers/:id/state", async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const container = await findContainer(id);
+    if (!container) return reply.code(404).send({ error: "No container" });
+    const info = await container.inspect();
+    return {
+      state: info.State.Status,
+      running: Boolean(info.State.Running),
+      startedAt: info.State.StartedAt,
+    };
+  });
+
   app.get("/servers/:id/stats", async (req, reply) => {
     const { id } = req.params as { id: string };
     const container = await findContainer(id);

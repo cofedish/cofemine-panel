@@ -20,6 +20,7 @@ import {
 } from "./service.js";
 import { readDownloadProxy } from "../integrations/download-proxy.js";
 import { resetWatchdogState } from "./install-watchdog.js";
+import { reconcileMany } from "./status.js";
 
 export async function serversRoutes(app: FastifyInstance): Promise<void> {
   // List servers visible to the user.
@@ -35,13 +36,24 @@ export async function serversRoutes(app: FastifyInstance): Promise<void> {
       include: { node: true },
       orderBy: { createdAt: "desc" },
     });
+    // Reconcile DB-held status with the live container state on each
+    // node before returning. Without this the server row stays stuck
+    // on "starting" forever because nothing else flips it back to
+    // "running" once the container actually finishes booting.
+    const live = await reconcileMany(
+      servers.map((s) => ({
+        id: s.id,
+        nodeId: s.nodeId,
+        status: s.status,
+      }))
+    );
     return servers.map((s) => ({
       id: s.id,
       name: s.name,
       description: s.description,
       type: s.type,
       version: s.version,
-      status: s.status,
+      status: live[s.id] ?? s.status,
       memoryMb: s.memoryMb,
       ports: s.ports,
       node: { id: s.node.id, name: s.node.name, status: s.node.status },
@@ -58,7 +70,13 @@ export async function serversRoutes(app: FastifyInstance): Promise<void> {
       include: { node: true, template: true },
     });
     if (!server) return reply.code(404).send({ error: "Not found" });
-    return server;
+    // Same status-reconcile pass as the list endpoint, scoped to one
+    // server. Pulls the container's current docker state from the
+    // agent and rewrites DB if it diverged from what we had.
+    const reconciled = await reconcileMany([
+      { id: server.id, nodeId: server.nodeId, status: server.status },
+    ]);
+    return { ...server, status: reconciled[server.id] ?? server.status };
   });
 
   app.post(
