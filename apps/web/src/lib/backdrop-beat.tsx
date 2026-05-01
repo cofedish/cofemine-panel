@@ -130,13 +130,17 @@ export function BackdropBeatProvider({
         sourceNodeRef.current =
           audioCtxRef.current.createMediaElementSource(a);
         const an = audioCtxRef.current.createAnalyser();
-        an.fftSize = 512; // → 256 frequency bins
-        // Moderate in-thread smoothing. The consumer (the visualiser)
-        // does its own peak-hold + decay smoothing in float space, so
-        // we don't need the AnalyserNode's smoothing to be heavy too —
-        // 0.7 leaves the spectrum responsive while killing single-
-        // frame jitter. 0.85 was washing out actual peaks.
-        an.smoothingTimeConstant = 0.7;
+        // 2048-point FFT → 1024 bins of ~21 Hz each at 44.1 kHz.
+        // 512 was too coarse: with 80 visualiser columns mapped over
+        // the audible range, neighbouring columns landed on the same
+        // bin and ended up identical, smearing all the energy across
+        // a flat plateau. 1024 bins per band lets us actually
+        // distinguish neighbouring frequency content.
+        an.fftSize = 2048;
+        // Light in-thread smoothing. We do peak-hold + decay in the
+        // visualiser, and we want the consumer to see real frame-by-
+        // frame transients, not an average that's already pre-blurred.
+        an.smoothingTimeConstant = 0.5;
         sourceNodeRef.current.connect(an);
         an.connect(audioCtxRef.current.destination);
         analyserRef.current = an;
@@ -183,17 +187,24 @@ export function BackdropBeatProvider({
   }, [getAudio, tracks.length]);
 
   // Sync the audio src whenever the current track changes (e.g. after
-  // ended/skip). Doesn't auto-play — that's gated on user gesture +
-  // pref. If pref is "on" we kick play() once src is set.
+  // ended/skip). If music is enabled, also kick playback so the
+  // playlist auto-advances — without this, the `ended` handler
+  // increments the track index and the new src loads but the audio
+  // sits paused at the start of the next track. Browser allows this
+  // because the audio element already had a successful play() call,
+  // which carries the user-gesture activation forward.
   useEffect(() => {
     const a = audioRef.current;
     if (!a || !current) return;
     const targetSrc = absoluteUrl(current.url);
     if (a.src !== targetSrc) {
       a.src = current.url;
+      if (pref === "on") {
+        void a.play().catch(() => setNeedsGesture(true));
+      }
     }
     a.volume = volume;
-  }, [current, volume]);
+  }, [current, volume, pref]);
 
   // Volume slider tracking, separate so changing it doesn't reload src.
   useEffect(() => {

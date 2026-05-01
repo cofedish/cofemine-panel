@@ -5,6 +5,7 @@ import { motion } from "framer-motion";
 import { cn } from "@/lib/cn";
 import { LogoMark, Wordmark } from "./logo";
 import { UserMenu } from "./user-menu";
+import { MusicMini } from "./music-mini";
 import { useT } from "@/lib/i18n";
 
 const LINKS = [
@@ -63,6 +64,7 @@ export function TopNav(): JSX.Element {
         <div className="flex-1" />
 
         <div className="flex items-center gap-3">
+          <MusicMini />
           <UserMenu />
         </div>
       </div>
