@@ -100,11 +100,32 @@ export class ItzgRuntimeProvider implements MinecraftRuntimeProvider {
       portBindings[key] = [{ HostPort: String(p.host) }];
     }
 
+    // Container memory limit needs headroom on top of the JVM heap.
+    // The user-facing "memory" knob feeds itzg's MEMORY env, which
+    // becomes Xms/Xmx — pure heap. JVM also needs space for the
+    // native side: metaspace (Forge mod classes can take 1-2 GB on
+    // big modpacks), JIT code cache, GC bookkeeping, off-heap
+    // allocations (NIO buffers, tons of mods use Unsafe), thread
+    // stacks. Without headroom the kernel cgroup-OOMs the process
+    // the moment heap + native crosses the limit — exactly the
+    // exit-137 the user just hit.
+    //
+    // Heuristic: 25% of heap, capped at 4 GB and floored at 1 GB.
+    // For 16 GB heap → 4 GB headroom → 20 GB container limit. For
+    // 1 GB toy server → 1 GB headroom → 2 GB container.
+    const headroomMb = Math.max(
+      1024,
+      Math.min(4096, Math.floor(spec.memoryMb * 0.25))
+    );
+    const containerMemoryMb = spec.memoryMb + headroomMb;
     const hostConfig: ContainerCreateOptions["HostConfig"] = {
       Binds: [`${dataPath}:/data`],
       PortBindings: portBindings,
       RestartPolicy: { Name: "unless-stopped" },
-      Memory: spec.memoryMb * 1024 * 1024,
+      Memory: containerMemoryMb * 1024 * 1024,
+      // Pin swap to memory so the kernel can't swap-thrash the JVM
+      // — disk-backed swap would tank tick rate before OOM-killing.
+      MemorySwap: containerMemoryMb * 1024 * 1024,
       NetworkMode: config.AGENT_DOCKER_NETWORK,
     };
     if (spec.cpuLimit) {
