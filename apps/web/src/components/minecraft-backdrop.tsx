@@ -1,68 +1,74 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import AudioMotionAnalyzer from "audiomotion-analyzer";
 import { useMotionEnabled } from "@/lib/motion-pref";
 import { useBackdropBeat } from "@/lib/backdrop-beat";
 
 /**
- * Decorative music-reactive backdrop powered by `audiomotion-analyzer`.
+ * Layered Minecraft-y backdrop:
  *
- * After several rounds of hand-rolling FFT bin mapping, peak-hold,
- * hysteresis and decay logic — and getting it visibly wrong every time
- * — we hand the whole thing off to a battle-tested library. audioMotion
- * is the analyser behind the audioMotion player; ~5k stars on GitHub,
- * ESM, no deps, gives us octave-band bars with a proper LED look out
- * of the box. All the previously-hand-rolled stuff (octave-equal
- * mapping, dB normalisation, attack/release smoothing, peak hold,
- * hysteresis) is now done inside the library, frame-tight and
- * canvas-rendered.
+ *   1. Static SVG silhouette at the very back. Seeded jagged
+ *      block-columns with a brighter "grass" cap on each — always
+ *      visible, even with music off, so the panel never looks empty.
+ *      This is what the user keeps asking us to "bring back".
+ *   2. audiomotion-analyzer canvas on top. Renders dense, narrow,
+ *      solid bars when music is playing; transparent when silent
+ *      (lets the static silhouette show through).
+ *   3. Pixel-grid overlay on top of both, so the whole bottom band
+ *      reads as a tiled Minecraft block field.
  *
- * What we configure here:
- *   - `mode: 6`           1/12 octave bands → ~80 bars across the row
- *   - `showLeds: true`    Draws each bar as a stack of LED-block
- *                          segments; matches the Minecraft block feel
- *                          we've been chasing the whole time
- *   - `bgAlpha: 0`        Transparent canvas — the panel bg shows
- *                          through above the bars
- *   - custom gradient     Two-stop accent gradient using the active
- *                          theme colour (rgb(var(--accent)))
- *   - `weightingFilter: 'D'`  Perceptual weighting so the bars
- *                              respond like the ear hears
- *   - `smoothing: 0.7`    Pre-FFT time smoothing
- *
- * Sits behind everything (fixed, z-0, pointer-events: none).
+ * Heights and column count are tuned to be dense enough to fill the
+ * entire width without obvious gaps, while audioMotion is set to its
+ * highest density (1/24 octave bands across a wide frequency range)
+ * so the bars also span edge-to-edge.
  */
 
 const GRADIENT_NAME = "cofemine";
+
+// Static-skyline params. 120 columns at BLOCK=8 gives a dense
+// silhouette that fills the row edge-to-edge without gaps.
+const SKY_COLS = 120;
+const SKY_BLOCK = 8;
+const SKY_MAX = 28; // in cells
+const SKY_W = SKY_COLS * SKY_BLOCK; // 960
+const SKY_H = SKY_MAX * SKY_BLOCK; // 224
+const SKY_SEED = 1337;
+
+function seededSkylineHeights(): number[] {
+  const out: number[] = [];
+  let s = SKY_SEED;
+  for (let i = 0; i < SKY_COLS; i++) {
+    s = (s * 9301 + 49297) % 233280;
+    const r = s / 233280;
+    const base = 0.55 + 0.45 * Math.sin(i / 4 + r * 1.5);
+    const h = Math.floor(base * SKY_MAX);
+    out.push(Math.max(2, Math.min(SKY_MAX, h)));
+  }
+  return out;
+}
 
 export function MinecraftBackdrop(): JSX.Element {
   const motionOn = useMotionEnabled();
   const { getAudioElement } = useBackdropBeat();
   const containerRef = useRef<HTMLDivElement | null>(null);
   const amRef = useRef<AudioMotionAnalyzer | null>(null);
+  const skylineHeights = useMemo(seededSkylineHeights, []);
 
   useEffect(() => {
     if (!motionOn) return;
     const container = containerRef.current;
     if (!container) return;
-    // The audio element is created lazily by the provider; call it
-    // here so audioMotion has something to attach a media-element
-    // source to. After this, ALL audio routes through audioMotion's
-    // internal graph (input → analyser → destination).
     const audio = getAudioElement();
     let am: AudioMotionAnalyzer | null = null;
     try {
       am = new AudioMotionAnalyzer(container, {
         source: audio,
-        // More bars + thinner. mode 7 = 1/24 octave (≈ 160 bars over
-        // our 60Hz–6kHz range). With high barSpace each bar reads as
-        // a thin column instead of a fat block.
-        mode: 7,
-        // SOLID single-column bars — LED segmentation off. The user
-        // wants the WE-reference look: each bar is one filled rect
-        // top to bottom, not a stack of glowing pixels.
-        ledBars: false,
+        // Mode 8 = 1/24 octave bands. Combined with a wide frequency
+        // range that's ~9 octaves × 24 ≈ 200 bars — dense enough that
+        // edge-to-edge the row reads as a tightly-packed equaliser.
+        mode: 8,
+        ledBars: false, // SOLID single-column bars
         showScaleX: false,
         showScaleY: false,
         showPeaks: true,
@@ -76,16 +82,17 @@ export function MinecraftBackdrop(): JSX.Element {
         smoothing: 0.7,
         minDecibels: -85,
         maxDecibels: -25,
-        minFreq: 60,
-        maxFreq: 6000,
+        // Wider range than before (was 60-6000 Hz) so we get more
+        // distinct bars across the row — content thins out above
+        // ~6 kHz but the bars are still drawn, dense.
+        minFreq: 30,
+        maxFreq: 16000,
         peakLine: false,
         channelLayout: "single",
-        // Sharp solid columns: thick gap between bars, no rounding,
-        // no outline, full opacity. `colorMode: "gradient"` paints
-        // each whole bar from a single gradient (top of bar = pos 0,
-        // bottom of bar = pos 1), so the grass-on-top, dirt-below
-        // palette still reads cleanly even without LED segments.
-        barSpace: 0.55,
+        // Sharp solid columns. Smaller barSpace because density is
+        // already higher — too much spacing makes individual bars
+        // disappear.
+        barSpace: 0.3,
         roundBars: false,
         outlineBars: false,
         alphaBars: false,
@@ -94,33 +101,23 @@ export function MinecraftBackdrop(): JSX.Element {
         loRes: false,
         colorMode: "gradient",
       });
-
       applyGradient(am);
       amRef.current = am;
     } catch (err) {
-      // createMediaElementSource throws "InvalidStateError: Failed
-      // to execute 'createMediaElementSource'..." if it's already
-      // been called for this element. Shouldn't happen with the
-      // refactored provider, but log just in case so it doesn't fail
-      // silently.
       // eslint-disable-next-line no-console
       console.error("[backdrop] audiomotion init failed:", err);
     }
-
     return () => {
       try {
         am?.destroy();
       } catch {
-        /* destroy is best-effort */
+        /* best-effort */
       }
       amRef.current = null;
     };
   }, [motionOn, getAudioElement]);
 
-  // Re-apply the gradient whenever the theme accent changes. The
-  // accent provider toggles `accent-*` classes on <html>; we watch
-  // the class attr and re-apply when the resolved CSS variable value
-  // differs from what we last set.
+  // Re-apply gradient on accent change.
   useEffect(() => {
     let lastAccent = readAccentRgb();
     const observer = new MutationObserver(() => {
@@ -140,37 +137,89 @@ export function MinecraftBackdrop(): JSX.Element {
   return (
     <div
       aria-hidden
-      className="pointer-events-none fixed inset-x-0 bottom-0 z-0 select-none opacity-[0.4] dark:opacity-[0.5]"
+      className="pointer-events-none fixed inset-x-0 bottom-0 z-0 select-none opacity-[0.32] dark:opacity-[0.42]"
       style={{
-        // Skinnier band hugged to the bottom edge so bars feel like a
-        // horizon line rather than floating in the middle of the page.
-        // Was clamp(220px, 44vh, 440px) — that took up almost half the
-        // viewport, and at low FFT levels short bars sat in the top
-        // of a too-tall container looking like they floated.
-        height: "clamp(160px, 30vh, 320px)",
-        // Light top fade only — keeps the canvas reaching the very
-        // bottom edge of the viewport so the "horizon" reads cleanly.
+        height: "clamp(180px, 32vh, 360px)",
         WebkitMaskImage:
           "linear-gradient(to top, black 0%, black 60%, transparent 100%)",
         maskImage:
           "linear-gradient(to top, black 0%, black 60%, transparent 100%)",
       }}
     >
-      <div ref={containerRef} className="w-full h-full" />
+      {/* Static seeded skyline — always visible. Fills the entire
+          row with grass-capped block columns so the panel always has
+          its Minecraft silhouette, even with music off. */}
+      <svg
+        className="absolute inset-0 w-full h-full"
+        viewBox={`0 0 ${SKY_W} ${SKY_H}`}
+        preserveAspectRatio="xMidYMax slice"
+      >
+        <defs>
+          {/* Pixel-grid overlay — restores the cell aesthetic. */}
+          <pattern
+            id="mc-grid"
+            width={SKY_BLOCK}
+            height={SKY_BLOCK}
+            patternUnits="userSpaceOnUse"
+          >
+            <path
+              d={`M ${SKY_BLOCK} 0 L 0 0 0 ${SKY_BLOCK}`}
+              fill="none"
+              stroke="rgb(var(--accent))"
+              strokeOpacity="0.32"
+              strokeWidth="0.5"
+            />
+          </pattern>
+        </defs>
+        {skylineHeights.map((h, i) => {
+          const heightPx = h * SKY_BLOCK;
+          const y = SKY_H - heightPx;
+          return (
+            <g key={i}>
+              {/* Dirt body */}
+              <rect
+                x={i * SKY_BLOCK}
+                y={y}
+                width={SKY_BLOCK}
+                height={heightPx}
+                fill="rgb(var(--accent))"
+                opacity="0.55"
+              />
+              {/* Grass cap — exactly one cell tall, fully aligned
+                  with one grid cell. */}
+              <rect
+                x={i * SKY_BLOCK}
+                y={y}
+                width={SKY_BLOCK}
+                height={SKY_BLOCK}
+                fill="rgb(var(--accent))"
+              />
+            </g>
+          );
+        })}
+        {/* Grid overlay sits on top of the skyline, so cell seams
+            cross the columns and the empty viewBox above. */}
+        <rect
+          x={0}
+          y={0}
+          width={SKY_W}
+          height={SKY_H}
+          fill="url(#mc-grid)"
+        />
+      </svg>
+
+      {/* audioMotion canvas — overlays the skyline. Transparent
+          when silent (skyline shows through), reactive bars on top
+          when music plays. */}
+      <div
+        ref={containerRef}
+        className="absolute inset-0"
+        style={{ mixBlendMode: "screen" }}
+      />
     </div>
   );
 }
 
-/**
- * Read the active accent colour from the CSS variable. The panel
- * stores it as space-separated bytes ("5 150 105") for Tailwind's
- * `rgb(var(--accent) / <alpha>)` consumer, so we keep it that way
- * and use the modern space-syntax `rgb(R G B / a)` form below.
- *
- * The OLD code wrapped this in `rgba(${val}, 0.5)` which produced
- * invalid CSS like `rgba(5 150 105, 0.5)`, so the gradient never
- * reflected accent changes — that was the "theme doesn't react" bug.
- */
 function readAccentRgb(): string {
   if (typeof window === "undefined") return "5 150 105";
   const v = getComputedStyle(document.documentElement)
@@ -179,39 +228,19 @@ function readAccentRgb(): string {
   return v || "5 150 105";
 }
 
-/**
- * Build the Minecraft "grass-on-top, dirt-below" gradient and apply
- * it to the analyser. In audioMotion `pos: 0` is the TOP of each bar
- * and `pos: 1` is the bottom, so:
- *   - top sliver (pos 0..0.06)        : bright accent — the "grass"
- *   - body       (pos 0.07..0.95)     : medium accent — the "dirt"
- *   - bottom     (pos 0.95..1)        : dim accent — shadowed dirt
- *
- * Each bar is rendered as a stack of LED segments; with
- * `colorMode: "gradient"` each segment picks its colour from this
- * palette by its vertical position, so the topmost block of every
- * bar is grass-bright while the stack below it is dirt-dim. Matches
- * the visual language of the rest of the panel.
- */
 function applyGradient(am: AudioMotionAnalyzer): void {
-  const accent = readAccentRgb(); // "R G B" (space-separated)
-  // Modern `rgb(R G B / a)` syntax accepts the space-separated bytes
-  // straight from the CSS variable, so when the user picks a new
-  // accent the new colour flows through without any string surgery.
+  const accent = readAccentRgb(); // "R G B" space-separated
+  // Modern `rgb(R G B / a)` syntax — accepts the space-separated
+  // bytes straight from the CSS variable, so accent swaps in
+  // Settings flow through without string surgery.
   const c = (a: number): string => `rgb(${accent} / ${a})`;
   am.registerGradient(GRADIENT_NAME, {
     bgColor: "transparent",
     colorStops: [
-      // Bright grass slab — the top sliver of every bar is
-      // full-strength accent, mimicking a Minecraft grass block.
       { pos: 0, color: c(1) },
       { pos: 0.06, color: c(1) },
-      // Sharp transition into the dirt body — visible step
-      // distinguishes the grass cap from the column below.
       { pos: 0.07, color: c(0.7) },
-      // Dirt body, slightly translucent.
       { pos: 0.95, color: c(0.6) },
-      // Faint shadow at the very bottom.
       { pos: 1, color: c(0.45) },
     ],
   });
