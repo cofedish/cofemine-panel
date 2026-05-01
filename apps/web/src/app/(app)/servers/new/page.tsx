@@ -1,5 +1,5 @@
 "use client";
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import useSWR from "swr";
 import { motion, AnimatePresence } from "framer-motion";
@@ -607,6 +607,8 @@ function PackPickStep({
   const [query, setQuery] = useState("");
   const [gameVersion, setGameVersion] = useState("");
   const [busy, setBusy] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [hasMore, setHasMore] = useState(true);
   const [results, setResults] = useState<ModpackHit[]>([]);
   const [err, setErr] = useState<string | null>(null);
   // Pack the user is *previewing* in the detail drawer. Distinct from
@@ -622,9 +624,26 @@ function PackPickStep({
     setPendingVersion(null);
   }, [preview?.id]);
 
-  // Fire an initial popular-packs search when the step mounts and any time
-  // the user edits the filter. Debounce typing by 300ms so we don't hammer
-  // the API on every keystroke.
+  const PAGE_SIZE = 24;
+
+  function mapHit(r: any): ModpackHit {
+    return {
+      id: String(r.id),
+      provider,
+      name: r.name,
+      slug: r.slug,
+      description: r.description,
+      iconUrl: r.iconUrl,
+      author: r.author,
+      downloads: r.downloads,
+      pageUrl: r.pageUrl,
+    };
+  }
+
+  // First-page (or new-filter) fetch. Resets pagination + result list.
+  // Debounces by 300ms when there's a typed filter so the API isn't
+  // hit on every keystroke; runs immediately for the initial empty
+  // search so the popular grid is visible without a delay.
   useEffect(() => {
     let cancelled = false;
     const t = setTimeout(
@@ -636,7 +655,8 @@ function PackPickStep({
           if (query) qp.set("query", query);
           if (gameVersion) qp.set("gameVersion", gameVersion);
           qp.set("projectType", "modpack");
-          qp.set("limit", "24");
+          qp.set("limit", String(PAGE_SIZE));
+          qp.set("offset", "0");
           const res = await api.get<any>(
             `/integrations/${provider}/search?${qp.toString()}`
           );
@@ -644,19 +664,8 @@ function PackPickStep({
           const raw: any[] = Array.isArray(res)
             ? res
             : (res.results ?? []);
-          setResults(
-            raw.map((r) => ({
-              id: String(r.id),
-              provider,
-              name: r.name,
-              slug: r.slug,
-              description: r.description,
-              iconUrl: r.iconUrl,
-              author: r.author,
-              downloads: r.downloads,
-              pageUrl: r.pageUrl,
-            }))
-          );
+          setResults(raw.map(mapHit));
+          setHasMore(raw.length >= PAGE_SIZE);
         } catch (e) {
           if (!cancelled)
             setErr(e instanceof ApiError ? e.message : String(e));
@@ -671,6 +680,37 @@ function PackPickStep({
       clearTimeout(t);
     };
   }, [provider, query, gameVersion]);
+
+  // Append the next page when the bottom sentinel hits the viewport.
+  // De-dupes against existing results in case the upstream returns
+  // overlapping entries on offset (CurseForge does this occasionally).
+  async function loadMore(): Promise<void> {
+    if (loadingMore || busy || !hasMore) return;
+    setLoadingMore(true);
+    setErr(null);
+    try {
+      const qp = new URLSearchParams();
+      if (query) qp.set("query", query);
+      if (gameVersion) qp.set("gameVersion", gameVersion);
+      qp.set("projectType", "modpack");
+      qp.set("limit", String(PAGE_SIZE));
+      qp.set("offset", String(results.length));
+      const res = await api.get<any>(
+        `/integrations/${provider}/search?${qp.toString()}`
+      );
+      const raw: any[] = Array.isArray(res) ? res : (res.results ?? []);
+      const seen = new Set(results.map((r) => `${r.provider}:${r.id}`));
+      const fresh = raw.map(mapHit).filter(
+        (r) => !seen.has(`${r.provider}:${r.id}`)
+      );
+      setResults((prev) => [...prev, ...fresh]);
+      setHasMore(raw.length >= PAGE_SIZE);
+    } catch (e) {
+      setErr(e instanceof ApiError ? e.message : String(e));
+    } finally {
+      setLoadingMore(false);
+    }
+  }
 
   return (
     <div className="tile p-7 space-y-5">
@@ -762,6 +802,18 @@ function PackPickStep({
             ? "No results. Try a different search."
             : "No packs available."}
         </div>
+      )}
+
+      {/* Bottom-of-grid sentinel — same infinite-scroll pattern the
+          server-content browse panel uses, so the wizard's pack
+          picker also keeps loading pages as the user scrolls
+          instead of capping at the first 24 results. */}
+      {results.length > 0 && hasMore && (
+        <ModpackInfiniteSentinel
+          onVisible={loadMore}
+          disabled={loadingMore || busy}
+          loading={loadingMore}
+        />
       )}
 
       {/* Confirmation summary: when a pack is selected we show a compact
@@ -1358,3 +1410,62 @@ function ReviewRow({
 
 /** Expose for potential future re-use. */
 void ServerTypeIcon;
+
+/**
+ * Infinite-scroll sentinel for the wizard's modpack picker. Fires
+ * `onVisible` as soon as the bottom row scrolls into view (with a
+ * 200px rootMargin so the next page lands before the user reaches
+ * the visible bottom). Disabled while a fetch is in flight so the
+ * IntersectionObserver doesn't trigger overlapping requests.
+ */
+function ModpackInfiniteSentinel({
+  onVisible,
+  disabled,
+  loading,
+}: {
+  onVisible: () => void;
+  disabled: boolean;
+  loading: boolean;
+}): JSX.Element {
+  const ref = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (disabled) return;
+    const el = ref.current;
+    if (!el) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          if (entry.isIntersecting) {
+            onVisible();
+            return;
+          }
+        }
+      },
+      { rootMargin: "200px" }
+    );
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [onVisible, disabled]);
+
+  return (
+    <div
+      ref={ref}
+      className="flex justify-center items-center gap-2 py-4 text-xs text-ink-muted"
+    >
+      {loading && (
+        <svg
+          className="animate-spin"
+          width="14"
+          height="14"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2.5"
+          strokeLinecap="round"
+        >
+          <path d="M21 12a9 9 0 1 1-6.2-8.55" />
+        </svg>
+      )}
+    </div>
+  );
+}
