@@ -184,10 +184,19 @@ export const installModrinthSchema = z.object({
   kind: z
     .enum(["modpack", "mod", "plugin", "datapack"])
     .default("mod"),
+  // Optional filters used to resolve "latest compatible" version when
+  // versionId isn't pinned. Crucial for plugin-on-modpack installs
+  // (e.g. dynmap onto a 1.20.1-Forge pack) — without them, Modrinth
+  // returns its newest build which usually targets the newest MC and
+  // is incompatible with older modpacks.
+  gameVersion: z.string().min(1).optional(),
+  loader: z.string().min(1).optional(),
 });
 
 export const installCurseforgeSchema = z.object({
   projectId: z.number().int().positive(),
   fileId: z.number().int().positive().optional(),
   kind: z.enum(["modpack", "mod", "plugin"]).default("mod"),
+  gameVersion: z.string().min(1).optional(),
+  loader: z.string().min(1).optional(),
 });

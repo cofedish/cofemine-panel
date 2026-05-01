@@ -113,10 +113,14 @@ export default function CreateServerPage(): JSX.Element {
 
   // Modpack selection
   const [pack, setPack] = useState<ModpackHit | null>(null);
-  /** Pinned pack version — id is what itzg needs (Modrinth version id or
-   *  CurseForge file id as string). `null` keeps the old "latest" behavior. */
+  /** Pinned pack version — id is what itzg needs (Modrinth version id
+   *  or CurseForge file id as string). Empty id ("") means "latest"
+   *  for itzg but we still carry along the pack's actual MC version
+   *  and loader so downstream installers (e.g. dynmap auto-install)
+   *  can pick a compatible build instead of Modrinth's newest-of-all
+   *  which usually targets a newer MC release. */
   const [packVersion, setPackVersion] = useState<
-    { id: string; label: string } | null
+    { id: string; label: string; gameVersion?: string; loader?: string } | null
   >(null);
 
   // Basics / resources
@@ -196,16 +200,30 @@ export default function CreateServerPage(): JSX.Element {
           console.warn("Failed to upload icon after create:", e);
         }
       }
-      // Optional dynmap auto-install. Best-effort: if the loader
-      // doesn't support it (e.g. Vanilla) or Modrinth is down, the
-      // server itself is already created and the user can install
-      // dynmap manually from the Content tab later.
+      // Optional dynmap auto-install. Pass the resolved MC version
+      // and loader so Modrinth picks a compatible dynmap build, not
+      // its newest build at large (which usually targets the latest
+      // MC release and silently won't load on an older modpack).
+      // Best-effort overall: a failure here doesn't tear down the
+      // newly-created server — the user can install manually from
+      // the Content tab later.
       const dynmapSlug = dynmapSlugFor(effectiveType);
       if (installDynmap && dynmapSlug) {
+        const { gameVersion, loader } = resolveRuntimeFilters(
+          source,
+          effectiveType,
+          version,
+          packVersion
+        );
         try {
           await api.post(
             `/integrations/servers/${res.id}/install/modrinth`,
-            { projectId: dynmapSlug, kind: "plugin" }
+            {
+              projectId: dynmapSlug,
+              kind: "plugin",
+              ...(gameVersion ? { gameVersion } : {}),
+              ...(loader ? { loader } : {}),
+            }
           );
         } catch (e) {
           console.warn("Dynmap auto-install failed:", e);
@@ -855,8 +873,14 @@ function PackVersionPicker({
 }: {
   provider: "modrinth" | "curseforge";
   pack: ModpackHit;
-  value: { id: string; label: string } | null;
-  onPick: (v: { id: string; label: string } | null) => void;
+  value:
+    | { id: string; label: string; gameVersion?: string; loader?: string }
+    | null;
+  onPick: (
+    v:
+      | { id: string; label: string; gameVersion?: string; loader?: string }
+      | null
+  ) => void;
 }): JSX.Element {
   const { t } = useT();
   const [versions, setVersions] = useState<VersionOption[]>([]);
@@ -881,6 +905,20 @@ function PackVersionPicker({
           distributionBlocked: Boolean(v.distributionBlocked),
         }));
         setVersions(list);
+        // Auto-fill the "Latest" selection with metadata from the
+        // newest version. Without this, downstream consumers see no
+        // gameVersion/loader and can't make compatibility decisions
+        // (the dynmap auto-install would happily pick latest dynmap
+        // for the wrong MC version).
+        const latest = list[0];
+        if (latest && (!value || (value.id === "" && !value.gameVersion))) {
+          onPick({
+            id: "",
+            label: "Latest",
+            gameVersion: latest.gameVersions[0],
+            loader: latest.loaders[0],
+          });
+        }
       })
       .catch((e) => {
         if (!cancelled) {
@@ -913,11 +951,29 @@ function PackVersionPicker({
         onChange={(e) => {
           const id = e.target.value;
           if (!id) {
-            onPick(null);
+            // "Latest" — keep metadata from the newest version so
+            // dynmap install can pick a compatible build.
+            const latest = versions[0];
+            onPick(
+              latest
+                ? {
+                    id: "",
+                    label: "Latest",
+                    gameVersion: latest.gameVersions[0],
+                    loader: latest.loaders[0],
+                  }
+                : null
+            );
             return;
           }
           const v = versions.find((x) => x.id === id);
-          if (v) onPick({ id: v.id, label: v.label });
+          if (v)
+            onPick({
+              id: v.id,
+              label: v.label,
+              gameVersion: v.gameVersions[0],
+              loader: v.loaders[0],
+            });
         }}
       >
         <option value="">{t("wizard.packVersion.latest")}</option>
@@ -1213,6 +1269,55 @@ function dynmapSlugFor(type: ServerTypeKey): string | null {
       return "dynmap-fabric";
     default:
       return null;
+  }
+}
+
+/**
+ * Compute the (gameVersion, loader) pair that downstream installs
+ * (e.g. dynmap auto-install) should be filtered against, depending
+ * on whether we're creating a plain server or a modpack.
+ *
+ *   - Plain: the user explicitly picks both the MC version and the
+ *     server type (Paper / Forge / etc.), so it's just a typeToLoader
+ *     lookup on top of the chosen MC.
+ *   - Modpack: the pack version itself dictates both. Whatever was
+ *     stored on `packVersion` (auto-filled to the newest version's
+ *     metadata when nothing's pinned) is the source of truth.
+ */
+function resolveRuntimeFilters(
+  source: Source,
+  effectiveType: ServerTypeKey,
+  plainVersion: string,
+  packVersion: { gameVersion?: string; loader?: string } | null
+): { gameVersion?: string; loader?: string } {
+  if (source === "plain") {
+    return {
+      gameVersion: plainVersion || undefined,
+      loader: typeToLoader(effectiveType),
+    };
+  }
+  return {
+    gameVersion: packVersion?.gameVersion,
+    loader: packVersion?.loader,
+  };
+}
+
+function typeToLoader(t: ServerTypeKey): string | undefined {
+  switch (t) {
+    case "PAPER":
+    case "PURPUR":
+    case "MOHIST":
+      return "paper";
+    case "FORGE":
+      return "forge";
+    case "NEOFORGE":
+      return "neoforge";
+    case "FABRIC":
+      return "fabric";
+    case "QUILT":
+      return "quilt";
+    default:
+      return undefined;
   }
 }
 

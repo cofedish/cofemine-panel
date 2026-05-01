@@ -147,10 +147,27 @@ export async function integrationsRoutes(app: FastifyInstance): Promise<void> {
     await assertServerPermission(req, id, "server.edit");
     const body = installModrinthSchema.parse(req.body);
     const server = await prisma.server.findUniqueOrThrow({ where: { id } });
-    const versions = await modrinth.getVersions(body.projectId);
+    // Pre-filter by gameVersion / loader so "latest" actually means
+    // "latest compatible with the target server" and not "latest
+    // build of the project at all", which is what was installing
+    // dynmap-for-1.21.11 on a 1.20.1 modpack.
+    const versions = await modrinth.getVersions(body.projectId, {
+      gameVersion: body.gameVersion,
+      loader: body.loader,
+    });
     const version =
       versions.find((v) => v.id === body.versionId) ?? versions[0];
-    if (!version) throw new Error("No compatible version found on Modrinth");
+    if (!version) {
+      const filterDesc =
+        body.gameVersion || body.loader
+          ? ` matching MC ${body.gameVersion ?? "*"} / ${
+              body.loader ?? "*"
+            }`
+          : "";
+      throw new Error(
+        `No compatible Modrinth version found${filterDesc}.`
+      );
+    }
     const plan = await modrinth.planInstall(version, body.kind);
     const client = await NodeClient.forId(server.nodeId);
     const res = await client.call("POST", `/servers/${id}/install`, {
@@ -178,10 +195,23 @@ export async function integrationsRoutes(app: FastifyInstance): Promise<void> {
       throw err;
     }
     const server = await prisma.server.findUniqueOrThrow({ where: { id } });
-    const versions = await curseforge.getVersions(body.projectId);
+    const versions = await curseforge.getVersions(body.projectId, {
+      gameVersion: body.gameVersion,
+      loader: body.loader,
+    });
     const version =
       versions.find((v) => v.id === String(body.fileId)) ?? versions[0];
-    if (!version) throw new Error("No compatible file found on CurseForge");
+    if (!version) {
+      const filterDesc =
+        body.gameVersion || body.loader
+          ? ` matching MC ${body.gameVersion ?? "*"} / ${
+              body.loader ?? "*"
+            }`
+          : "";
+      throw new Error(
+        `No compatible CurseForge file found${filterDesc}.`
+      );
+    }
     const plan = await curseforge.planInstall(version, body.kind);
     const client = await NodeClient.forId(server.nodeId);
     const res = await client.call("POST", `/servers/${id}/install`, {
