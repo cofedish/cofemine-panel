@@ -55,21 +55,20 @@ export function MinecraftBackdrop(): JSX.Element {
     try {
       am = new AudioMotionAnalyzer(container, {
         source: audio,
-        // Visual config
-        mode: 6, // 1/12 octave bands → ~80 bars wide
-        ledBars: true, // LED-block bars — exactly the Minecraft block feel
+        // Layout — unchanged from the previous revision; user said
+        // positions and movement are fine, only visual style needs
+        // to match the panel's Minecraft-block aesthetic.
+        mode: 6, // 1/12 octave bands → ~80 bars
+        ledBars: true,
         showScaleX: false,
         showScaleY: false,
-        showPeaks: true, // small floating peak marker on each bar
+        showPeaks: true,
         showBgColor: false,
         bgAlpha: 0,
         overlay: true,
-        fillAlpha: 0.85,
-        lineWidth: 0,
         radial: false,
         reflexRatio: 0,
         mirror: 0,
-        // Spectrum analysis tuning
         weightingFilter: "D",
         smoothing: 0.7,
         minDecibels: -85,
@@ -77,22 +76,25 @@ export function MinecraftBackdrop(): JSX.Element {
         minFreq: 60,
         maxFreq: 6000,
         peakLine: false,
-        // Channel layout: single (mono mix) — full row shows the
-        // combined L+R signal rather than splitting the screen.
         channelLayout: "single",
+        // Pixel-block styling — this is the bit the user actually
+        // wants. Wide gaps between bars + low-res rendering + sharp
+        // square corners + opaque fill makes each bar read as a
+        // proper stack of Minecraft blocks instead of a thin LED
+        // strip. `colorMode: "gradient"` makes each bar's segments
+        // pick their colour from the registered gradient stops based
+        // on vertical position.
+        barSpace: 0.45,
+        roundBars: false,
+        outlineBars: false,
+        alphaBars: false,
+        fillAlpha: 1,
+        lineWidth: 0,
+        loRes: true,
+        colorMode: "gradient",
       });
 
-      // Custom gradient using the live theme accent colour. We read it
-      // from the CSS variable so theme switching can re-apply.
-      const accent = readAccentRgb();
-      am.registerGradient(GRADIENT_NAME, {
-        bgColor: "transparent",
-        colorStops: [
-          { pos: 0, color: `rgba(${accent}, 0.55)` },
-          { pos: 1, color: `rgba(${accent}, 1)` },
-        ],
-      });
-      am.gradient = GRADIENT_NAME;
+      applyGradient(am);
       amRef.current = am;
     } catch (err) {
       // createMediaElementSource throws "InvalidStateError: Failed
@@ -114,26 +116,13 @@ export function MinecraftBackdrop(): JSX.Element {
     };
   }, [motionOn, getAudioElement]);
 
-  // Re-register gradient on theme changes (accent CSS variable
-  // updates). audioMotion caches gradients, so we overwrite the
-  // existing slot.
+  // Re-apply gradient on theme changes (accent CSS variable updates).
+  // audioMotion caches gradients, so we overwrite the existing slot.
   useEffect(() => {
-    const am = amRef.current;
-    if (!am) return;
     const observer = new MutationObserver(() => {
-      const accent = readAccentRgb();
-      am.registerGradient(GRADIENT_NAME, {
-        bgColor: "transparent",
-        colorStops: [
-          { pos: 0, color: `rgba(${accent}, 0.55)` },
-          { pos: 1, color: `rgba(${accent}, 1)` },
-        ],
-      });
-      am.gradient = GRADIENT_NAME;
+      const am = amRef.current;
+      if (am) applyGradient(am);
     });
-    // The theme provider toggles a class / data-attr on <html>; watch
-    // that so we pick up accent swaps without needing an explicit
-    // event channel.
     observer.observe(document.documentElement, {
       attributes: true,
       attributeFilter: ["class", "data-accent", "data-theme"],
@@ -171,4 +160,37 @@ function readAccentRgb(): string {
     .getPropertyValue("--accent")
     .trim();
   return v || "5, 150, 105";
+}
+
+/**
+ * Build the Minecraft "grass-on-top, dirt-below" gradient and apply
+ * it to the analyser. In audioMotion `pos: 0` is the TOP of each bar
+ * and `pos: 1` is the bottom, so:
+ *   - top sliver (pos 0..0.06)        : bright accent — the "grass"
+ *   - body       (pos 0.07..0.95)     : medium accent — the "dirt"
+ *   - bottom     (pos 0.95..1)        : dim accent — shadowed dirt
+ *
+ * Each bar is rendered as a stack of LED segments; with
+ * `colorMode: "gradient"` each segment picks its colour from this
+ * palette by its vertical position, so the topmost block of every
+ * bar is grass-bright while the stack below it is dirt-dim. Matches
+ * the visual language of the rest of the panel.
+ */
+function applyGradient(am: AudioMotionAnalyzer): void {
+  const accent = readAccentRgb();
+  am.registerGradient(GRADIENT_NAME, {
+    bgColor: "transparent",
+    colorStops: [
+      // Bright grass band
+      { pos: 0, color: `rgba(${accent}, 1)` },
+      { pos: 0.06, color: `rgba(${accent}, 1)` },
+      // Sharp transition into the dirt body
+      { pos: 0.07, color: `rgba(${accent}, 0.7)` },
+      // Dirt body — uniform, slightly translucent
+      { pos: 0.95, color: `rgba(${accent}, 0.6)` },
+      // Faint shadow at the very bottom
+      { pos: 1, color: `rgba(${accent}, 0.45)` },
+    ],
+  });
+  am.gradient = GRADIENT_NAME;
 }
