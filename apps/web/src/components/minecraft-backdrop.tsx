@@ -89,6 +89,31 @@ export function MinecraftBackdrop(): JSX.Element {
     return out;
   }, []);
 
+  // Per-column oscillator parameters for the procedural fallback. Each
+  // column gets its own seeded frequency + phase + amplitude so columns
+  // pulse independently — no horizontal traveling wave (`Math.sin(i + t)`
+  // would slide a peak across the row, which the user explicitly does
+  // NOT want; columns should only move vertically).
+  const oscillators = useMemo(() => {
+    const out = new Array<{ freq: number; phase: number; amp: number }>(COLS);
+    let s = 0xbeef;
+    const rand = (): number => {
+      s = (s * 9301 + 49297) % 233280;
+      return s / 233280;
+    };
+    for (let i = 0; i < COLS; i++) {
+      out[i] = {
+        // Frequency in Hz — slow breathing, varies per column so they
+        // don't all peak at the same time.
+        freq: 0.25 + rand() * 0.5,
+        phase: rand() * Math.PI * 2,
+        // Per-column amplitude as a fraction of full height.
+        amp: 0.1 + rand() * 0.18,
+      };
+    }
+    return out;
+  }, []);
+
   useEffect(() => {
     if (!motionOn) {
       // Static silhouette — settle to a flat baseline.
@@ -97,7 +122,7 @@ export function MinecraftBackdrop(): JSX.Element {
       return;
     }
     let raf = 0;
-    let phase = 0;
+    const startTs = performance.now();
     const tick = (): void => {
       const heights = heightsRef.current;
       const analyser = getAnalyser();
@@ -121,21 +146,23 @@ export function MinecraftBackdrop(): JSX.Element {
           heights[i] = stepToward(heights[i]!, target);
         }
       } else {
-        // Procedural fallback. Two sine layers, slow phase, low amp.
-        phase += 0.012;
+        // Procedural fallback. Each column has its own seeded
+        // oscillator, so the row breathes column-by-column instead of
+        // a sine peak sliding across the screen. Time is the only
+        // shared variable — no `i` in the sin() argument means no
+        // horizontal traveling wave.
+        const tSec = (performance.now() - startTs) / 1000;
         for (let i = 0; i < COLS; i++) {
-          const t =
-            0.32 +
-            0.18 * Math.sin(i * 0.16 + phase) +
-            0.08 * Math.sin(i * 0.43 + phase * 1.7);
+          const o = oscillators[i]!;
+          const wave = Math.sin(tSec * o.freq * Math.PI * 2 + o.phase);
+          const t = 0.35 + o.amp * wave;
           const target = clamp(
             Math.round(t * MAX_HEIGHT),
             FLOOR_BLOCKS,
             MAX_HEIGHT
           );
-          // In fallback mode neither rise nor fall should be jumpy —
-          // we want the silhouette to read as breathing, not pulsing.
-          // 1 cell per frame in either direction is plenty.
+          // 1 cell per frame in either direction — keeps the silhouette
+          // breathing instead of pulsing.
           heights[i] = stepTowardCalm(heights[i]!, target);
         }
       }
@@ -144,7 +171,7 @@ export function MinecraftBackdrop(): JSX.Element {
     };
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
-  }, [motionOn, playing, getAnalyser, binMap]);
+  }, [motionOn, playing, getAnalyser, binMap, oscillators]);
 
   return (
     <div
