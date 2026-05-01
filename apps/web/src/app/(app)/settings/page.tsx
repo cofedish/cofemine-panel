@@ -5,7 +5,7 @@ import { PageHeader } from "@/components/page-header";
 import { AppearancePanel } from "@/components/appearance-switcher";
 import { ImageUpload } from "@/components/image-upload";
 import { User, Palette, Info, ImageIcon } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useT } from "@/lib/i18n";
 
 type Me = {
@@ -57,6 +57,15 @@ function AvatarEditor({ current }: { current: string | null }): JSX.Element {
   const [value, setValue] = useState<string | null>(current);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  // Sync local state with the prop whenever the upstream value
+  // changes. `useState(current)` only uses its argument on the FIRST
+  // render — if SWR hadn't resolved yet on mount (`current` was
+  // null), `value` stays null forever even after the saved avatar
+  // arrives, and the preview pretends there's no image. This is
+  // exactly the "иногда пропадает хотя файл есть" bug the user hit.
+  useEffect(() => {
+    setValue(current);
+  }, [current]);
   const dirty = value !== current;
 
   async function save(): Promise<void> {
