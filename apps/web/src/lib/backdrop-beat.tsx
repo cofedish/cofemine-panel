@@ -131,13 +131,12 @@ export function BackdropBeatProvider({
           audioCtxRef.current.createMediaElementSource(a);
         const an = audioCtxRef.current.createAnalyser();
         an.fftSize = 512; // → 256 frequency bins
-        // Heavy time smoothing. The consumer renders 60 fps and steps
-        // 1 cell per frame, so the byte values feeding it should be
-        // already low-passed; otherwise calm tracks like Sweden look
-        // like the columns are having a seizure. 0.85 buys a ~6-frame
-        // moving average — enough to settle into chord-by-chord
-        // breathing without losing percussive transients.
-        an.smoothingTimeConstant = 0.85;
+        // Moderate in-thread smoothing. The consumer (the visualiser)
+        // does its own peak-hold + decay smoothing in float space, so
+        // we don't need the AnalyserNode's smoothing to be heavy too —
+        // 0.7 leaves the spectrum responsive while killing single-
+        // frame jitter. 0.85 was washing out actual peaks.
+        an.smoothingTimeConstant = 0.7;
         sourceNodeRef.current.connect(an);
         an.connect(audioCtxRef.current.destination);
         analyserRef.current = an;

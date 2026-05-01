@@ -5,87 +5,61 @@ import { useMotionEnabled } from "@/lib/motion-pref";
 import { useBackdropBeat } from "@/lib/backdrop-beat";
 
 /**
- * Music-reactive Minecraft-y backdrop. Renders a row of narrow column
- * blocks at the bottom of the viewport whose heights are driven by
- * frequency data from the live audio stream.
+ * Music-reactive backdrop, rebuilt to behave like a real audio
+ * visualiser (audioMotion / Winamp / Wallpaper Engine vibe).
  *
- * When music is playing:
- *   - Pull a freshly-sampled FFT spectrum from the BackdropBeat
- *     provider's AnalyserNode each animation frame.
- *   - Map columns to FFT bins on a mild log curve so each column
- *     covers a roughly equal-width band of perceptual frequencies.
- *   - Boost low-amplitude signals via a sqrt curve so quiet ambient
- *     tracks like "Sweden" still drive visible motion.
+ * Pattern, in three sentences:
+ *   1. Each frame, sample the AnalyserNode's byte frequency data and
+ *      pull one bin per column (octave-equal mapping).
+ *   2. Convert the raw byte to a perceptual loudness via a mild power
+ *      curve, then apply per-column "peak hold + exponential decay":
+ *      if the new value is higher than the current, snap to it (fast
+ *      attack via a one-pole low-pass); otherwise let the column tail
+ *      drop a small fraction every frame. That's what gives a real
+ *      visualiser its sharp peaks and lingering tails.
+ *   3. Render heights as sub-pixel floats — no integer-cell snapping.
+ *      The grid pattern overlay keeps the pixel-block feel; the
+ *      "grass-slab" cap from the previous revision is dropped because
+ *      it can't be both fully-aligned-to-a-cell *and* smooth.
  *
- * When music is paused or unavailable, a procedural "calm waves"
- * fallback drives the columns so the panel still has gentle motion.
- *
- * Stepping (the bit the user cares about most):
- *   - Heights are integer multiples of BLOCK. The top "grass" slab is
- *     ALWAYS fully aligned with one grid cell — never half-way between
- *     two cells.
- *   - Per frame, the rendered height moves by AT MOST `RISE_STEP` cells
- *     up or `FALL_STEP` cells down toward the FFT-derived target. So a
- *     column can never teleport across cells — it always passes through
- *     every intermediate cell on its way to a peak. Stepping is fast
- *     (60 fps × 2 cells/frame = 120 cells/sec on attack), so visually
- *     it reads as snappy, but every cell gets at least one frame.
- *   - Attack > Release for the classic peak-meter pop-and-tail.
- *
- * Sits behind everything (fixed, z-0, pointer-events: none).
+ * When music is paused or unavailable, a per-column independent
+ * sine oscillator (no horizontal traveling wave) drives a calm
+ * breathing silhouette so the panel still has motion.
  */
 
 const COLS = 160;
-const BLOCK = 6;
-const MAX_HEIGHT = 36; // in blocks → 216px viewBox tall
-const TOTAL_W = COLS * BLOCK;
-const TOTAL_H = MAX_HEIGHT * BLOCK;
+const BAR_WIDTH = 6; // viewBox px per bar
+const TOTAL_W = COLS * BAR_WIDTH;
+const TOTAL_H = 240; // viewBox tall
 
-// Per-frame step limits, in whole BLOCK cells. One cell per frame in
-// either direction = max 60 cells/sec — feels calm and "breathing" on
-// ambient tracks, still snappy enough for percussive ones because the
-// AnalyserNode does its own time-smoothing inside the audio thread.
-// Larger steps made Sweden look like dubstep.
-const RISE_STEP = 1;
-const FALL_STEP = 1;
-// Always keep at least this many blocks visible so quiet tracks aren't
-// flat lines.
-const FLOOR_BLOCKS = 2;
-// Below this normalised FFT value treat the bin as silence so noise
-// floor jitter doesn't keep nudging columns up and down on quiet
-// ambient passages.
-const NOISE_GATE = 0.04;
+// Smoothing knobs. ATTACK is the fraction of "new target → current"
+// blended in on the rising edge — 0.6 means peaks land in ~3 frames.
+// DECAY is the per-frame multiplier when the input drops below the
+// current peak — 0.94 gives a tail that halves over ~12 frames
+// (~200ms at 60fps), the classic "peak meter" look.
+const ATTACK = 0.6;
+const DECAY = 0.94;
+// Floor as a fraction of viewBox height. Quiet ambient passages
+// settle into a thin baseline instead of vanishing entirely.
+const FLOOR = 0.02;
 
 export function MinecraftBackdrop(): JSX.Element {
   const motionOn = useMotionEnabled();
   const { getAnalyser, playing } = useBackdropBeat();
-  // Per-column rendered heights, in WHOLE BLOCK cells. Persistent
-  // across frames; the rAF loop nudges each value at most `RISE_STEP`
-  // up or `FALL_STEP` down per frame toward the current FFT target,
-  // never skipping cells. Stored as a 16-bit int array — heights are
-  // never larger than MAX_HEIGHT (36) so 8-bit would do too, but 16
-  // matches typical rAF perf on every browser.
-  const heightsRef = useRef<Int16Array>(new Int16Array(COLS));
+  // Per-column rendered heights as floats in [0, 1]. Persistent
+  // across frames; the rAF loop mutates in place.
+  const heightsRef = useRef<Float32Array>(new Float32Array(COLS));
   // Reusable buffer for getByteFrequencyData. fftSize=512 → 256 bins.
-  // Using `new ArrayBuffer(...)` keeps the byte buffer typed as
-  // `ArrayBuffer` (not `ArrayBufferLike`) so newer DOM lib types
-  // accept it as the parameter to `getByteFrequencyData`.
   const freqRef = useRef<Uint8Array<ArrayBuffer>>(
     new Uint8Array(new ArrayBuffer(256))
   );
-  // Bumped each frame so React re-renders the SVG; the rect attrs
-  // read from heightsRef.current at render time.
   const [, setFrame] = useState(0);
 
-  // Per-column FFT bin index, computed once. True logarithmic
-  // (octave-equal) mapping: each column covers the same fraction of
-  // an octave, so musical content spreads evenly across the row.
-  //
-  // Range: bin 2 (skip DC + rumble) up to bin 64 (~5.5 kHz at 44.1k
-  // sample rate). C418's piano-and-strings tracks have basically
-  // nothing above ~6 kHz, so mapping further would leave the right
-  // half of the screen permanently flat — which is exactly what the
-  // user reported with the previous linear-ish mapping up to bin 110.
+  // Octave-equal log mapping from column index to FFT bin. Range
+  // 2..64 covers the audible band where C418-style ambient + most
+  // synth/percussive material actually has content (~85 Hz to
+  // 5.5 kHz at 44.1 kHz sample rate). Linear or wider mappings left
+  // the right half of the row dead.
   const binMap = useMemo(() => {
     const out = new Uint16Array(COLS);
     const minBin = 2;
@@ -94,17 +68,18 @@ export function MinecraftBackdrop(): JSX.Element {
     const lnMax = Math.log(maxBin);
     for (let i = 0; i < COLS; i++) {
       const t = i / (COLS - 1);
-      const bin = Math.round(Math.exp(lnMin + t * (lnMax - lnMin)));
-      out[i] = clamp(bin, minBin, maxBin);
+      out[i] = clamp(
+        Math.round(Math.exp(lnMin + t * (lnMax - lnMin))),
+        minBin,
+        maxBin
+      );
     }
     return out;
   }, []);
 
-  // Per-column oscillator parameters for the procedural fallback. Each
-  // column gets its own seeded frequency + phase + amplitude so columns
-  // pulse independently — no horizontal traveling wave (`Math.sin(i + t)`
-  // would slide a peak across the row, which the user explicitly does
-  // NOT want; columns should only move vertically).
+  // Per-column independent oscillator parameters for the no-music
+  // fallback. Time-only sin() argument means columns pulse vertically
+  // and never form a horizontal traveling wave.
   const oscillators = useMemo(() => {
     const out = new Array<{ freq: number; phase: number; amp: number }>(COLS);
     let s = 0xbeef;
@@ -114,12 +89,9 @@ export function MinecraftBackdrop(): JSX.Element {
     };
     for (let i = 0; i < COLS; i++) {
       out[i] = {
-        // Frequency in Hz — slow breathing, varies per column so they
-        // don't all peak at the same time.
-        freq: 0.25 + rand() * 0.5,
+        freq: 0.2 + rand() * 0.4, // Hz
         phase: rand() * Math.PI * 2,
-        // Per-column amplitude as a fraction of full height.
-        amp: 0.1 + rand() * 0.18,
+        amp: 0.06 + rand() * 0.12,
       };
     }
     return out;
@@ -127,8 +99,7 @@ export function MinecraftBackdrop(): JSX.Element {
 
   useEffect(() => {
     if (!motionOn) {
-      // Static silhouette — settle to a flat baseline.
-      heightsRef.current.fill(Math.floor(MAX_HEIGHT * 0.4));
+      heightsRef.current.fill(0.32);
       setFrame((f) => (f + 1) % 1024);
       return;
     }
@@ -137,46 +108,38 @@ export function MinecraftBackdrop(): JSX.Element {
     const tick = (): void => {
       const heights = heightsRef.current;
       const analyser = getAnalyser();
-      // 1) Compute integer cell target per column.
-      // 2) Step current toward target by at most RISE_STEP / FALL_STEP
-      //    cells. Never teleport — every intermediate cell gets at
-      //    least one frame on screen.
       if (analyser && playing) {
         analyser.getByteFrequencyData(freqRef.current);
         const f = freqRef.current;
         for (let i = 0; i < COLS; i++) {
           const raw = f[binMap[i]!]! / 255;
-          // Mild linear scaling — the AnalyserNode already does its
-          // own time smoothing (smoothingTimeConstant=0.85 in the
-          // provider), and a sqrt boost on top made Sweden look like
-          // a percussion track. Noise gate kills tiny jitter.
-          const level = raw < NOISE_GATE ? 0 : raw * 1.15;
-          const target = clamp(
-            Math.round(level * MAX_HEIGHT),
-            FLOOR_BLOCKS,
-            MAX_HEIGHT
-          );
-          heights[i] = stepToward(heights[i]!, target);
+          // Power curve gives a perceptual-loudness look: doubles the
+          // visual response of quiet content without blowing up loud
+          // content like sqrt did.
+          const target = Math.pow(raw, 0.7);
+          const cur = heights[i]!;
+          // Peak-hold + slow decay: if the spectrum spike came in,
+          // snap up fast (one-pole low-pass at ATTACK); else tail
+          // drops a fixed fraction per frame. Matches what real
+          // visualizers do.
+          if (target > cur) {
+            heights[i] = cur + (target - cur) * ATTACK;
+          } else {
+            heights[i] = Math.max(target, cur * DECAY);
+          }
         }
       } else {
-        // Procedural fallback. Each column has its own seeded
-        // oscillator, so the row breathes column-by-column instead of
-        // a sine peak sliding across the screen. Time is the only
-        // shared variable — no `i` in the sin() argument means no
-        // horizontal traveling wave.
+        // No-music fallback. Per-column independent oscillator. Same
+        // float smoothing path so transitions in/out of music feel
+        // continuous.
         const tSec = (performance.now() - startTs) / 1000;
         for (let i = 0; i < COLS; i++) {
           const o = oscillators[i]!;
           const wave = Math.sin(tSec * o.freq * Math.PI * 2 + o.phase);
-          const t = 0.35 + o.amp * wave;
-          const target = clamp(
-            Math.round(t * MAX_HEIGHT),
-            FLOOR_BLOCKS,
-            MAX_HEIGHT
-          );
-          // 1 cell per frame in either direction — keeps the silhouette
-          // breathing instead of pulsing.
-          heights[i] = stepTowardCalm(heights[i]!, target);
+          const target = clamp(0.28 + o.amp * wave, FLOOR, 1);
+          const cur = heights[i]!;
+          // Symmetric mild lerp — fallback should breathe, not pulse.
+          heights[i] = cur + (target - cur) * 0.04;
         }
       }
       setFrame((f) => (f + 1) % 1024);
@@ -205,58 +168,43 @@ export function MinecraftBackdrop(): JSX.Element {
         preserveAspectRatio="xMidYMax slice"
       >
         <defs>
-          {/* Pixel grid overlay — keeps the block aesthetic even with
-              sub-pixel column heights. */}
+          {/* Pixel grid overlay — preserves the block-aesthetic
+              without forcing the bars to snap to integer cells. */}
           <pattern
             id="mc-grid"
-            width={BLOCK}
-            height={BLOCK}
+            width={BAR_WIDTH}
+            height={BAR_WIDTH}
             patternUnits="userSpaceOnUse"
           >
             <path
-              d={`M ${BLOCK} 0 L 0 0 0 ${BLOCK}`}
+              d={`M ${BAR_WIDTH} 0 L 0 0 0 ${BAR_WIDTH}`}
               fill="none"
               stroke="rgb(var(--accent))"
-              strokeOpacity="0.35"
+              strokeOpacity="0.3"
               strokeWidth="0.5"
             />
           </pattern>
-          {/* Vertical accent gradient — bottom slightly darker, top
-              brighter — so each column reads "lit from above". */}
-          <linearGradient id="mc-col-grad" x1="0" x2="0" y1="0" y2="1">
+          {/* Vertical accent gradient — bottom darker, top brighter
+              so each bar reads "lit from above". */}
+          <linearGradient id="mc-bar-grad" x1="0" x2="0" y1="0" y2="1">
             <stop offset="0%" stopColor="rgb(var(--accent))" stopOpacity="1" />
             <stop offset="100%" stopColor="rgb(var(--accent))" stopOpacity="0.55" />
           </linearGradient>
         </defs>
 
         {Array.from({ length: COLS }).map((_, i) => {
-          // Heights are integer cell counts → multiplying by BLOCK
-          // keeps the top edge perfectly aligned with a grid cell, so
-          // the bright "grass" slab is always fully inside one cell.
-          const blocks = heightsRef.current[i] ?? 0;
-          const heightPx = blocks * BLOCK;
+          const level = heightsRef.current[i] ?? 0;
+          const heightPx = Math.max(level, FLOOR) * TOTAL_H;
           const y = TOTAL_H - heightPx;
           return (
-            <g key={i}>
-              {/* Column body — gradient gives depth. */}
-              <rect
-                x={i * BLOCK}
-                y={y}
-                width={BLOCK}
-                height={heightPx}
-                fill="url(#mc-col-grad)"
-              />
-              {/* Bright "grass" strip exactly one block tall, snapped
-                  to the column's current top. Square-block silhouette
-                  preserved at every frame. */}
-              <rect
-                x={i * BLOCK}
-                y={y}
-                width={BLOCK}
-                height={BLOCK}
-                fill="rgb(var(--accent))"
-              />
-            </g>
+            <rect
+              key={i}
+              x={i * BAR_WIDTH}
+              y={y}
+              width={BAR_WIDTH}
+              height={heightPx}
+              fill="url(#mc-bar-grad)"
+            />
           );
         })}
 
@@ -276,30 +224,4 @@ export function MinecraftBackdrop(): JSX.Element {
 
 function clamp(v: number, lo: number, hi: number): number {
   return v < lo ? lo : v > hi ? hi : v;
-}
-
-/**
- * Step `current` toward `target` by at most RISE_STEP cells up or
- * FALL_STEP cells down. Returns the new integer height. The constraint
- * "≤ N cells per frame" is what guarantees the top slab passes through
- * every intermediate cell on its way to a peak instead of teleporting.
- */
-function stepToward(current: number, target: number): number {
-  if (current === target) return current;
-  if (current < target) {
-    const diff = target - current;
-    return current + (diff < RISE_STEP ? diff : RISE_STEP);
-  }
-  const diff = current - target;
-  return current - (diff < FALL_STEP ? diff : FALL_STEP);
-}
-
-/**
- * Calmer step variant for the no-music procedural fallback — exactly
- * one cell per frame in either direction. The silhouette breathes
- * instead of pulsing.
- */
-function stepTowardCalm(current: number, target: number): number {
-  if (current === target) return current;
-  return current < target ? current + 1 : current - 1;
 }
