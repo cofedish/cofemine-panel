@@ -375,6 +375,9 @@ const en: Dict = {
   "wizard.modpack.search": "Search packs…",
   "wizard.modpack.picked": "Picked",
   "wizard.modpack.clear": "Clear",
+  "wizard.modpack.use": "Use this pack",
+  "wizard.modpack.changeVersion": "Change version",
+  "wizard.modpack.selected": "Selected pack",
   "wizard.packVersion": "Pack version",
   "wizard.packVersion.latest": "Latest (newest published)",
   "wizard.packVersion.hint":
@@ -911,6 +914,9 @@ const ru: Dict = {
   "wizard.modpack.search": "Поиск сборок…",
   "wizard.modpack.picked": "Выбрано",
   "wizard.modpack.clear": "Очистить",
+  "wizard.modpack.use": "Использовать сборку",
+  "wizard.modpack.changeVersion": "Сменить версию",
+  "wizard.modpack.selected": "Выбранная сборка",
   "wizard.packVersion": "Версия сборки",
   "wizard.packVersion.latest": "Последняя (самая новая)",
   "wizard.packVersion.hint":

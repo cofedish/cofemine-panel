@@ -68,6 +68,9 @@ export function ContentDetailDrawer({
   installed,
   installing,
   onInstall,
+  actionLabel,
+  extra,
+  actionDisabled,
 }: {
   open: boolean;
   onClose: () => void;
@@ -79,6 +82,15 @@ export function ContentDetailDrawer({
   installed?: boolean;
   installing?: boolean;
   onInstall?: () => void;
+  /** Override the action button label (default: "Install"). Useful when
+   *  reusing the drawer in a wizard where the action means "pick this". */
+  actionLabel?: string;
+  /** Caller-supplied node rendered before the long-form body — used to
+   *  inline secondary controls like a version picker so the user doesn't
+   *  have to dismiss the drawer to keep moving. */
+  extra?: React.ReactNode;
+  /** Disable the action button (e.g. version not yet picked). */
+  actionDisabled?: boolean;
 }): JSX.Element {
   const { t } = useT();
   const { data, error } = useSWR<ContentDetails>(
@@ -137,7 +149,11 @@ export function ContentDetailDrawer({
                   {String((error as Error).message ?? error)}
                 </div>
               ) : (
-                <DetailBody data={merged} loading={loading} />
+                <DetailBody
+                  data={merged}
+                  loading={loading}
+                  extra={extra}
+                />
               )}
             </div>
             <footer className="border-t border-line p-4 flex items-center justify-between gap-3 flex-wrap">
@@ -174,7 +190,7 @@ export function ContentDetailDrawer({
                       installed ? "btn-ghost" : "btn-primary"
                     )}
                     onClick={onInstall}
-                    disabled={installing || installed}
+                    disabled={installing || installed || actionDisabled}
                   >
                     {installed ? (
                       <>
@@ -183,7 +199,7 @@ export function ContentDetailDrawer({
                     ) : installing ? (
                       t("content.installing")
                     ) : (
-                      t("content.install")
+                      actionLabel ?? t("content.install")
                     )}
                   </button>
                 )}
@@ -272,9 +288,11 @@ function DetailHeader({
 function DetailBody({
   data,
   loading,
+  extra,
 }: {
   data: Partial<ContentDetails>;
   loading: boolean;
+  extra?: React.ReactNode;
 }): JSX.Element {
   return (
     <div className="p-5 space-y-5">
@@ -296,6 +314,8 @@ function DetailBody({
           </span>
         ))}
       </div>
+
+      {extra}
 
       {data.gallery && data.gallery.length > 0 && (
         <Gallery items={data.gallery} />

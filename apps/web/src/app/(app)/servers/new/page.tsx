@@ -16,6 +16,7 @@ import {
 import { EnvForm } from "@/components/env-form";
 import { ImageUpload } from "@/components/image-upload";
 import { MemorySlider } from "@/components/memory-slider";
+import { ContentDetailDrawer } from "@/components/content-detail-drawer";
 import { cn } from "@/lib/cn";
 import { useT } from "@/lib/i18n";
 import {
@@ -341,7 +342,11 @@ export default function CreateServerPage(): JSX.Element {
         </motion.div>
       </AnimatePresence>
 
-      <div className="flex items-center justify-between">
+      {/* Sticky nav bar — keeps Back/Next reachable without scrolling
+          past the modpack grid + version picker, which got long enough
+          for users to lose the buttons. Sits above the global footer
+          (z-20) and sticks to the viewport bottom. */}
+      <div className="sticky bottom-0 z-20 -mx-6 px-6 py-3 bg-[rgb(var(--bg-surface-1))]/85 backdrop-blur-sm border-t border-line flex items-center justify-between">
         <button
           type="button"
           onClick={() => (idx === 0 ? router.back() : prev())}
@@ -549,6 +554,18 @@ function PackPickStep({
   const [busy, setBusy] = useState(false);
   const [results, setResults] = useState<ModpackHit[]>([]);
   const [err, setErr] = useState<string | null>(null);
+  // Pack the user is *previewing* in the detail drawer. Distinct from
+  // `pack` (the wizard's confirmed selection) because we don't want to
+  // mutate wizard state until they hit "Use this pack" inside the drawer.
+  const [preview, setPreview] = useState<ModpackHit | null>(null);
+  // Pending version selected inside the drawer for the previewed pack.
+  // Reset every time the previewed pack changes so old selections from a
+  // different pack don't leak into the new one.
+  const [pendingVersion, setPendingVersion] =
+    useState<{ id: string; label: string } | null>(null);
+  useEffect(() => {
+    setPendingVersion(null);
+  }, [preview?.id]);
 
   // Fire an initial popular-packs search when the step mounts and any time
   // the user edits the filter. Debounce typing by 300ms so we don't hammer
@@ -643,12 +660,12 @@ function PackPickStep({
             <button
               key={r.id}
               type="button"
-              onClick={() => onPick(r)}
+              onClick={() => setPreview(r)}
               className={cn(
                 "tile text-left p-4 flex gap-3 transition-all",
                 active
                   ? "ring-2 ring-[rgb(var(--accent))]/50 border-[rgb(var(--accent))]/60"
-                  : "hover:border-line-strong"
+                  : "hover:border-line-strong hover:bg-surface-2"
               )}
             >
               {r.iconUrl ? (
@@ -692,14 +709,84 @@ function PackPickStep({
         </div>
       )}
 
+      {/* Confirmation summary: when a pack is selected we show a compact
+          card so the user can re-open the drawer or change version
+          without scrolling around the grid. */}
       {pack && (
-        <PackVersionPicker
-          provider={provider}
-          pack={pack}
-          value={packVersion}
-          onPick={onPickVersion}
-        />
+        <div className="tile p-4 flex items-center gap-3 border-[rgb(var(--accent))]/40">
+          {pack.iconUrl ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={pack.iconUrl}
+              alt=""
+              className="w-10 h-10 rounded-md object-cover shrink-0"
+            />
+          ) : (
+            <span className="w-10 h-10 rounded-md bg-surface-2 text-ink-secondary grid place-items-center shrink-0">
+              <Package size={18} />
+            </span>
+          )}
+          <div className="flex-1 min-w-0">
+            <div className="text-xs text-ink-muted">
+              {t("wizard.modpack.selected")}
+            </div>
+            <div className="font-medium truncate">{pack.name}</div>
+            <div className="text-xs text-ink-muted truncate">
+              {packVersion?.label ?? t("wizard.packVersion.latest")}
+            </div>
+          </div>
+          <button
+            type="button"
+            className="btn btn-ghost"
+            onClick={() => setPreview(pack)}
+          >
+            {t("wizard.modpack.changeVersion")}
+          </button>
+        </div>
       )}
+
+      <ContentDetailDrawer
+        open={preview !== null}
+        onClose={() => setPreview(null)}
+        provider={provider}
+        projectId={preview?.id ?? ""}
+        initial={
+          preview
+            ? {
+                name: preview.name,
+                iconUrl: preview.iconUrl,
+                description: preview.description,
+                pageUrl: preview.pageUrl,
+                author: preview.author,
+                downloads: preview.downloads,
+              }
+            : undefined
+        }
+        actionLabel={t("wizard.modpack.use")}
+        onInstall={
+          preview
+            ? () => {
+                onPick(preview);
+                onPickVersion(pendingVersion);
+                setPreview(null);
+              }
+            : undefined
+        }
+        extra={
+          preview ? (
+            <PackVersionPicker
+              provider={provider}
+              pack={preview}
+              value={
+                preview.id === pack?.id
+                  ? (pendingVersion ?? packVersion)
+                  : pendingVersion
+              }
+              onPick={setPendingVersion}
+            />
+          ) : null
+        }
+      />
     </div>
   );
 }
