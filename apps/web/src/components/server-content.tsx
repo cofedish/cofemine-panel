@@ -610,9 +610,14 @@ function FailuresPanel({
           const raw: any[] = Array.isArray(res) ? res : (res.results ?? []);
           const top = raw[0];
           if (!top) return { failure: f, status: "no-match" as const };
+          // Same filters used to find this top hit; forward them so
+          // the install resolver picks a compatible Modrinth version
+          // instead of the newest (potentially incompatible) one.
           await api.post(`/integrations/servers/${serverId}/install/modrinth`, {
             projectId: top.id,
             kind: "mod",
+            ...(gameVersion ? { gameVersion } : {}),
+            ...(loader ? { loader } : {}),
           });
           return {
             failure: f,
@@ -1004,10 +1009,22 @@ function BrowsePanel({
     setErr(null);
     try {
       const endpoint = `/integrations/servers/${serverId}/install/${provider}`;
+      // Forward the server's runtime (MC version + loader) so the
+      // install endpoint resolves "latest" against compatible
+      // versions instead of the project's newest build at large.
+      // Without this, installing dynmap onto a 1.20.1 Forge server
+      // would happily download the 1.21.11 build that crashes
+      // immediately. typeToLoader/runtime detection happens upstream
+      // (the BrowsePanel useEffect that locks `gameVersion`/`loader`
+      // from server.type + installed runtime), we just need to wire
+      // it through here.
+      const filters: Record<string, string> = {};
+      if (gameVersion) filters.gameVersion = gameVersion;
+      if (loader) filters.loader = loader;
       const body =
         provider === "modrinth"
-          ? { projectId: r.id, kind }
-          : { projectId: Number(r.id), kind };
+          ? { projectId: r.id, kind, ...filters }
+          : { projectId: Number(r.id), kind, ...filters };
       await api.post(endpoint, body);
       setMsg(
         kind === "modpack"
