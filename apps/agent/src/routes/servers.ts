@@ -43,6 +43,37 @@ const writeFileSchema = z.object({
   content: z.string(),
 });
 
+type HealthState = "healthy" | "unhealthy" | "starting" | null;
+
+/**
+ * Read Docker's parenthesised health hint out of the human-readable
+ * Status string (the one listContainers returns alongside State).
+ * Avoids a per-container inspect() call in the batch state endpoint.
+ */
+function parseHealthFromStatus(status: string | undefined): HealthState {
+  if (!status) return null;
+  const m = /\(([^)]+)\)/.exec(status);
+  if (!m) return null;
+  const inner = m[1]!.toLowerCase();
+  if (inner.includes("starting")) return "starting";
+  if (inner === "healthy") return "healthy";
+  if (inner === "unhealthy") return "unhealthy";
+  return null;
+}
+
+/**
+ * Normalise Docker's `State.Health.Status` (returned from inspect)
+ * to the same vocabulary as parseHealthFromStatus. Docker reports
+ * "starting" / "healthy" / "unhealthy" / "none".
+ */
+function mapDockerHealth(s: string): HealthState {
+  const v = s.toLowerCase();
+  if (v === "starting") return "starting";
+  if (v === "healthy") return "healthy";
+  if (v === "unhealthy") return "unhealthy";
+  return null;
+}
+
 async function findContainer(serverId: string) {
   const containers = await docker.listContainers({
     all: true,
@@ -204,7 +235,12 @@ export async function serversAgentRoutes(app: FastifyInstance): Promise<void> {
     });
     const states: Record<
       string,
-      { status: string; state: string; startedAt?: string | null }
+      {
+        status: string;
+        state: string;
+        health: "healthy" | "unhealthy" | "starting" | null;
+        startedAt?: string | null;
+      }
     > = {};
     for (const c of containers) {
       const id = c.Labels?.[`${config.AGENT_LABEL_PREFIX}.serverId`];
@@ -214,7 +250,16 @@ export async function serversAgentRoutes(app: FastifyInstance): Promise<void> {
         // running / removing / paused / exited / dead. Match against
         // it directly — this is what Docker daemon reports.
         state: c.State,
-        status: c.Status, // human-readable like "Up 4 minutes"
+        status: c.Status, // human-readable like "Up 4 minutes (healthy)"
+        // Parse the parenthesised health hint that Docker appends to
+        // the human-readable Status string. Cheaper than calling
+        // inspect() on every container just to read State.Health.
+        // Format examples:
+        //   "Up 4 minutes"                    → null
+        //   "Up 4 minutes (healthy)"          → healthy
+        //   "Up 4 minutes (unhealthy)"        → unhealthy
+        //   "Up 4 minutes (health: starting)" → starting
+        health: parseHealthFromStatus(c.Status),
       };
     }
     return states;
@@ -231,6 +276,14 @@ export async function serversAgentRoutes(app: FastifyInstance): Promise<void> {
     return {
       state: info.State.Status,
       running: Boolean(info.State.Running),
+      // State.Health is undefined when there's no HEALTHCHECK on the
+      // image. itzg ships one (mc-monitor pings RCON), so it's
+      // present for managed MC containers.
+      health: (info.State as { Health?: { Status?: string } }).Health?.Status
+        ? mapDockerHealth(
+            (info.State as { Health: { Status: string } }).Health.Status
+          )
+        : null,
       startedAt: info.State.StartedAt,
     };
   });

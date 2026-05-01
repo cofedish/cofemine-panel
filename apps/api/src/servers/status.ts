@@ -17,10 +17,33 @@ import { NodeClient } from "../nodes/node-client.js";
  * fallen back to "stopped" so the DB doesn't stick on "starting".
  */
 export type PanelStatus = "running" | "starting" | "stopping" | "stopped";
+export type DockerHealth = "healthy" | "unhealthy" | "starting" | null;
 
-export function dockerStateToPanelStatus(state: string): PanelStatus {
+/**
+ * Map a container's Docker state (and optional HEALTHCHECK status)
+ * to the panel's enum.
+ *
+ * `state === "running"` only means the container's process is alive,
+ * not that Minecraft has finished booting. itzg's image ships a
+ * HEALTHCHECK that pings RCON; until that probe succeeds, Health is
+ * "starting" and we keep showing the user "starting" instead of
+ * pretending the server is ready. After the first healthy probe we
+ * flip to "running". Containers without a HEALTHCHECK (custom
+ * runtimes) are treated as healthy by default — there's no signal
+ * to wait on.
+ */
+export function dockerStateToPanelStatus(
+  state: string,
+  health: DockerHealth = null
+): PanelStatus {
   switch (state) {
     case "running":
+      // itzg's HEALTHCHECK pings RCON; "starting" → MC still
+      // booting (loading mods, generating world, etc.). The user's
+      // bug was that we were claiming "running" the second the
+      // Java process spawned, which on a heavy modpack happens
+      // many minutes before the server actually accepts players.
+      if (health === "starting") return "starting";
       return "running";
     case "restarting":
       // True restart loop — closer to "starting" UX-wise than a
@@ -57,10 +80,11 @@ export function dockerStateToPanelStatus(state: string): PanelStatus {
  */
 export async function reconcileServerStatus(
   serverId: string,
-  liveDockerState: string | null
+  liveDockerState: string | null,
+  liveHealth: DockerHealth = null
 ): Promise<PanelStatus | null> {
   if (!liveDockerState) return null;
-  const live = dockerStateToPanelStatus(liveDockerState);
+  const live = dockerStateToPanelStatus(liveDockerState, liveHealth);
   const row = await prisma.server.findUnique({
     where: { id: serverId },
     select: { status: true },
@@ -89,13 +113,15 @@ export async function reconcileServerStatus(
  */
 export async function fetchNodeStates(
   nodeId: string
-): Promise<Record<string, { state: string }> | null> {
+): Promise<Record<
+  string,
+  { state: string; health?: DockerHealth }
+> | null> {
   try {
     const client = await NodeClient.forId(nodeId);
-    return await client.call<Record<string, { state: string }>>(
-      "GET",
-      "/servers/state"
-    );
+    return await client.call<
+      Record<string, { state: string; health?: DockerHealth }>
+    >("GET", "/servers/state");
   } catch {
     return null;
   }
@@ -129,7 +155,12 @@ export async function reconcileMany(
       }
       for (const id of ids) {
         const dockerState = live[id]?.state ?? null;
-        const reconciled = await reconcileServerStatus(id, dockerState);
+        const dockerHealth = live[id]?.health ?? null;
+        const reconciled = await reconcileServerStatus(
+          id,
+          dockerState,
+          dockerHealth
+        );
         if (reconciled) {
           out[id] = reconciled;
         } else {
