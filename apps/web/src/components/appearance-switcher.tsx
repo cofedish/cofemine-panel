@@ -7,7 +7,7 @@ import { ACCENTS, useAccent, type Accent } from "./theme-provider";
 import { cn } from "@/lib/cn";
 import { useT } from "@/lib/i18n";
 import { useMotionPref, type MotionPref } from "@/lib/motion-pref";
-import { useMusicPref, type MusicPref } from "@/lib/music-pref";
+import { useMusicPref } from "@/lib/music-pref";
 import { useBackdropBeat } from "@/lib/backdrop-beat";
 
 const ACCENT_PREVIEW: Record<Accent, { label: string; hex: string }> = {
@@ -129,8 +129,22 @@ export function AppearancePanel(): JSX.Element {
 function MusicSection(): JSX.Element {
   const { t } = useT();
   const { pref, setPref, volume, setVolume } = useMusicPref();
-  const { tracks, current, playing, next } = useBackdropBeat();
+  const { tracks, current, playing, next, play, pause, needsGesture } =
+    useBackdropBeat();
   const hasTracks = tracks.length > 0;
+
+  // play() and pause() are called directly from the click handlers
+  // (not from a useEffect) so the user-gesture activation reaches the
+  // <audio>.play() call, which is what browsers require to allow
+  // playback on production HTTPS deploys.
+  function turnOn(): void {
+    setPref("on");
+    void play();
+  }
+  function turnOff(): void {
+    setPref("off");
+    pause();
+  }
 
   return (
     <div>
@@ -139,26 +153,32 @@ function MusicSection(): JSX.Element {
         {t("music.subtitle")}
       </p>
       <div className="grid grid-cols-2 gap-3 max-w-xl">
-        {(
-          [
-            { v: "off", labelKey: "music.off" },
-            { v: "on", labelKey: "music.on" },
-          ] as const
-        ).map(({ v, labelKey }) => (
-          <button
-            key={v}
-            type="button"
-            onClick={() => setPref(v as MusicPref)}
-            className={cn(
-              "relative px-4 py-3 rounded-lg border text-sm font-medium transition-colors",
-              pref === v
-                ? "border-accent/60 bg-surface-2 text-ink"
-                : "border-line text-ink-secondary hover:bg-surface-2"
-            )}
-          >
-            {t(labelKey)}
-          </button>
-        ))}
+        <button
+          type="button"
+          onClick={turnOff}
+          className={cn(
+            "relative px-4 py-3 rounded-lg border text-sm font-medium transition-colors",
+            pref === "off"
+              ? "border-accent/60 bg-surface-2 text-ink"
+              : "border-line text-ink-secondary hover:bg-surface-2"
+          )}
+        >
+          {t("music.off")}
+        </button>
+        <button
+          type="button"
+          onClick={turnOn}
+          disabled={!hasTracks}
+          className={cn(
+            "relative px-4 py-3 rounded-lg border text-sm font-medium transition-colors",
+            pref === "on"
+              ? "border-accent/60 bg-surface-2 text-ink"
+              : "border-line text-ink-secondary hover:bg-surface-2",
+            !hasTracks && "opacity-50 cursor-not-allowed"
+          )}
+        >
+          {t("music.on")}
+        </button>
       </div>
 
       {/* Volume + transport row. Disabled when music is off so the user
@@ -195,6 +215,20 @@ function MusicSection(): JSX.Element {
           </button>
         )}
       </div>
+
+      {/* Autoplay-blocked retry button. Some browsers block the first
+          play() on a fresh page load even with a recent gesture; this
+          fires play() inside its own onClick so the new gesture takes
+          effect. */}
+      {pref === "on" && needsGesture && hasTracks && (
+        <button
+          type="button"
+          onClick={() => void play()}
+          className="btn btn-primary mt-3"
+        >
+          {t("music.gestureNeeded")}
+        </button>
+      )}
 
       {/* Now-playing / setup hint. */}
       <div className="mt-3 text-xs max-w-xl">

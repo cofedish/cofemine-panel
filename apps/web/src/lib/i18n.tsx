@@ -65,6 +65,7 @@ const en: Dict = {
   "music.nowPlaying": "Now playing:",
   "music.loading": "Loading…",
   "music.tracksAvailable": "{n} track(s) available — turn on to start.",
+  "music.gestureNeeded": "Click to enable music",
   "music.noTracksHint":
     "No tracks configured.\nDrop ogg/mp3 files into apps/web/public/audio/ and list them in manifest.json with their BPM. See the README in that folder for details. Without tracks the skyline still pulses at a fallback 90 BPM.",
 
@@ -614,6 +615,7 @@ const ru: Dict = {
   "music.nowPlaying": "Сейчас играет:",
   "music.loading": "Загрузка…",
   "music.tracksAvailable": "Треков в манифесте: {n}. Включи, чтобы запустить.",
+  "music.gestureNeeded": "Нажми, чтобы включить музыку",
   "music.noTracksHint":
     "Треки не настроены.\nПоложи ogg/mp3 в apps/web/public/audio/ и пропиши их в manifest.json с указанием BPM. Подробности в README в той же папке. Без треков силуэт всё равно пульсирует — на запасных 90 BPM.",
 

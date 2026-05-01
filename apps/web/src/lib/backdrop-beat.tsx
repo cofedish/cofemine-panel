@@ -9,34 +9,29 @@ import {
   useState,
 } from "react";
 import { useMusicPref } from "./music-pref";
-import { useMotionEnabled } from "./motion-pref";
 
 /**
- * Beat clock for the decorative backdrop.
+ * Audio + visualiser plumbing for the decorative backdrop.
  *
- * Two modes:
- *   1. Music on, manifest has tracks → the clock derives BPM from the
- *      currently-playing track (manifest entry) and the playback head
- *      of a hidden HTMLAudioElement. Each call to `useBeat()` returns
- *      a beat counter that increments exactly when audio crosses the
- *      next quarter-note boundary, so visuals are perfectly synced to
- *      the soundtrack.
- *   2. Music off OR no manifest tracks → an internal rAF loop drives
- *      the counter at a fixed fallback BPM (90), so the equalizer
- *      still pulses subtly without sound.
+ * Architecture:
+ *   • Lazy HTMLAudioElement (created on first user gesture so browser
+ *     autoplay policies don't block our first play() call).
+ *   • Web Audio graph: createMediaElementSource(audio) → AnalyserNode
+ *     → destination. The AnalyserNode is exposed via getAnalyser() so
+ *     <MinecraftBackdrop> can run its own rAF loop, sample frequency
+ *     data, and turn it into column heights — proper FFT visualiser
+ *     instead of the previous BPM-step pulse.
+ *   • Manifest at /audio/manifest.json drives the playlist. No tracks
+ *     ship with the panel (Mojang/C418/Lena Raine retain rights);
+ *     drop your own files in /audio and list them with their BPM.
  *
- * Manifest format (loaded from /audio/manifest.json):
- *   {
- *     "tracks": [
- *       { "url": "/audio/sweden.ogg", "title": "Sweden", "bpm": 88 },
- *       …
- *     ]
- *   }
- *
- * No tracks ship with the panel (Mojang owns the soundtracks). Drop
- * your own ogg/mp3 files into apps/web/public/audio/ and list them in
- * manifest.json with their tempo. Tools like https://tunebat.com or
- * `aubiotrack` can extract BPM if you don't know it.
+ * Autoplay strategy:
+ *   • play() / pause() / next() are exposed as actions. The Settings
+ *     toggle calls play() directly inside its onClick — that keeps the
+ *     user-gesture activation, so the browser allows it.
+ *   • If play() is rejected anyway (e.g. user reloads the page with
+ *     pref already "on" and no fresh gesture), `needsGesture` flips
+ *     true and the UI surfaces a "click to enable" button.
  */
 
 export type Track = {
@@ -48,20 +43,19 @@ export type Track = {
 type Manifest = { tracks: Track[] };
 
 type Ctx = {
-  /** Monotonic beat counter — increments each quarter note. */
-  beat: number;
-  /** True while audio is actually playing. */
   playing: boolean;
-  /** Currently-playing track, or null if nothing loaded. */
   current: Track | null;
-  /** All tracks in the manifest. */
   tracks: Track[];
-  /** Force-skip to next track. */
+  needsGesture: boolean;
+  play: () => Promise<void>;
+  pause: () => void;
   next: () => void;
+  /** Returns the AnalyserNode if the audio graph is built, else null.
+   *  Stable across renders (consumers call it inside their own rAF). */
+  getAnalyser: () => AnalyserNode | null;
 };
 
 const BeatContext = createContext<Ctx | null>(null);
-const FALLBACK_BPM = 90;
 const MANIFEST_URL = "/audio/manifest.json";
 
 export function BackdropBeatProvider({
@@ -70,20 +64,20 @@ export function BackdropBeatProvider({
   children: React.ReactNode;
 }): JSX.Element {
   const { pref, volume } = useMusicPref();
-  const motionOn = useMotionEnabled();
   const [tracks, setTracks] = useState<Track[]>([]);
   const [trackIdx, setTrackIdx] = useState(0);
   const [playing, setPlaying] = useState(false);
-  const [beat, setBeat] = useState(0);
+  const [needsGesture, setNeedsGesture] = useState(false);
 
   const audioRef = useRef<HTMLAudioElement | null>(null);
-  // Last beat number we *emitted* so rAF doesn't double-count.
-  const emittedRef = useRef(0);
-  // Time origin for the fallback (silent) beat clock.
-  const fallbackStartRef = useRef(0);
+  const audioCtxRef = useRef<AudioContext | null>(null);
+  const analyserRef = useRef<AnalyserNode | null>(null);
+  const sourceNodeRef = useRef<MediaElementAudioSourceNode | null>(null);
 
-  // Load manifest once on mount. Failures are silent — the fallback
-  // clock still runs, the user just doesn't hear anything.
+  const current = tracks[trackIdx] ?? null;
+
+  // Manifest fetch on mount. Failures stay silent — backdrop still
+  // animates from its procedural fallback, just without sound.
   useEffect(() => {
     let cancelled = false;
     fetch(MANIFEST_URL, { cache: "no-store" })
@@ -96,114 +90,171 @@ export function BackdropBeatProvider({
         setTracks(valid);
       })
       .catch(() => {
-        /* no manifest, fallback clock only */
+        /* no manifest available */
       });
     return () => {
       cancelled = true;
     };
   }, []);
 
-  const current = tracks[trackIdx] ?? null;
-  const wantPlay = pref === "on" && motionOn && current !== null;
+  // Lazily create the <audio> element. Done outside any effect so
+  // play()/pause() actions can use it before the first effect runs.
+  const getAudio = useCallback((): HTMLAudioElement => {
+    if (!audioRef.current) {
+      const a = new Audio();
+      a.preload = "auto";
+      // crossOrigin is required for createMediaElementSource on
+      // cross-origin sources. Same-origin (our /audio path) tolerates
+      // either; setting "anonymous" keeps it consistent.
+      a.crossOrigin = "anonymous";
+      audioRef.current = a;
+    }
+    return audioRef.current;
+  }, []);
 
-  // Audio element lifecycle. Created lazily on first play to dodge
-  // browser autoplay policies (audio.play() must be inside a user
-  // gesture; we still attempt it — if blocked the user can re-toggle
-  // the pref to retry).
+  // Audio graph (AudioContext + AnalyserNode + MediaElementSource).
+  // Must be built *inside* a user gesture or AudioContext starts
+  // suspended on Chrome. We call this from play().
+  const ensureAudioGraph = useCallback((): void => {
+    const a = getAudio();
+    if (!audioCtxRef.current) {
+      const Ctor =
+        window.AudioContext ||
+        (window as unknown as { webkitAudioContext?: typeof AudioContext })
+          .webkitAudioContext;
+      if (!Ctor) return;
+      audioCtxRef.current = new Ctor();
+    }
+    if (!sourceNodeRef.current) {
+      try {
+        sourceNodeRef.current =
+          audioCtxRef.current.createMediaElementSource(a);
+        const an = audioCtxRef.current.createAnalyser();
+        an.fftSize = 512; // → 256 frequency bins
+        // Built-in time smoothing — light, since we layer attack/
+        // release on top in the consumer for that "peak meter" feel.
+        an.smoothingTimeConstant = 0.5;
+        sourceNodeRef.current.connect(an);
+        an.connect(audioCtxRef.current.destination);
+        analyserRef.current = an;
+      } catch {
+        /* createMediaElementSource throws if already connected — fine. */
+      }
+    }
+    if (audioCtxRef.current.state === "suspended") {
+      void audioCtxRef.current.resume();
+    }
+  }, [getAudio]);
+
+  // Wire up persistent <audio> event listeners once on mount. We don't
+  // re-bind on track change because the same element is reused.
   useEffect(() => {
-    const a = audioRef.current ?? new Audio();
-    audioRef.current = a;
-    a.preload = "auto";
-    a.volume = volume;
-    a.loop = false;
-
-    if (!current || !wantPlay) {
-      a.pause();
-      setPlaying(false);
-      return;
-    }
-
-    if (a.src !== absoluteUrl(current.url)) {
-      a.src = current.url;
-      a.currentTime = 0;
-    }
-    const onPlay = (): void => setPlaying(true);
-    const onPause = (): void => setPlaying(false);
-    const onEnded = (): void => {
-      // Advance to the next track in the manifest. Wraps at the end.
-      setTrackIdx((i) => (i + 1) % Math.max(1, tracks.length));
+    const a = getAudio();
+    const onPlay = (): void => {
+      setPlaying(true);
+      setNeedsGesture(false);
     };
+    const onPause = (): void => setPlaying(false);
+    const onEnded = (): void =>
+      setTrackIdx((i) =>
+        tracks.length > 0 ? (i + 1) % tracks.length : 0
+      );
     const onError = (): void => {
+      // If the current src 404s or the codec is unsupported, advance
+      // so a single bad track doesn't kill the whole playlist.
       setPlaying(false);
-      setTrackIdx((i) => (i + 1) % Math.max(1, tracks.length));
+      setTrackIdx((i) =>
+        tracks.length > 0 ? (i + 1) % tracks.length : 0
+      );
     };
     a.addEventListener("play", onPlay);
     a.addEventListener("pause", onPause);
     a.addEventListener("ended", onEnded);
     a.addEventListener("error", onError);
-
-    a.play().catch(() => {
-      /* autoplay blocked — settings toggle is a user gesture, so
-         flipping On there will succeed even if first mount didn't. */
-    });
-
     return () => {
       a.removeEventListener("play", onPlay);
       a.removeEventListener("pause", onPause);
       a.removeEventListener("ended", onEnded);
       a.removeEventListener("error", onError);
     };
-  }, [current, wantPlay, tracks.length, volume]);
+  }, [getAudio, tracks.length]);
 
-  // Volume tracking — separate effect so flipping the slider doesn't
-  // re-trigger src reload.
+  // Sync the audio src whenever the current track changes (e.g. after
+  // ended/skip). Doesn't auto-play — that's gated on user gesture +
+  // pref. If pref is "on" we kick play() once src is set.
+  useEffect(() => {
+    const a = audioRef.current;
+    if (!a || !current) return;
+    const targetSrc = absoluteUrl(current.url);
+    if (a.src !== targetSrc) {
+      a.src = current.url;
+    }
+    a.volume = volume;
+  }, [current, volume]);
+
+  // Volume slider tracking, separate so changing it doesn't reload src.
   useEffect(() => {
     if (audioRef.current) audioRef.current.volume = volume;
   }, [volume]);
 
-  // Beat ticker. While audio is playing we sample currentTime each
-  // animation frame and emit a beat each time it crosses a quarter-
-  // note boundary. While silent, we use a wall-clock fallback at 90
-  // BPM so the backdrop still has a pulse for users without music.
+  // pref → "off" should pause immediately. Turning "on" alone doesn't
+  // start playback — that's done explicitly by play() so it always
+  // happens within a user gesture.
   useEffect(() => {
-    if (!motionOn) {
-      setBeat(0);
-      return;
+    if (pref === "off") {
+      audioRef.current?.pause();
     }
-    let raf = 0;
-    fallbackStartRef.current = performance.now();
-    emittedRef.current = 0;
-    setBeat(0);
+  }, [pref]);
 
-    const tick = (): void => {
-      const a = audioRef.current;
-      const useAudio = playing && a && current && a.duration > 0;
-      let nextBeat: number;
-      if (useAudio) {
-        const secsPerBeat = 60 / current.bpm;
-        nextBeat = Math.floor(a.currentTime / secsPerBeat);
-      } else {
-        const elapsed = (performance.now() - fallbackStartRef.current) / 1000;
-        const secsPerBeat = 60 / FALLBACK_BPM;
-        nextBeat = Math.floor(elapsed / secsPerBeat);
-      }
-      if (nextBeat !== emittedRef.current) {
-        emittedRef.current = nextBeat;
-        setBeat(nextBeat);
-      }
-      raf = requestAnimationFrame(tick);
-    };
-    raf = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(raf);
-  }, [playing, current, motionOn]);
+  const play = useCallback(async (): Promise<void> => {
+    if (!current) return;
+    ensureAudioGraph();
+    const a = getAudio();
+    if (!a.src && current) a.src = current.url;
+    try {
+      await a.play();
+      setNeedsGesture(false);
+    } catch {
+      // Browser blocked autoplay (no fresh gesture, or context lock).
+      // The settings UI shows a "click to enable music" prompt off
+      // this flag — clicking it retries from a fresh gesture.
+      setNeedsGesture(true);
+    }
+  }, [current, ensureAudioGraph, getAudio]);
 
-  const next = useCallback(() => {
+  const pause = useCallback((): void => {
+    audioRef.current?.pause();
+  }, []);
+
+  const next = useCallback((): void => {
     setTrackIdx((i) => (tracks.length > 0 ? (i + 1) % tracks.length : 0));
   }, [tracks.length]);
 
+  const getAnalyser = useCallback(() => analyserRef.current, []);
+
+  // When manifest finishes loading and pref is already "on" (e.g.
+  // saved from a prior session), attempt play once. This will succeed
+  // if the page got any user gesture by now (clicking the page,
+  // etc.); otherwise needsGesture flips and the UI prompts.
+  useEffect(() => {
+    if (pref === "on" && current && !playing) {
+      void play();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tracks.length, pref]);
+
   const value = useMemo<Ctx>(
-    () => ({ beat, playing, current, tracks, next }),
-    [beat, playing, current, tracks, next]
+    () => ({
+      playing,
+      current,
+      tracks,
+      needsGesture,
+      play,
+      pause,
+      next,
+      getAnalyser,
+    }),
+    [playing, current, tracks, needsGesture, play, pause, next, getAnalyser]
   );
 
   return <BeatContext.Provider value={value}>{children}</BeatContext.Provider>;
