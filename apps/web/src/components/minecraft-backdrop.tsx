@@ -116,16 +116,22 @@ export function MinecraftBackdrop(): JSX.Element {
     };
   }, [motionOn, getAudioElement]);
 
-  // Re-apply gradient on theme changes (accent CSS variable updates).
-  // audioMotion caches gradients, so we overwrite the existing slot.
+  // Re-apply the gradient whenever the theme accent changes. The
+  // accent provider toggles `accent-*` classes on <html>; we watch
+  // the class attr and re-apply when the resolved CSS variable value
+  // differs from what we last set.
   useEffect(() => {
+    let lastAccent = readAccentRgb();
     const observer = new MutationObserver(() => {
+      const cur = readAccentRgb();
+      if (cur === lastAccent) return;
+      lastAccent = cur;
       const am = amRef.current;
       if (am) applyGradient(am);
     });
     observer.observe(document.documentElement, {
       attributes: true,
-      attributeFilter: ["class", "data-accent", "data-theme"],
+      attributeFilter: ["class", "data-theme"],
     });
     return () => observer.disconnect();
   }, []);
@@ -133,15 +139,20 @@ export function MinecraftBackdrop(): JSX.Element {
   return (
     <div
       aria-hidden
-      className="pointer-events-none fixed inset-x-0 bottom-0 z-0 select-none opacity-[0.32] dark:opacity-[0.35]"
+      className="pointer-events-none fixed inset-x-0 bottom-0 z-0 select-none opacity-[0.4] dark:opacity-[0.5]"
       style={{
-        height: "clamp(220px, 44vh, 440px)",
-        // Fade the top edge into the page background so the canvas
-        // doesn't have a hard horizon line.
+        // Skinnier band hugged to the bottom edge so bars feel like a
+        // horizon line rather than floating in the middle of the page.
+        // Was clamp(220px, 44vh, 440px) — that took up almost half the
+        // viewport, and at low FFT levels short bars sat in the top
+        // of a too-tall container looking like they floated.
+        height: "clamp(160px, 30vh, 320px)",
+        // Light top fade only — keeps the canvas reaching the very
+        // bottom edge of the viewport so the "horizon" reads cleanly.
         WebkitMaskImage:
-          "linear-gradient(to top, black 0%, black 35%, transparent 100%)",
+          "linear-gradient(to top, black 0%, black 60%, transparent 100%)",
         maskImage:
-          "linear-gradient(to top, black 0%, black 35%, transparent 100%)",
+          "linear-gradient(to top, black 0%, black 60%, transparent 100%)",
       }}
     >
       <div ref={containerRef} className="w-full h-full" />
@@ -150,16 +161,21 @@ export function MinecraftBackdrop(): JSX.Element {
 }
 
 /**
- * Read the active accent colour from the CSS variable as an
- * "r, g, b" string, suitable for embedding in `rgba(${val}, a)`.
- * Falls back to the brand emerald if the var is missing.
+ * Read the active accent colour from the CSS variable. The panel
+ * stores it as space-separated bytes ("5 150 105") for Tailwind's
+ * `rgb(var(--accent) / <alpha>)` consumer, so we keep it that way
+ * and use the modern space-syntax `rgb(R G B / a)` form below.
+ *
+ * The OLD code wrapped this in `rgba(${val}, 0.5)` which produced
+ * invalid CSS like `rgba(5 150 105, 0.5)`, so the gradient never
+ * reflected accent changes — that was the "theme doesn't react" bug.
  */
 function readAccentRgb(): string {
-  if (typeof window === "undefined") return "5, 150, 105";
+  if (typeof window === "undefined") return "5 150 105";
   const v = getComputedStyle(document.documentElement)
     .getPropertyValue("--accent")
     .trim();
-  return v || "5, 150, 105";
+  return v || "5 150 105";
 }
 
 /**
@@ -177,19 +193,25 @@ function readAccentRgb(): string {
  * the visual language of the rest of the panel.
  */
 function applyGradient(am: AudioMotionAnalyzer): void {
-  const accent = readAccentRgb();
+  const accent = readAccentRgb(); // "R G B" (space-separated)
+  // Modern `rgb(R G B / a)` syntax accepts the space-separated bytes
+  // straight from the CSS variable, so when the user picks a new
+  // accent the new colour flows through without any string surgery.
+  const c = (a: number): string => `rgb(${accent} / ${a})`;
   am.registerGradient(GRADIENT_NAME, {
     bgColor: "transparent",
     colorStops: [
-      // Bright grass band
-      { pos: 0, color: `rgba(${accent}, 1)` },
-      { pos: 0.06, color: `rgba(${accent}, 1)` },
-      // Sharp transition into the dirt body
-      { pos: 0.07, color: `rgba(${accent}, 0.7)` },
-      // Dirt body — uniform, slightly translucent
-      { pos: 0.95, color: `rgba(${accent}, 0.6)` },
-      // Faint shadow at the very bottom
-      { pos: 1, color: `rgba(${accent}, 0.45)` },
+      // Bright grass slab — the top sliver of every bar is
+      // full-strength accent, mimicking a Minecraft grass block.
+      { pos: 0, color: c(1) },
+      { pos: 0.06, color: c(1) },
+      // Sharp transition into the dirt body — visible step
+      // distinguishes the grass cap from the column below.
+      { pos: 0.07, color: c(0.7) },
+      // Dirt body, slightly translucent.
+      { pos: 0.95, color: c(0.6) },
+      // Faint shadow at the very bottom.
+      { pos: 1, color: c(0.45) },
     ],
   });
   am.gradient = GRADIENT_NAME;
