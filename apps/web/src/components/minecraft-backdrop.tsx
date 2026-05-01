@@ -174,26 +174,21 @@ export function MinecraftBackdrop(): JSX.Element {
           }
           let targetCells: number;
           if (peakDb < NOISE_FLOOR_DB) {
-            // Below the noise gate — fall back to the baseline so
-            // quiet bands still show the silhouette beneath the
-            // peaks. Without this, a silent FFT wipes the silhouette
-            // as soon as music starts.
-            targetCells = cols[i]!.baseHeight;
+            // Below the noise gate — bar drops to zero. The static
+            // silhouette is REPLACED by the FFT response while music
+            // is playing; we don't keep the baseline as a minimum.
+            // (Earlier revision used max(baseline, fft) but the
+            // user explicitly wants the silhouette to disappear and
+            // the columns to dance instead.)
+            targetCells = 0;
           } else {
             let norm = (peakDb - MIN_DB) / (MAX_DB - MIN_DB);
             if (norm < 0) norm = 0;
             else if (norm > 1) norm = 1;
-            // Power 1.4 squashes mids so bars with real content stand
-            // out and most others sit near baseline.
+            // Power 1.4 squashes mids — bars with real content stand
+            // out, others sit close to zero.
             norm = Math.pow(norm, 1.4);
-            // Map to total height. We use max(silhouette, fft) so
-            // FFT can ONLY add to the column, never push it below
-            // the static baseline. The user's "ВОТ ОНИ И ДОЛЖНЫ ПОД
-            // МУЗЫКУ ДВИГАТЬСЯ" — columns dance UP from the silhouette.
-            targetCells = Math.max(
-              cols[i]!.baseHeight,
-              Math.round(norm * MAX_HEIGHT)
-            );
+            targetCells = Math.round(norm * MAX_HEIGHT);
           }
           const cur = live[i]!;
           // Peak-hold + slow decay: snap up fast, drift down slow.
