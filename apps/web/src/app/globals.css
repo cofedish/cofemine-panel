@@ -574,10 +574,15 @@ select:disabled {
     margin-top: 1.2rem;
     margin-bottom: 0.4rem;
   }
-  .content-body h1 { font-size: 1.15rem; }
-  .content-body h2 { font-size: 1.05rem; }
-  .content-body h3 { font-size: 0.95rem; }
-  .content-body p { line-height: 1.6; }
+  /* `!important` here is deliberate: mod authors regularly ship
+     <h1 style="font-size:10vw"> etc. The sanitiser strips inline
+     `style` already, but the override is belt-and-braces in case a
+     future renderer change lets one through. */
+  .content-body h1 { font-size: 1.15rem !important; }
+  .content-body h2 { font-size: 1.05rem !important; }
+  .content-body h3 { font-size: 0.95rem !important; }
+  .content-body h4 { font-size: 0.9rem !important; }
+  .content-body p { line-height: 1.6; word-wrap: break-word; overflow-wrap: anywhere; }
   .content-body strong { color: rgb(var(--fg-primary)); }
   .content-body a {
     color: rgb(var(--accent));
@@ -585,10 +590,15 @@ select:disabled {
   }
   .content-body a:hover { text-decoration: underline; }
   .content-body img {
-    max-width: 100%;
-    height: auto;
+    max-width: 100% !important;
+    width: auto !important;
+    height: auto !important;
+    /* Cap absurdly tall banner images so they never push the install
+       button out of reach. The drawer is ~90vh; 60vh leaves room. */
+    max-height: 60vh;
     border-radius: 0.4rem;
     margin: 0.5rem 0;
+    object-fit: contain;
   }
   .content-body ul,
   .content-body ol {

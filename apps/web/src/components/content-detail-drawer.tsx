@@ -702,11 +702,18 @@ function isSafeUrl(url: string): boolean {
 }
 
 /**
- * Tiny HTML cleaner for CurseForge bodies. Removes <script>, <iframe>,
- * <style>, on* event-handler attributes, and javascript: hrefs. Not a
- * full sanitiser — relies on the upstream API (CurseForge) already
- * delivering clean HTML — but ensures the panel doesn't blindly inject
- * anything too obviously hostile.
+ * Tiny HTML cleaner for content bodies. Removes <script>, <iframe>,
+ * <style>, on* event-handler attributes, javascript: hrefs, and ALL
+ * inline `style` attributes — mod authors love things like
+ * `<h1 style="font-size:10vw">` that blow up to fill the modal, and
+ * inline styles are also a common XSS / overlay vector. The panel's
+ * own .content-body CSS handles the real styling.
+ *
+ * Width/height attributes on <img> are stripped too so the CSS can
+ * cap them at 100%; otherwise huge banners overflow the dialog.
+ *
+ * Not a full sanitiser — relies on the upstream API already delivering
+ * mostly-clean HTML — but enough to keep the panel safe and laid out.
  */
 function sanitizeHtml(html: string): string {
   let h = html;
@@ -714,6 +721,13 @@ function sanitizeHtml(html: string): string {
   h = h.replace(/\son\w+\s*=\s*"[^"]*"/gi, "");
   h = h.replace(/\son\w+\s*=\s*'[^']*'/gi, "");
   h = h.replace(/\son\w+\s*=\s*[^\s>]+/gi, "");
+  // Strip inline style + width/height attrs (quoted and unquoted forms).
+  h = h.replace(/\sstyle\s*=\s*"[^"]*"/gi, "");
+  h = h.replace(/\sstyle\s*=\s*'[^']*'/gi, "");
+  h = h.replace(/\sstyle\s*=\s*[^\s>]+/gi, "");
+  h = h.replace(/\s(width|height)\s*=\s*"[^"]*"/gi, "");
+  h = h.replace(/\s(width|height)\s*=\s*'[^']*'/gi, "");
+  h = h.replace(/\s(width|height)\s*=\s*[^\s>]+/gi, "");
   h = h.replace(/href\s*=\s*"javascript:[^"]*"/gi, 'href="#"');
   h = h.replace(/href\s*=\s*'javascript:[^']*'/gi, "href='#'");
   // Force every <a> to open in a new tab + drop opener.
