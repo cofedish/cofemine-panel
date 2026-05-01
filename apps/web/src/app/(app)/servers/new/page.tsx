@@ -257,7 +257,7 @@ export default function CreateServerPage(): JSX.Element {
   }
 
   return (
-    <div className="space-y-8 max-w-5xl">
+    <div className="space-y-8 max-w-5xl mx-auto">
       <PageHeader
         breadcrumbs={[
           { label: t("nav.dashboard"), href: "/" },
