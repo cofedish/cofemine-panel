@@ -1,5 +1,6 @@
 import { Agent, request } from "undici";
 import type {
+  ContentDetails,
   ContentKind,
   ContentProvider,
   ContentSummary,
@@ -184,6 +185,61 @@ export class ModrinthProvider implements ContentProvider {
       gameVersions: p.game_versions,
       projectType: p.project_type,
       pageUrl: `https://modrinth.com/${p.project_type}/${p.slug}`,
+    };
+  }
+
+  /**
+   * Full project payload for the in-panel detail drawer: long-form
+   * markdown body, gallery, source/issues/wiki/discord links, license,
+   * follower count, etc. We return a normalised shape so the UI can
+   * render Modrinth and CurseForge with the same component.
+   */
+  async getDetails(id: string): Promise<ContentDetails> {
+    const p = await call<any>(`/project/${id}`);
+    const links: ContentDetails["links"] = [];
+    if (p.source_url) links.push({ label: "Source", url: p.source_url });
+    if (p.issues_url) links.push({ label: "Issues", url: p.issues_url });
+    if (p.wiki_url) links.push({ label: "Wiki", url: p.wiki_url });
+    if (p.discord_url) links.push({ label: "Discord", url: p.discord_url });
+    for (const d of p.donation_urls ?? []) {
+      if (d?.url) {
+        links.push({ label: d.platform ? `Donate (${d.platform})` : "Donate", url: d.url });
+      }
+    }
+    return {
+      id: p.id,
+      provider: "modrinth",
+      name: p.title,
+      slug: p.slug,
+      description: p.description,
+      iconUrl: p.icon_url,
+      loaders: p.loaders,
+      gameVersions: p.game_versions,
+      projectType: p.project_type,
+      pageUrl: `https://modrinth.com/${p.project_type}/${p.slug}`,
+      downloads: p.downloads,
+      followers: p.followers,
+      body: p.body,
+      bodyFormat: "markdown",
+      gallery: (p.gallery ?? []).map((g: any) => ({
+        url: g.url,
+        title: g.title,
+        description: g.description,
+        featured: Boolean(g.featured),
+      })),
+      links,
+      categories: [
+        ...(p.categories ?? []),
+        ...(p.additional_categories ?? []),
+      ],
+      publishedAt: p.published,
+      updatedAt: p.updated,
+      license:
+        typeof p.license === "string"
+          ? p.license
+          : (p.license?.name ?? p.license?.id),
+      clientSide: p.client_side,
+      serverSide: p.server_side,
     };
   }
 

@@ -1,5 +1,6 @@
 import { request } from "undici";
 import type {
+  ContentDetails,
   ContentKind,
   ContentProvider,
   ContentSummary,
@@ -99,6 +100,41 @@ export class CurseForgeProvider implements ContentProvider {
     const key = await this.requireKey();
     const res = await call<{ data: any }>(`/mods/${id}`, key);
     return projectToSummary(res.data);
+  }
+
+  /**
+   * Full project + HTML description for the in-panel detail drawer.
+   * CurseForge splits the long-form description into a separate
+   * `/mods/:id/description` endpoint that returns sanitised HTML, so we
+   * fetch both and merge.
+   */
+  async getDetails(id: number): Promise<ContentDetails> {
+    const key = await this.requireKey();
+    const [proj, desc] = await Promise.all([
+      call<{ data: any }>(`/mods/${id}`, key),
+      call<{ data: string }>(`/mods/${id}/description`, key).catch(
+        () => ({ data: "" })
+      ),
+    ]);
+    const p = proj.data;
+    const links: ContentDetails["links"] = [];
+    if (p.links?.sourceUrl) links.push({ label: "Source", url: p.links.sourceUrl });
+    if (p.links?.issuesUrl) links.push({ label: "Issues", url: p.links.issuesUrl });
+    if (p.links?.wikiUrl) links.push({ label: "Wiki", url: p.links.wikiUrl });
+    return {
+      ...projectToSummary(p),
+      body: desc.data || undefined,
+      bodyFormat: "html",
+      gallery: (p.screenshots ?? []).map((s: any) => ({
+        url: s.url,
+        title: s.title,
+        description: s.description,
+      })),
+      links,
+      categories: (p.categories ?? []).map((c: any) => c.name).filter(Boolean),
+      publishedAt: p.dateCreated,
+      updatedAt: p.dateModified,
+    };
   }
 
   async getVersions(

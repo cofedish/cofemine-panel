@@ -556,6 +556,85 @@ select:disabled {
     transition: color 140ms ease;
   }
   .link:hover { color: rgb(var(--accent-hover)); text-decoration: underline; }
+
+  /* Long-form description shown in the content detail drawer. Both the
+     markdown renderer and the (sanitised) CurseForge HTML reuse these
+     selectors so the two providers look the same. */
+  .content-body {
+    color: rgb(var(--fg-secondary));
+  }
+  .content-body > * + * { margin-top: 0.75rem; }
+  .content-body h1,
+  .content-body h2,
+  .content-body h3,
+  .content-body h4 {
+    color: rgb(var(--fg-primary));
+    font-weight: 600;
+    line-height: 1.3;
+    margin-top: 1.2rem;
+    margin-bottom: 0.4rem;
+  }
+  .content-body h1 { font-size: 1.15rem; }
+  .content-body h2 { font-size: 1.05rem; }
+  .content-body h3 { font-size: 0.95rem; }
+  .content-body p { line-height: 1.6; }
+  .content-body strong { color: rgb(var(--fg-primary)); }
+  .content-body a {
+    color: rgb(var(--accent));
+    text-decoration: none;
+  }
+  .content-body a:hover { text-decoration: underline; }
+  .content-body img {
+    max-width: 100%;
+    height: auto;
+    border-radius: 0.4rem;
+    margin: 0.5rem 0;
+  }
+  .content-body ul,
+  .content-body ol {
+    padding-left: 1.25rem;
+  }
+  .content-body ul { list-style: disc; }
+  .content-body ol { list-style: decimal; }
+  .content-body li + li { margin-top: 0.25rem; }
+  .content-body code {
+    background: rgb(var(--bg-surface-2));
+    border: 1px solid rgb(var(--border));
+    border-radius: 0.3rem;
+    padding: 0.05rem 0.3rem;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
+      monospace;
+    font-size: 0.78rem;
+  }
+  .content-body pre {
+    background: rgb(var(--bg-surface-2));
+    border: 1px solid rgb(var(--border));
+    border-radius: 0.5rem;
+    padding: 0.75rem 1rem;
+    overflow-x: auto;
+    font-size: 0.78rem;
+  }
+  .content-body pre code {
+    background: transparent;
+    border: 0;
+    padding: 0;
+  }
+  .content-body blockquote {
+    border-left: 2px solid rgb(var(--border));
+    padding-left: 0.75rem;
+    color: rgb(var(--fg-muted));
+    font-style: italic;
+  }
+  .content-body table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.78rem;
+  }
+  .content-body th,
+  .content-body td {
+    border: 1px solid rgb(var(--border));
+    padding: 0.35rem 0.6rem;
+  }
 }
 
 /* ======================================================================

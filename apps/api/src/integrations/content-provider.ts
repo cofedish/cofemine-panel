@@ -38,6 +38,31 @@ export interface ContentSummary {
   pageUrl?: string;
 }
 
+export interface ContentGalleryItem {
+  url: string;
+  title?: string;
+  description?: string;
+  featured?: boolean;
+}
+
+export interface ContentDetails extends ContentSummary {
+  /** Long-form description. Modrinth returns markdown; CurseForge returns
+   *  HTML. The UI distinguishes by `bodyFormat`. */
+  body?: string;
+  bodyFormat?: "markdown" | "html";
+  gallery?: ContentGalleryItem[];
+  /** Useful external links — source, issues, wiki, discord, etc. */
+  links?: Array<{ label: string; url: string }>;
+  categories?: string[];
+  followers?: number;
+  /** ISO timestamps. */
+  publishedAt?: string;
+  updatedAt?: string;
+  license?: string;
+  clientSide?: string;
+  serverSide?: string;
+}
+
 export interface ContentVersion {
   id: string;
   versionNumber?: string;

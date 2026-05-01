@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import { ModrinthMark, CurseForgeMark } from "./brand-icons";
 import { useDialog } from "./dialog-provider";
+import { ContentDetailDrawer } from "./content-detail-drawer";
 import { useT } from "@/lib/i18n";
 
 /* ================================ TYPES ================================ */
@@ -241,6 +242,11 @@ function InstalledPanel({
   const dialog = useDialog();
   const { t } = useT();
   const [sub, setSub] = useState<"mods" | "plugins" | "datapacks">("mods");
+  const [detail, setDetail] = useState<{
+    provider: "modrinth" | "curseforge";
+    projectId: string;
+    initial: { name?: string; iconUrl?: string; description?: string; pageUrl?: string };
+  } | null>(null);
   const groups: Record<"mods" | "plugins" | "datapacks", InstalledFile[]> = {
     mods: installed?.mods ?? [],
     plugins: installed?.plugins ?? [],
@@ -348,28 +354,98 @@ function InstalledPanel({
               key={f.name}
               file={f}
               onDelete={() => remove(f)}
+              onOpen={() => {
+                const det = installedDetailKey(f);
+                if (det) setDetail(det);
+              }}
             />
           ))}
         </div>
       )}
+
+      <ContentDetailDrawer
+        open={detail !== null}
+        onClose={() => setDetail(null)}
+        provider={detail?.provider ?? "modrinth"}
+        projectId={detail?.projectId ?? ""}
+        initial={detail?.initial}
+      />
     </section>
   );
+}
+
+/**
+ * Resolve a clickable provider+id pair from an installed jar's metadata.
+ * Modrinth files include the slug; CurseForge files include the numeric
+ * modId. Returns null when the jar has no provider match (manual upload,
+ * unknown source) — caller hides the click affordance in that case.
+ */
+function installedDetailKey(
+  f: InstalledFile
+): {
+  provider: "modrinth" | "curseforge";
+  projectId: string;
+  initial: { name?: string; iconUrl?: string; description?: string; pageUrl?: string };
+} | null {
+  if (f.modrinth?.slug) {
+    return {
+      provider: "modrinth",
+      projectId: f.modrinth.slug,
+      initial: {
+        name: f.modrinth.title,
+        iconUrl: f.modrinth.icon ?? undefined,
+        description: f.modrinth.description,
+        pageUrl: f.modrinth.pageUrl,
+      },
+    };
+  }
+  if (f.curseforge?.modId) {
+    return {
+      provider: "curseforge",
+      projectId: String(f.curseforge.modId),
+      initial: {
+        name: f.curseforge.title,
+        iconUrl: f.curseforge.icon ?? undefined,
+        description: f.curseforge.summary,
+        pageUrl: f.curseforge.pageUrl,
+      },
+    };
+  }
+  return null;
 }
 
 function InstalledCard({
   file,
   onDelete,
+  onOpen,
 }: {
   file: InstalledFile;
   onDelete: () => void;
+  onOpen: () => void;
 }): JSX.Element {
   const title =
     file.modrinth?.title ?? file.curseforge?.title ?? prettifyFilename(file.name);
   const subtitle = file.modrinth?.description ?? file.curseforge?.summary;
   const icon = file.modrinth?.icon ?? file.curseforge?.icon ?? null;
   const pageUrl = file.modrinth?.pageUrl ?? file.curseforge?.pageUrl;
+  const clickable = Boolean(file.modrinth?.slug || file.curseforge?.modId);
   return (
-    <div className="tile p-3.5 flex gap-3 items-start">
+    <div
+      className={cn(
+        "tile p-3.5 flex gap-3 items-start transition-colors",
+        clickable &&
+          "cursor-pointer hover:bg-surface-2 hover:border-[rgb(var(--accent))]/30"
+      )}
+      onClick={clickable ? onOpen : undefined}
+      role={clickable ? "button" : undefined}
+      tabIndex={clickable ? 0 : undefined}
+      onKeyDown={(e) => {
+        if (clickable && (e.key === "Enter" || e.key === " ")) {
+          e.preventDefault();
+          onOpen();
+        }
+      }}
+    >
       {icon ? (
         // eslint-disable-next-line @next/next/no-img-element
         <img
@@ -416,6 +492,7 @@ function InstalledCard({
               href={pageUrl}
               target="_blank"
               rel="noreferrer"
+              onClick={(e) => e.stopPropagation()}
             >
               page <ExternalLink size={10} />
             </a>
@@ -424,7 +501,10 @@ function InstalledCard({
       </div>
       <button
         className="btn-icon btn-ghost !h-8 !w-8 shrink-0"
-        onClick={onDelete}
+        onClick={(e) => {
+          e.stopPropagation();
+          onDelete();
+        }}
         aria-label="Delete"
         title="Delete"
       >
@@ -805,6 +885,7 @@ function BrowsePanel({
   const [recentSlugs, setRecentSlugs] = useState<Set<string>>(
     () => new Set()
   );
+  const [detail, setDetail] = useState<Summary | null>(null);
 
   const cfDisabled = integ ? !integ.providers.curseforge.enabled : true;
 
@@ -1043,6 +1124,7 @@ function BrowsePanel({
                   installed={isInstalled}
                   installing={installingId === r.id}
                   onInstall={() => install(r)}
+                  onOpen={() => setDetail(r)}
                 />
               );
             })}
@@ -1067,6 +1149,34 @@ function BrowsePanel({
           )}
         </>
       )}
+
+      <ContentDetailDrawer
+        open={detail !== null}
+        onClose={() => setDetail(null)}
+        provider={detail?.provider ?? provider}
+        projectId={detail?.id ?? ""}
+        initial={
+          detail
+            ? {
+                name: detail.name,
+                iconUrl: detail.iconUrl,
+                description: detail.description,
+                pageUrl: detail.pageUrl,
+                author: detail.author,
+                downloads: detail.downloads,
+              }
+            : undefined
+        }
+        installed={
+          detail
+            ? resultIsInstalled(detail, installedKeys) ||
+              (!!detail.slug && recentSlugs.has(normKey(detail.slug))) ||
+              recentSlugs.has(normKey(String(detail.id)))
+            : false
+        }
+        installing={installingId === detail?.id}
+        onInstall={detail ? () => install(detail) : undefined}
+      />
     </section>
   );
 }
@@ -1076,15 +1186,28 @@ function ResultCard({
   installed,
   installing,
   onInstall,
+  onOpen,
 }: {
   r: Summary;
   installed: boolean;
   installing: boolean;
   onInstall: () => void;
+  onOpen: () => void;
 }): JSX.Element {
   const { t } = useT();
   return (
-    <div className="tile p-4 flex gap-3">
+    <div
+      className="tile p-4 flex gap-3 cursor-pointer transition-colors hover:bg-surface-2 hover:border-[rgb(var(--accent))]/30"
+      onClick={onOpen}
+      role="button"
+      tabIndex={0}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onOpen();
+        }
+      }}
+    >
       {r.iconUrl ? (
         // eslint-disable-next-line @next/next/no-img-element
         <img
@@ -1121,7 +1244,10 @@ function ResultCard({
       </div>
       <button
         className={cn("btn self-start", installed ? "btn-ghost" : "btn-subtle")}
-        onClick={onInstall}
+        onClick={(e) => {
+          e.stopPropagation();
+          onInstall();
+        }}
         disabled={installing || installed}
       >
         {installed ? (

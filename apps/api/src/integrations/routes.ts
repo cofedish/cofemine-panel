@@ -103,6 +103,11 @@ export async function integrationsRoutes(app: FastifyInstance): Promise<void> {
     return modrinth.getProject(id);
   });
 
+  app.get("/modrinth/projects/:id/details", async (req) => {
+    const { id } = req.params as { id: string };
+    return modrinth.getDetails(id);
+  });
+
   app.get("/modrinth/projects/:id/versions", async (req) => {
     const { id } = req.params as { id: string };
     const q = req.query as { gameVersion?: string; loader?: string };
@@ -116,6 +121,18 @@ export async function integrationsRoutes(app: FastifyInstance): Promise<void> {
     }
     const filters = modrinthSearchSchema.parse(req.query);
     return { disabled: false, results: await curseforge.search(filters) };
+  });
+
+  app.get("/curseforge/projects/:id/details", async (req) => {
+    const { id } = req.params as { id: string };
+    if (!(await curseforge.isEnabled())) {
+      const err = new Error(
+        "CurseForge API key is not set. Configure it in Integrations."
+      );
+      (err as any).statusCode = 409;
+      throw err;
+    }
+    return curseforge.getDetails(Number(id));
   });
 
   app.get("/curseforge/projects/:id/versions", async (req) => {
