@@ -420,9 +420,9 @@ const en: Dict = {
   "wizard.resources.cpuHint": "cores (empty = no limit)",
   "wizard.resources.port": "Host port",
   "wizard.eula": "Accept Minecraft EULA",
-  "wizard.dynmap.label": "Install Dynmap (live web map)",
+  "wizard.dynmap.label": "Install live web map (Dynmap or BlueMap)",
   "wizard.dynmap.hint":
-    "Drops the right Dynmap plugin/mod into the server's content folder right after creation. Once the server starts and finishes its initial render, the Map page in this panel goes live with player skins and positions.",
+    "Schedules the right map plugin / mod to be dropped into the server right after its first successful boot — Dynmap on Paper-family, BlueMap on Forge / NeoForge / Fabric (it covers more modern MC versions than dynmap currently does). Once the server restarts to load it, the Map page in this panel goes live with player skins and positions.",
   "wizard.eulaDesc":
     "By checking this you agree to the Minecraft EULA. Required to boot the server.",
   "wizard.env": "Extra environment variables",
@@ -995,9 +995,9 @@ const ru: Dict = {
   "wizard.resources.cpuHint": "ядер (пусто = без лимита)",
   "wizard.resources.port": "Порт хоста",
   "wizard.eula": "Принять Minecraft EULA",
-  "wizard.dynmap.label": "Установить Dynmap (живая web-карта)",
+  "wizard.dynmap.label": "Установить живую web-карту (Dynmap или BlueMap)",
   "wizard.dynmap.hint":
-    "Сразу после создания сервера панель докинет нужный плагин/мод Dynmap в папку содержимого. Как только сервер запустится и сгенерит карту, страница «Карта» в этой панели заживёт — со скинами и координатами игроков.",
+    "После первого успешного запуска сервера панель сама докинет нужный плагин/мод — Dynmap для Paper-семьи, BlueMap для Forge / NeoForge / Fabric (он лучше держит свежие версии MC, чем Dynmap). Сервер автоматически перезапустится чтобы подхватить мод, и страница «Карта» заживёт со скинами и координатами игроков.",
   "wizard.eulaDesc":
     "Отметка подтверждает согласие с Minecraft EULA. Обязательно для запуска сервера.",
   "wizard.env": "Дополнительные переменные окружения",

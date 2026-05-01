@@ -1,5 +1,6 @@
 import { prisma } from "../db.js";
 import { NodeClient } from "../nodes/node-client.js";
+import { firePendingMapInstall } from "./post-boot.js";
 
 /**
  * Bridge between Docker's container state vocabulary and the panel's
@@ -103,6 +104,12 @@ export async function reconcileServerStatus(
     where: { id: serverId },
     data: { status: live },
   });
+  // Running transition is also our trigger for post-boot install
+  // hooks (deferred dynmap / bluemap install for modpack servers).
+  // Fire-and-forget; the hook reads the server's env flag itself.
+  if (live === "running" && db !== "running") {
+    void firePendingMapInstall(serverId);
+  }
   return live;
 }
 
