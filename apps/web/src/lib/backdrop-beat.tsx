@@ -197,15 +197,19 @@ export function BackdropBeatProvider({
     };
   }, [getAudioElement, tracks.length]);
 
-  // Sync src to current track. Auto-resume if pref is on (handles
-  // both first load and auto-advance after `ended`).
+  // Sync src to current track. Auto-resume if pref is on AND the
+  // user hasn't manually paused — same intent gate the first-load
+  // effect uses, so navigating to another panel route doesn't
+  // restart audio against the user's wishes when this effect happens
+  // to re-fire (e.g. on initial provider mount with a non-empty
+  // tracks list).
   useEffect(() => {
     const a = audioRef.current;
     if (!a || !current) return;
     const targetSrc = absoluteUrl(current.url);
     if (a.src !== targetSrc) {
       a.src = current.url;
-      if (pref === "on") {
+      if (pref === "on" && !userPausedRef.current) {
         void a.play().catch(() => setNeedsGesture(true));
       }
     }

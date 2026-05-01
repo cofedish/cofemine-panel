@@ -206,14 +206,15 @@ export default function CreateServerPage(): JSX.Element {
         }
       }
       // Optional dynmap auto-install. Pass the resolved MC version
-      // and loader so Modrinth picks a compatible dynmap build, not
-      // its newest build at large (which usually targets the latest
-      // MC release and silently won't load on an older modpack).
-      // Best-effort overall: a failure here doesn't tear down the
-      // newly-created server — the user can install manually from
-      // the Content tab later.
-      const dynmapSlug = dynmapSlugFor(effectiveType, packVersion?.loader);
-      if (installDynmap && dynmapSlug) {
+      // and loader so Modrinth picks a compatible build, not its
+      // newest build at large. `dynmapTargetFor` also picks the
+      // correct kind (plugin for Bukkit, mod for Forge/Fabric) so
+      // the agent drops the jar into the right folder.
+      const dynmapTarget = dynmapTargetFor(
+        effectiveType,
+        packVersion?.loader
+      );
+      if (installDynmap && dynmapTarget) {
         const { gameVersion, loader } = resolveRuntimeFilters(
           source,
           effectiveType,
@@ -224,14 +225,24 @@ export default function CreateServerPage(): JSX.Element {
           await api.post(
             `/integrations/servers/${res.id}/install/modrinth`,
             {
-              projectId: dynmapSlug,
-              kind: "plugin",
+              projectId: dynmapTarget.slug,
+              kind: dynmapTarget.kind,
               ...(gameVersion ? { gameVersion } : {}),
               ...(loader ? { loader } : {}),
             }
           );
         } catch (e) {
-          console.warn("Dynmap auto-install failed:", e);
+          // Surface the failure instead of silently dropping it —
+          // user explicitly asked for dynmap, they should know if
+          // it didn't land. Server itself is still created, so this
+          // doesn't block routing to the new server's page.
+          const msg =
+            e instanceof ApiError
+              ? e.message
+              : e instanceof Error
+                ? e.message
+                : String(e);
+          setErr(`Server created, but Dynmap install failed: ${msg}`);
         }
       }
       router.push(`/servers/${res.id}`);
@@ -1316,7 +1327,7 @@ function ReviewStep({
 
       {/* Auto-install Dynmap. Hidden for Vanilla — vanilla can't load
           plugins/mods, so the option would silently no-op. */}
-      {dynmapSlugFor(type, packLoader) && (
+      {dynmapTargetFor(type, packLoader) && (
         <label className="flex items-start gap-3 text-sm">
           <input
             type="checkbox"
@@ -1339,45 +1350,59 @@ function ReviewStep({
   );
 }
 
+type DynmapTarget = {
+  slug: string;
+  /** Modrinth project_type — controls where the install endpoint
+   *  drops the jar. "plugin" goes into plugins/, "mod" into mods/.
+   *  Forge / Fabric dynmap are mods, Bukkit dynmap is a plugin. */
+  kind: "plugin" | "mod";
+};
+
 /**
- * Pick the right Modrinth project slug for dynmap. For plain
- * servers the loader is in the type itself (PAPER → bukkit dynmap,
- * FORGE → dynmapforge, etc.); for modpack servers the type string
- * is just "MODRINTH" / "CURSEFORGE" — the *actual* loader comes
- * from the pack's version metadata, which the picker already
- * captured into `packVersion.loader`. Falls through to null when
- * we can't pick (Vanilla, or modpack without a resolved loader yet)
- * so the wizard can hide the toggle.
+ * Pick the right Modrinth project + content kind for dynmap. For
+ * plain servers the loader is in the type itself; for modpack
+ * servers the type string is just "MODRINTH"/"CURSEFORGE" — the
+ * actual loader is whatever the pack picks, which the version-
+ * picker captures into `packVersion.loader`. Falls through to null
+ * when we can't pick (Vanilla, or modpack without a resolved loader
+ * yet) so the wizard can hide the toggle.
  *
- * Modrinth slugs:
- *   dynmap          — Bukkit / Paper / Spigot / Purpur / Mohist
- *   dynmapforge     — Forge / NeoForge
- *   dynmap-fabric   — Fabric / Quilt
+ * Modrinth projects:
+ *   dynmap          (kind: plugin) — Bukkit / Paper / Spigot / Purpur / Mohist
+ *   dynmapforge     (kind: mod)    — Forge / NeoForge
+ *   dynmap-fabric   (kind: mod)    — Fabric / Quilt
+ *
+ * The kind matters because the install endpoint uses it to decide
+ * whether to drop the jar in plugins/ or mods/. Earlier this
+ * function returned only the slug and the wizard hard-coded
+ * `kind: "plugin"` for everyone — Forge dynmap silently landed in
+ * plugins/, Forge ignored it, no port 8123 listener, the Map page
+ * said "not running". That's the exact bug we're fixing here.
  */
-function dynmapSlugFor(
+function dynmapTargetFor(
   type: ServerTypeKey,
   packLoader?: string | null
-): string | null {
-  // Plain server → loader == type.
+): DynmapTarget | null {
   switch (type) {
     case "PAPER":
     case "PURPUR":
     case "MOHIST":
-      return "dynmap";
+      return { slug: "dynmap", kind: "plugin" };
     case "FORGE":
     case "NEOFORGE":
-      return "dynmapforge";
+      return { slug: "dynmapforge", kind: "mod" };
     case "FABRIC":
     case "QUILT":
-      return "dynmap-fabric";
+      return { slug: "dynmap-fabric", kind: "mod" };
   }
-  // Modpack source → use the resolved pack loader.
   const loader = packLoader?.toLowerCase();
   if (!loader) return null;
-  if (loader === "forge" || loader === "neoforge") return "dynmapforge";
-  if (loader === "fabric" || loader === "quilt") return "dynmap-fabric";
+  if (loader === "forge" || loader === "neoforge")
+    return { slug: "dynmapforge", kind: "mod" };
+  if (loader === "fabric" || loader === "quilt")
+    return { slug: "dynmap-fabric", kind: "mod" };
   if (loader === "paper" || loader === "spigot" || loader === "bukkit")
-    return "dynmap";
+    return { slug: "dynmap", kind: "plugin" };
   return null;
 }
 
