@@ -41,13 +41,20 @@ const MAX_HEIGHT = 36; // in blocks → 216px viewBox tall
 const TOTAL_W = COLS * BLOCK;
 const TOTAL_H = MAX_HEIGHT * BLOCK;
 
-// Per-frame step limits, in whole BLOCK cells. Rise faster than fall so
-// peaks pop and tails linger — peak-meter style. Both are positive.
-const RISE_STEP = 2;
+// Per-frame step limits, in whole BLOCK cells. One cell per frame in
+// either direction = max 60 cells/sec — feels calm and "breathing" on
+// ambient tracks, still snappy enough for percussive ones because the
+// AnalyserNode does its own time-smoothing inside the audio thread.
+// Larger steps made Sweden look like dubstep.
+const RISE_STEP = 1;
 const FALL_STEP = 1;
 // Always keep at least this many blocks visible so quiet tracks aren't
 // flat lines.
 const FLOOR_BLOCKS = 2;
+// Below this normalised FFT value treat the bin as silence so noise
+// floor jitter doesn't keep nudging columns up and down on quiet
+// ambient passages.
+const NOISE_GATE = 0.04;
 
 export function MinecraftBackdrop(): JSX.Element {
   const motionOn = useMotionEnabled();
@@ -70,21 +77,25 @@ export function MinecraftBackdrop(): JSX.Element {
   // read from heightsRef.current at render time.
   const [, setFrame] = useState(0);
 
-  // Per-column FFT bin index, computed once. Log mapping concentrates
-  // the columns over the audible/musical range and avoids the dead
-  // tail of high bins where there's nothing to show.
+  // Per-column FFT bin index, computed once. True logarithmic
+  // (octave-equal) mapping: each column covers the same fraction of
+  // an octave, so musical content spreads evenly across the row.
+  //
+  // Range: bin 2 (skip DC + rumble) up to bin 64 (~5.5 kHz at 44.1k
+  // sample rate). C418's piano-and-strings tracks have basically
+  // nothing above ~6 kHz, so mapping further would leave the right
+  // half of the screen permanently flat — which is exactly what the
+  // user reported with the previous linear-ish mapping up to bin 110.
   const binMap = useMemo(() => {
     const out = new Uint16Array(COLS);
-    const minBin = 2; // skip DC + first bin (rumble)
-    const maxBin = 110; // ~10kHz at 48kHz sample rate; rest is mostly silent
+    const minBin = 2;
+    const maxBin = 64;
+    const lnMin = Math.log(minBin);
+    const lnMax = Math.log(maxBin);
     for (let i = 0; i < COLS; i++) {
       const t = i / (COLS - 1);
-      // Mild log curve — pure log was too bottom-heavy.
-      const k = Math.pow(t, 1.5);
-      out[i] = Math.min(
-        maxBin,
-        Math.max(minBin, Math.round(minBin + k * (maxBin - minBin)))
-      );
+      const bin = Math.round(Math.exp(lnMin + t * (lnMax - lnMin)));
+      out[i] = clamp(bin, minBin, maxBin);
     }
     return out;
   }, []);
@@ -135,9 +146,11 @@ export function MinecraftBackdrop(): JSX.Element {
         const f = freqRef.current;
         for (let i = 0; i < COLS; i++) {
           const raw = f[binMap[i]!]! / 255;
-          // sqrt expands small signals (ambient C418 tracks barely
-          // peg the bytes; we want the bars visibly moving anyway).
-          const level = Math.sqrt(raw);
+          // Mild linear scaling — the AnalyserNode already does its
+          // own time smoothing (smoothingTimeConstant=0.85 in the
+          // provider), and a sqrt boost on top made Sweden look like
+          // a percussion track. Noise gate kills tiny jitter.
+          const level = raw < NOISE_GATE ? 0 : raw * 1.15;
           const target = clamp(
             Math.round(level * MAX_HEIGHT),
             FLOOR_BLOCKS,
