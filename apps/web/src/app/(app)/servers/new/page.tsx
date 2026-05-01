@@ -758,10 +758,11 @@ function PackPickStep({
           so it stays in view as the user scrolls through results.
           Earlier it sat after the grid, but with infinite scroll
           loading more rows underneath it kept slipping further away
-          from the user's eyeline. Sticky-top with a small offset
-          keeps it pinned to the panel chrome instead. */}
+          from the user's eyeline. Sticky-top sits just below the
+          panel's TopNav (h-14 sticky-0) so the card never tucks
+          underneath the navigation chrome. */}
       {pack && (
-        <div className="sticky top-2 z-10">
+        <div className="sticky top-16 z-10">
           <div className="tile p-4 flex items-center gap-3 border-[rgb(var(--accent))]/40 backdrop-blur bg-[rgb(var(--bg-surface-1))]/95">
             {pack.iconUrl ? (
               // eslint-disable-next-line @next/next/no-img-element
