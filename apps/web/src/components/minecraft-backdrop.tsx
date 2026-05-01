@@ -55,11 +55,14 @@ export function MinecraftBackdrop(): JSX.Element {
     try {
       am = new AudioMotionAnalyzer(container, {
         source: audio,
-        // Layout — unchanged from the previous revision; user said
-        // positions and movement are fine, only visual style needs
-        // to match the panel's Minecraft-block aesthetic.
-        mode: 6, // 1/12 octave bands → ~80 bars
-        ledBars: true,
+        // More bars + thinner. mode 7 = 1/24 octave (≈ 160 bars over
+        // our 60Hz–6kHz range). With high barSpace each bar reads as
+        // a thin column instead of a fat block.
+        mode: 7,
+        // SOLID single-column bars — LED segmentation off. The user
+        // wants the WE-reference look: each bar is one filled rect
+        // top to bottom, not a stack of glowing pixels.
+        ledBars: false,
         showScaleX: false,
         showScaleY: false,
         showPeaks: true,
@@ -77,20 +80,18 @@ export function MinecraftBackdrop(): JSX.Element {
         maxFreq: 6000,
         peakLine: false,
         channelLayout: "single",
-        // Pixel-block styling — this is the bit the user actually
-        // wants. Wide gaps between bars + low-res rendering + sharp
-        // square corners + opaque fill makes each bar read as a
-        // proper stack of Minecraft blocks instead of a thin LED
-        // strip. `colorMode: "gradient"` makes each bar's segments
-        // pick their colour from the registered gradient stops based
-        // on vertical position.
-        barSpace: 0.45,
+        // Sharp solid columns: thick gap between bars, no rounding,
+        // no outline, full opacity. `colorMode: "gradient"` paints
+        // each whole bar from a single gradient (top of bar = pos 0,
+        // bottom of bar = pos 1), so the grass-on-top, dirt-below
+        // palette still reads cleanly even without LED segments.
+        barSpace: 0.55,
         roundBars: false,
         outlineBars: false,
         alphaBars: false,
         fillAlpha: 1,
         lineWidth: 0,
-        loRes: true,
+        loRes: false,
         colorMode: "gradient",
       });
 
