@@ -754,6 +754,47 @@ function PackPickStep({
       </div>
       {err && <div className="chip chip-danger !h-auto !py-2 !px-3">{err}</div>}
 
+      {/* Selected-pack summary lives ABOVE the grid (and is sticky)
+          so it stays in view as the user scrolls through results.
+          Earlier it sat after the grid, but with infinite scroll
+          loading more rows underneath it kept slipping further away
+          from the user's eyeline. Sticky-top with a small offset
+          keeps it pinned to the panel chrome instead. */}
+      {pack && (
+        <div className="sticky top-2 z-10">
+          <div className="tile p-4 flex items-center gap-3 border-[rgb(var(--accent))]/40 backdrop-blur bg-[rgb(var(--bg-surface-1))]/95">
+            {pack.iconUrl ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={pack.iconUrl}
+                alt=""
+                className="w-10 h-10 rounded-md object-cover shrink-0"
+              />
+            ) : (
+              <span className="w-10 h-10 rounded-md bg-surface-2 text-ink-secondary grid place-items-center shrink-0">
+                <Package size={18} />
+              </span>
+            )}
+            <div className="flex-1 min-w-0">
+              <div className="text-xs text-ink-muted">
+                {t("wizard.modpack.selected")}
+              </div>
+              <div className="font-medium truncate">{pack.name}</div>
+              <div className="text-xs text-ink-muted truncate">
+                {packVersion?.label ?? t("wizard.packVersion.latest")}
+              </div>
+            </div>
+            <button
+              type="button"
+              className="btn btn-ghost"
+              onClick={() => setPreview(pack)}
+            >
+              {t("wizard.modpack.changeVersion")}
+            </button>
+          </div>
+        </div>
+      )}
+
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
         {results.map((r) => {
           const active = pack?.id === r.id;
@@ -820,42 +861,6 @@ function PackPickStep({
           disabled={loadingMore || busy}
           loading={loadingMore}
         />
-      )}
-
-      {/* Confirmation summary: when a pack is selected we show a compact
-          card so the user can re-open the drawer or change version
-          without scrolling around the grid. */}
-      {pack && (
-        <div className="tile p-4 flex items-center gap-3 border-[rgb(var(--accent))]/40">
-          {pack.iconUrl ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              src={pack.iconUrl}
-              alt=""
-              className="w-10 h-10 rounded-md object-cover shrink-0"
-            />
-          ) : (
-            <span className="w-10 h-10 rounded-md bg-surface-2 text-ink-secondary grid place-items-center shrink-0">
-              <Package size={18} />
-            </span>
-          )}
-          <div className="flex-1 min-w-0">
-            <div className="text-xs text-ink-muted">
-              {t("wizard.modpack.selected")}
-            </div>
-            <div className="font-medium truncate">{pack.name}</div>
-            <div className="text-xs text-ink-muted truncate">
-              {packVersion?.label ?? t("wizard.packVersion.latest")}
-            </div>
-          </div>
-          <button
-            type="button"
-            className="btn btn-ghost"
-            onClick={() => setPreview(pack)}
-          >
-            {t("wizard.modpack.changeVersion")}
-          </button>
-        </div>
       )}
 
       <ContentDetailDrawer
