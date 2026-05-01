@@ -2,11 +2,13 @@
 import { useTheme } from "next-themes";
 import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
-import { Sun, Moon, Monitor, Check } from "lucide-react";
+import { Sun, Moon, Monitor, Check, Music, SkipForward } from "lucide-react";
 import { ACCENTS, useAccent, type Accent } from "./theme-provider";
 import { cn } from "@/lib/cn";
 import { useT } from "@/lib/i18n";
 import { useMotionPref, type MotionPref } from "@/lib/motion-pref";
+import { useMusicPref, type MusicPref } from "@/lib/music-pref";
+import { useBackdropBeat } from "@/lib/backdrop-beat";
 
 const ACCENT_PREVIEW: Record<Accent, { label: string; hex: string }> = {
   emerald: { label: "Emerald", hex: "#059669" },
@@ -117,6 +119,100 @@ export function AppearancePanel(): JSX.Element {
             </button>
           ))}
         </div>
+      </div>
+
+      <MusicSection />
+    </div>
+  );
+}
+
+function MusicSection(): JSX.Element {
+  const { t } = useT();
+  const { pref, setPref, volume, setVolume } = useMusicPref();
+  const { tracks, current, playing, next } = useBackdropBeat();
+  const hasTracks = tracks.length > 0;
+
+  return (
+    <div>
+      <h3 className="font-medium mb-1">{t("music.title")}</h3>
+      <p className="text-sm text-ink-muted mb-3 max-w-xl">
+        {t("music.subtitle")}
+      </p>
+      <div className="grid grid-cols-2 gap-3 max-w-xl">
+        {(
+          [
+            { v: "off", labelKey: "music.off" },
+            { v: "on", labelKey: "music.on" },
+          ] as const
+        ).map(({ v, labelKey }) => (
+          <button
+            key={v}
+            type="button"
+            onClick={() => setPref(v as MusicPref)}
+            className={cn(
+              "relative px-4 py-3 rounded-lg border text-sm font-medium transition-colors",
+              pref === v
+                ? "border-accent/60 bg-surface-2 text-ink"
+                : "border-line text-ink-secondary hover:bg-surface-2"
+            )}
+          >
+            {t(labelKey)}
+          </button>
+        ))}
+      </div>
+
+      {/* Volume + transport row. Disabled when music is off so the user
+          isn't fiddling with controls that have no effect. */}
+      <div
+        className={cn(
+          "mt-4 max-w-xl flex items-center gap-3",
+          pref !== "on" && "opacity-50 pointer-events-none"
+        )}
+      >
+        <Music size={14} className="text-ink-secondary shrink-0" />
+        <input
+          type="range"
+          min={0}
+          max={1}
+          step={0.05}
+          value={volume}
+          onChange={(e) => setVolume(Number(e.target.value))}
+          className="flex-1 accent-[rgb(var(--accent))]"
+          aria-label={t("music.volume")}
+        />
+        <span className="text-xs text-ink-muted tabular-nums w-9 text-right">
+          {Math.round(volume * 100)}%
+        </span>
+        {hasTracks && (
+          <button
+            type="button"
+            onClick={next}
+            className="btn btn-ghost !py-1.5 !px-2"
+            aria-label={t("music.next")}
+            title={t("music.next")}
+          >
+            <SkipForward size={14} />
+          </button>
+        )}
+      </div>
+
+      {/* Now-playing / setup hint. */}
+      <div className="mt-3 text-xs max-w-xl">
+        {!hasTracks ? (
+          <p className="text-ink-muted leading-relaxed whitespace-pre-line">
+            {t("music.noTracksHint")}
+          </p>
+        ) : pref === "on" && current ? (
+          <p className="text-ink-secondary">
+            {playing ? t("music.nowPlaying") : t("music.loading")}{" "}
+            <span className="text-ink font-medium">{current.title}</span>{" "}
+            <span className="text-ink-muted">· {current.bpm} BPM</span>
+          </p>
+        ) : (
+          <p className="text-ink-muted">
+            {t("music.tracksAvailable", { n: tracks.length })}
+          </p>
+        )}
       </div>
     </div>
   );

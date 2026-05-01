@@ -6,6 +6,8 @@ import { ThemeProvider } from "@/components/theme-provider";
 import { DialogProvider } from "@/components/dialog-provider";
 import { I18nProvider } from "@/lib/i18n";
 import { MotionPrefProvider } from "@/lib/motion-pref";
+import { MusicPrefProvider } from "@/lib/music-pref";
+import { BackdropBeatProvider } from "@/lib/backdrop-beat";
 
 // Press Start 2P — the canonical pixel font, close to Minecraft's title
 // look. Exposed as --font-pixel so .font-pixel (see globals.css) picks it
@@ -38,7 +40,11 @@ export default function RootLayout({
         <ThemeProvider>
           <I18nProvider>
             <MotionPrefProvider>
-              <DialogProvider>{children}</DialogProvider>
+              <MusicPrefProvider>
+                <BackdropBeatProvider>
+                  <DialogProvider>{children}</DialogProvider>
+                </BackdropBeatProvider>
+              </MusicPrefProvider>
             </MotionPrefProvider>
           </I18nProvider>
         </ThemeProvider>

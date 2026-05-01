@@ -55,6 +55,19 @@ const en: Dict = {
   "motion.on": "On",
   "motion.off": "Off",
 
+  "music.title": "Background music",
+  "music.subtitle":
+    "Plays soundtracks while you use the panel. The skyline at the bottom of the page pulses in sync with the current track's beat.",
+  "music.on": "On",
+  "music.off": "Off",
+  "music.volume": "Volume",
+  "music.next": "Skip track",
+  "music.nowPlaying": "Now playing:",
+  "music.loading": "Loading…",
+  "music.tracksAvailable": "{n} track(s) available — turn on to start.",
+  "music.noTracksHint":
+    "No tracks configured.\nDrop ogg/mp3 files into apps/web/public/audio/ and list them in manifest.json with their BPM. See the README in that folder for details. Without tracks the skyline still pulses at a fallback 90 BPM.",
+
   "menu.settings": "Settings",
   "menu.signOut": "Sign out",
 
@@ -590,6 +603,19 @@ const ru: Dict = {
   "motion.auto": "Авто",
   "motion.on": "Включены",
   "motion.off": "Выключены",
+
+  "music.title": "Фоновая музыка",
+  "music.subtitle":
+    "Играет саундтреки во время работы панели. Силуэт блоков внизу страницы пульсирует в такт текущему треку.",
+  "music.on": "Включена",
+  "music.off": "Выключена",
+  "music.volume": "Громкость",
+  "music.next": "Следующий трек",
+  "music.nowPlaying": "Сейчас играет:",
+  "music.loading": "Загрузка…",
+  "music.tracksAvailable": "Треков в манифесте: {n}. Включи, чтобы запустить.",
+  "music.noTracksHint":
+    "Треки не настроены.\nПоложи ogg/mp3 в apps/web/public/audio/ и пропиши их в manifest.json с указанием BPM. Подробности в README в той же папке. Без треков силуэт всё равно пульсирует — на запасных 90 BPM.",
 
   "menu.settings": "Настройки",
   "menu.signOut": "Выйти",
