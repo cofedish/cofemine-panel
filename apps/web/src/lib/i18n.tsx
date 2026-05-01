@@ -115,6 +115,7 @@ const en: Dict = {
 
   "server.tabs.overview": "Overview",
   "server.tabs.console": "Console",
+  "server.tabs.map": "Map",
   "server.tabs.files": "Files",
   "server.tabs.properties": "Properties",
   "server.tabs.backups": "Backups",
@@ -673,6 +674,7 @@ const ru: Dict = {
 
   "server.tabs.overview": "Обзор",
   "server.tabs.console": "Консоль",
+  "server.tabs.map": "Карта",
   "server.tabs.files": "Файлы",
   "server.tabs.properties": "Свойства",
   "server.tabs.backups": "Бэкапы",

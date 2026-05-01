@@ -12,6 +12,7 @@ import { registerAuthHook } from "./auth/plugin.js";
 import { authRoutes } from "./auth/routes.js";
 import { nodesRoutes } from "./nodes/routes.js";
 import { serversRoutes } from "./servers/routes.js";
+import { mapRoutes } from "./servers/map-routes.js";
 import { backupsRoutes } from "./backups/routes.js";
 import { schedulesRoutes } from "./schedules/routes.js";
 import { templatesRoutes } from "./templates/routes.js";
@@ -84,6 +85,11 @@ async function bootstrap(): Promise<void> {
   await app.register(authRoutes, { prefix: "/auth" });
   await app.register(nodesRoutes, { prefix: "/nodes" });
   await app.register(serversRoutes, { prefix: "/servers" });
+  // Live-map proxy → agent → dynmap. Mounted at root because the
+  // route is parameterised on /servers/:id/map/* — re-prefixing under
+  // /servers would double the path. Auth is handled inside the
+  // route via assertServerPermission.
+  await app.register(mapRoutes);
   await app.register(backupsRoutes); // mounts under /servers/:id/backups and /backups/:id
   await app.register(schedulesRoutes);
   await app.register(templatesRoutes, { prefix: "/templates" });

@@ -680,6 +680,49 @@ select:disabled {
   letter-spacing: -0.005em;
 }
 
+/* Player marker on the live server map. Pixel-art head in an accent
+   ring, plus a tiny floating name tag. Used inside Leaflet's divIcon
+   so the markup is HTML, not SVG. */
+.player-marker {
+  position: relative;
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  transform: translate(-50%, -50%);
+  transition: transform 120ms ease;
+}
+.player-marker:hover { transform: translate(-50%, -50%) scale(1.12); z-index: 1000; }
+.player-marker img {
+  width: 24px;
+  height: 24px;
+  border-radius: 4px;
+  border: 2px solid rgb(var(--accent));
+  background: rgb(var(--bg-surface-1));
+  image-rendering: pixelated;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+}
+.player-marker-name {
+  position: absolute;
+  top: -16px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 10px;
+  font-weight: 600;
+  color: rgb(var(--fg-primary));
+  background: rgb(var(--bg-surface-1) / 0.92);
+  padding: 1px 5px;
+  border-radius: 3px;
+  white-space: nowrap;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+  pointer-events: none;
+}
+/* Leaflet attribution clutter doesn't suit our minimal panel chrome
+   — and we already credit dynmap in the install hint. */
+.leaflet-container .leaflet-control-attribution { display: none !important; }
+.leaflet-container { background: rgb(var(--bg-surface-2)); }
+
 /* Reduced-motion friendly animations */
 @media (prefers-reduced-motion: reduce) {
   *,

@@ -4,6 +4,7 @@ import { config } from "./config.js";
 import { serversAgentRoutes } from "./routes/servers.js";
 import { backupsAgentRoutes } from "./routes/backups.js";
 import { installAgentRoutes } from "./routes/install.js";
+import { proxyAgentRoutes } from "./routes/proxy.js";
 import { consoleAgentWs } from "./ws/console.js";
 import { ensureNetwork } from "./docker.js";
 import { ensureDir } from "./paths.js";
@@ -33,6 +34,7 @@ async function bootstrap(): Promise<void> {
   await app.register(serversAgentRoutes);
   await app.register(backupsAgentRoutes);
   await app.register(installAgentRoutes);
+  await app.register(proxyAgentRoutes);
   await consoleAgentWs(app);
 
   await ensureDir(config.AGENT_DATA_ROOT);

@@ -11,6 +11,7 @@ import { ServerProperties } from "@/components/server-properties";
 import { ServerContent } from "@/components/server-content";
 import { ServerDiagnostics } from "@/components/server-diagnostics";
 import { ServerSchedules } from "@/components/server-schedules";
+import { ServerMap } from "@/components/server-map";
 import { StatusDot } from "@/components/status-dot";
 import { PageHeader } from "@/components/page-header";
 import { getServerMeta, ServerTypeIcon } from "@/components/server-icons";
@@ -60,6 +61,7 @@ type Player = { online: number; max: number; players: string[] };
 const TABS = [
   { key: "overview", i18n: "server.tabs.overview" },
   { key: "console", i18n: "server.tabs.console" },
+  { key: "map", i18n: "server.tabs.map" },
   { key: "files", i18n: "server.tabs.files" },
   { key: "properties", i18n: "server.tabs.properties" },
   { key: "backups", i18n: "server.tabs.backups" },
@@ -334,6 +336,7 @@ export default function ServerDetailPage(): JSX.Element {
           <Overview data={data} players={players ?? null} />
         )}
         {tab === "console" && <ServerConsole serverId={id} />}
+        {tab === "map" && <ServerMap serverId={id} />}
         {tab === "files" && <ServerFiles serverId={id} />}
         {tab === "properties" && <ServerProperties serverId={id} />}
         {tab === "backups" && <ServerBackups serverId={id} />}
