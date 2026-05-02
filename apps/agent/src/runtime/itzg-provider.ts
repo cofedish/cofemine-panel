@@ -127,6 +127,16 @@ export class ItzgRuntimeProvider implements MinecraftRuntimeProvider {
       // — disk-backed swap would tank tick rate before OOM-killing.
       MemorySwap: containerMemoryMb * 1024 * 1024,
       NetworkMode: config.AGENT_DOCKER_NETWORK,
+      // Make `host.docker.internal` resolve to the docker host's
+      // gateway IP from inside the MC container, regardless of which
+      // custom bridge network the container ends up on. Without this,
+      // a download-proxy running on the host that the user pointed
+      // at via 127.0.0.1 / 172.17.0.1 / etc. is unreachable from
+      // cofemine_mcnet — those addresses belong to default bridge,
+      // not ours. The user's panel-configured proxy host is rewritten
+      // to host.docker.internal in materializeEnv when it looks
+      // loopbacky, so the JVM tunnels into the host correctly.
+      ExtraHosts: ["host.docker.internal:host-gateway"],
     };
     if (spec.cpuLimit) {
       hostConfig.NanoCpus = Math.floor(spec.cpuLimit * 1e9);

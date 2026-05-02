@@ -141,14 +141,38 @@ export async function clearDownloadProxy(): Promise<void> {
 }
 
 /**
+ * If the user pointed the proxy at a loopback / default-bridge
+ * address (localhost / 127.0.0.1 / 172.17.0.1 — that last one is
+ * the docker0 default-bridge gateway), the MC container running on
+ * cofemine_mcnet (a custom bridge) physically can't reach it. The
+ * itzg container spec now ships with `host.docker.internal` aliased
+ * to the host gateway, so this helper rewrites those loopback-ish
+ * IPs to that hostname. The user's panel config stays untouched —
+ * we only translate at the moment we hand the value to the JVM.
+ */
+function rewriteHostForContainer(host: string): string {
+  const h = host.trim().toLowerCase();
+  if (
+    h === "localhost" ||
+    h === "127.0.0.1" ||
+    h === "::1" ||
+    h === "172.17.0.1"
+  ) {
+    return "host.docker.internal";
+  }
+  return host;
+}
+
+/**
  * Translate a proxy config into JVM system properties that reactor-netty
  * (mc-image-helper's HTTP client) respects. Both SOCKS and HTTP proxies
  * are supported.
  */
 export function makeJavaToolOptions(proxy: DownloadProxyConfig): string {
   const parts: string[] = [];
+  const host = rewriteHostForContainer(proxy.host);
   if (proxy.protocol === "socks") {
-    parts.push(`-DsocksProxyHost=${proxy.host}`);
+    parts.push(`-DsocksProxyHost=${host}`);
     parts.push(`-DsocksProxyPort=${proxy.port}`);
     if (proxy.username) {
       parts.push(`-Djava.net.socks.username=${proxy.username}`);
@@ -157,9 +181,9 @@ export function makeJavaToolOptions(proxy: DownloadProxyConfig): string {
       parts.push(`-Djava.net.socks.password=${proxy.password}`);
     }
   } else {
-    parts.push(`-Dhttp.proxyHost=${proxy.host}`);
+    parts.push(`-Dhttp.proxyHost=${host}`);
     parts.push(`-Dhttp.proxyPort=${proxy.port}`);
-    parts.push(`-Dhttps.proxyHost=${proxy.host}`);
+    parts.push(`-Dhttps.proxyHost=${host}`);
     parts.push(`-Dhttps.proxyPort=${proxy.port}`);
     if (proxy.username) {
       parts.push(`-Dhttp.proxyUser=${proxy.username}`);
