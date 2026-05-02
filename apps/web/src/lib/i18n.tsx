@@ -427,7 +427,7 @@ const en: Dict = {
   "wizard.eula": "Accept Minecraft EULA",
   "wizard.dynmap.label": "Install live web map (Dynmap or BlueMap)",
   "wizard.dynmap.hint":
-    "Schedules the right map plugin / mod to be dropped into the server right after its first successful boot — Dynmap on Paper-family, BlueMap on Forge / NeoForge / Fabric (it covers more modern MC versions than dynmap currently does). Once the server restarts to load it, the Map page in this panel goes live with player skins and positions.",
+    "Resolves the right map jar (Dynmap on Paper-family, BlueMap on Forge / NeoForge / Fabric) before the server's first boot and bakes its download URL into the server's env. itzg downloads it on every start, alongside the modpack's own mods, so the file is always there. Server creation takes a moment longer while we look up the compatible version.",
   "wizard.eulaDesc":
     "By checking this you agree to the Minecraft EULA. Required to boot the server.",
   "wizard.env": "Extra environment variables",
@@ -1007,7 +1007,7 @@ const ru: Dict = {
   "wizard.eula": "Принять Minecraft EULA",
   "wizard.dynmap.label": "Установить живую web-карту (Dynmap или BlueMap)",
   "wizard.dynmap.hint":
-    "После первого успешного запуска сервера панель сама докинет нужный плагин/мод — Dynmap для Paper-семьи, BlueMap для Forge / NeoForge / Fabric (он лучше держит свежие версии MC, чем Dynmap). Сервер автоматически перезапустится чтобы подхватить мод, и страница «Карта» заживёт со скинами и координатами игроков.",
+    "Резолвит совместимую версию jar'а (Dynmap для Paper-семьи, BlueMap для Forge / NeoForge / Fabric) ДО первого запуска сервера и зашивает URL в env. itzg сам качает файл на каждом старте, рядом с модами модпака, файл всегда на месте. Создание сервера займёт чуть дольше — резолв версии через Modrinth API.",
   "wizard.eulaDesc":
     "Отметка подтверждает согласие с Minecraft EULA. Обязательно для запуска сервера.",
   "wizard.env": "Дополнительные переменные окружения",

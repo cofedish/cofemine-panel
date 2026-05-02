@@ -163,6 +163,60 @@ export default function CreateServerPage(): JSX.Element {
     setBusy(true);
     setErr(null);
     try {
+      // Resolve the live-map jar URL BEFORE creating the server, so
+      // we can inject it into the container's env at create-time.
+      // itzg's MODS / PLUGINS env vars are its native mechanism for
+      // "extra files alongside the modpack" — itzg downloads them on
+      // every start and they survive across pack reinstalls. This
+      // replaces our previous post-boot-install-hook approach which
+      // relied on a status reconciler firing after first boot and was
+      // brittle in practice (didn't fire reliably, didn't survive
+      // modpack first-install wipes, etc.).
+      const mergedEnv: Record<string, string> = { ...env };
+      const dynmapTarget = dynmapTargetFor(
+        effectiveType,
+        packVersion?.loader
+      );
+      if (installDynmap && dynmapTarget) {
+        const { gameVersion, loader } = resolveRuntimeFilters(
+          source,
+          effectiveType,
+          version,
+          packVersion
+        );
+        try {
+          const url = await resolveModrinthDownloadUrl(
+            dynmapTarget.slug,
+            gameVersion,
+            loader
+          );
+          if (url) {
+            // itzg env keys: PLUGINS for Bukkit-family, MODS for
+            // Forge/Fabric/NeoForge. Comma-append if the user already
+            // has something there.
+            const envKey =
+              dynmapTarget.kind === "plugin" ? "PLUGINS" : "MODS";
+            mergedEnv[envKey] = mergedEnv[envKey]
+              ? `${mergedEnv[envKey]},${url}`
+              : url;
+          } else {
+            setErr(
+              `Server will be created, but no compatible ${dynmapTarget.slug} build was found for MC ${gameVersion ?? "?"} / ${loader ?? "?"}. The map plugin won't auto-install — pick a compatible release manually from the Content tab.`
+            );
+          }
+        } catch (e) {
+          const msg =
+            e instanceof ApiError
+              ? e.message
+              : e instanceof Error
+                ? e.message
+                : String(e);
+          setErr(
+            `Server will be created, but resolving the map plugin failed: ${msg}`
+          );
+        }
+      }
+
       const body: any = {
         name,
         description: description || undefined,
@@ -170,7 +224,7 @@ export default function CreateServerPage(): JSX.Element {
         type: effectiveType,
         memoryMb: Number(memoryMb),
         ports: [{ host: Number(hostPort), container: 25565, protocol: "tcp" }],
-        env,
+        env: mergedEnv,
         eulaAccepted: eula,
       };
       if (source === "plain") {
@@ -205,53 +259,10 @@ export default function CreateServerPage(): JSX.Element {
           console.warn("Failed to upload icon after create:", e);
         }
       }
-      // Optional live-map auto-install. Stored as a panel-internal
-      // env flag rather than fired immediately, because itzg's
-      // AUTO_CURSEFORGE / MODRINTH first-boot pack install fully
-      // owns /data/mods and would wipe a pre-installed jar against
-      // the pack manifest. The status reconciler picks up the flag
-      // when the server transitions into "running" the first time
-      // and fires the install via the agent then. We use the same
-      // path for plain (non-modpack) servers too — mods/ is empty
-      // either way and one code path is easier to reason about.
-      //
-      // Agent strips all `__COFEMINE_*` env keys before passing env
-      // into the container, so the flag never reaches itzg.
-      const dynmapTarget = dynmapTargetFor(
-        effectiveType,
-        packVersion?.loader
-      );
-      if (installDynmap && dynmapTarget) {
-        const { gameVersion, loader } = resolveRuntimeFilters(
-          source,
-          effectiveType,
-          version,
-          packVersion
-        );
-        try {
-          const pending = {
-            provider: "modrinth" as const,
-            projectId: dynmapTarget.slug,
-            kind: dynmapTarget.kind,
-            ...(gameVersion ? { gameVersion } : {}),
-            ...(loader ? { loader } : {}),
-          };
-          await api.patch(`/servers/${res.id}`, {
-            env: {
-              ...env,
-              __COFEMINE_PENDING_MAP_INSTALL: JSON.stringify(pending),
-            },
-          });
-        } catch (e) {
-          const msg =
-            e instanceof ApiError
-              ? e.message
-              : e instanceof Error
-                ? e.message
-                : String(e);
-          setErr(`Server created, but Dynmap install scheduling failed: ${msg}`);
-        }
-      }
+      // (Dynmap / BlueMap auto-install was already wired into the
+      // create body above via MODS / PLUGINS env — nothing else to
+      // do here. itzg downloads the jar from the URL we baked in,
+      // alongside / on top of the modpack's own mods.)
       router.push(`/servers/${res.id}`);
     } catch (e) {
       setErr(e instanceof ApiError ? e.message : String(e));
@@ -1439,6 +1450,42 @@ function resolveRuntimeFilters(
     gameVersion: packVersion?.gameVersion,
     loader: packVersion?.loader,
   };
+}
+
+/**
+ * Look up the newest Modrinth version of `slug` that's compatible
+ * with the given gameVersion + loader, and return the direct .jar
+ * download URL. Returns null when nothing compatible exists — caller
+ * surfaces a notice but still creates the server.
+ *
+ * The endpoint we hit (`/integrations/modrinth/projects/:id/versions`)
+ * already does the gameVersion/loader filtering server-side via
+ * Modrinth's facets, so versions[0] here is the newest *compatible*
+ * build, not the project's newest in absolute terms.
+ */
+async function resolveModrinthDownloadUrl(
+  slug: string,
+  gameVersion?: string,
+  loader?: string
+): Promise<string | null> {
+  const qs = new URLSearchParams();
+  if (gameVersion) qs.set("gameVersion", gameVersion);
+  if (loader) qs.set("loader", loader);
+  const versions = await api.get<
+    Array<{
+      id: string;
+      files: Array<{ url: string; filename: string; primary: boolean }>;
+    }>
+  >(
+    `/integrations/modrinth/projects/${encodeURIComponent(
+      slug
+    )}/versions${qs.toString() ? `?${qs}` : ""}`
+  );
+  const v = versions[0];
+  if (!v) return null;
+  // Prefer the file flagged primary; fall back to the first.
+  const file = v.files.find((f) => f.primary) ?? v.files[0];
+  return file?.url ?? null;
 }
 
 function typeToLoader(t: ServerTypeKey): string | undefined {
