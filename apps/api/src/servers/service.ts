@@ -5,6 +5,7 @@ import { decryptSecret } from "../crypto.js";
 import {
   INSTALL_PROXY_ENV_FLAG,
   makeJavaToolOptions,
+  makeProxyEnv,
   readDownloadProxy,
 } from "../integrations/download-proxy.js";
 
@@ -25,11 +26,24 @@ async function materializeEnv(
   if (!useProxy) return out;
   const proxy = await readDownloadProxy();
   if (!proxy) return out;
+  // JAVA_TOOL_OPTIONS — works for `java.net.URL` style HTTP clients
+  // (older JDKs, some library code paths). Kept for completeness.
   const opts = makeJavaToolOptions(proxy);
-  // Respect user-provided JAVA_TOOL_OPTIONS — append ours, don't overwrite.
   out.JAVA_TOOL_OPTIONS = out.JAVA_TOOL_OPTIONS
     ? `${out.JAVA_TOOL_OPTIONS} ${opts}`
     : opts;
+  // The big one: HTTP_PROXY / HTTPS_PROXY / NO_PROXY. mc-image-helper
+  // uses reactor-netty for its downloads, and reactor-netty (like
+  // most modern HTTP clients in the JVM ecosystem — curl, wget, the
+  // JDK 11+ HttpClient) reads these env vars but DOES NOT honour
+  // Java's `-DsocksProxyHost` system property. The whole reason the
+  // user's container "wasn't going through the proxy" was that the
+  // JVM picked up our SOCKS settings but the actual download client
+  // ignored them. These env vars fix that — set both upper- and
+  // lowercase since different libs check different cases. NO_PROXY
+  // covers loopback, docker bridges, and `.ru` (which xray's routing
+  // already sends direct on the host anyway).
+  Object.assign(out, makeProxyEnv(proxy));
   return out;
 }
 

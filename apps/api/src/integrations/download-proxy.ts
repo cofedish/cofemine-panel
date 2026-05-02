@@ -164,6 +164,43 @@ function rewriteHostForContainer(host: string): string {
 }
 
 /**
+ * Build the universal `HTTP_PROXY` / `HTTPS_PROXY` URL that
+ * curl / wget / Java 11+ HttpClient / reactor-netty (via
+ * `proxyWithSystemProperties`) respect. Unlike Java's
+ * `-DsocksProxyHost`, which only routes URLConnection traffic,
+ * these env vars are honoured by virtually every HTTP client used
+ * inside the itzg image.
+ *
+ * For SOCKS-only proxies we still emit a `socks5://...` URL — most
+ * modern tools that read these env vars accept that form. For
+ * mixed-mode proxies (xray on 2080) the HTTP path on the same port
+ * is what actually carries the traffic in practice.
+ */
+export function makeProxyUrl(proxy: DownloadProxyConfig): string {
+  const host = rewriteHostForContainer(proxy.host);
+  const auth =
+    proxy.username || proxy.password
+      ? `${encodeURIComponent(proxy.username ?? "")}:${encodeURIComponent(
+          proxy.password ?? ""
+        )}@`
+      : "";
+  const scheme = proxy.protocol === "socks" ? "socks5" : "http";
+  return `${scheme}://${auth}${host}:${proxy.port}`;
+}
+
+/**
+ * Hosts that should bypass the proxy. Localhost variants so the
+ * MC server can talk to its own RCON / mc-monitor without tunnelling.
+ * Plus `.ru` because — per the user's xray routing — `.ru` already
+ * goes direct on the host and there's no point sending those
+ * requests through the proxy chain only to be unwrapped at egress.
+ * Plus the docker bridge ranges so inter-container traffic on
+ * cofemine_mcnet doesn't get NAT'd through the proxy.
+ */
+const NO_PROXY_HOSTS =
+  "localhost,127.0.0.1,::1,host.docker.internal,*.ru,172.16.0.0/12,10.0.0.0/8,192.168.0.0/16";
+
+/**
  * Translate a proxy config into JVM system properties that reactor-netty
  * (mc-image-helper's HTTP client) respects. Both SOCKS and HTTP proxies
  * are supported.
@@ -195,6 +232,28 @@ export function makeJavaToolOptions(proxy: DownloadProxyConfig): string {
     }
   }
   return parts.join(" ");
+}
+
+/**
+ * Build the env-var bundle for the container: HTTP/HTTPS_PROXY (the
+ * universal mechanism most HTTP clients respect) plus NO_PROXY for
+ * traffic that should stay direct.
+ */
+export function makeProxyEnv(
+  proxy: DownloadProxyConfig
+): Record<string, string> {
+  const url = makeProxyUrl(proxy);
+  return {
+    // Both upper- and lowercase forms — different libraries pick
+    // different variants. curl prefers lowercase, Java 11 HttpClient
+    // checks both. Set both to avoid surprises.
+    HTTP_PROXY: url,
+    HTTPS_PROXY: url,
+    http_proxy: url,
+    https_proxy: url,
+    NO_PROXY: NO_PROXY_HOSTS,
+    no_proxy: NO_PROXY_HOSTS,
+  };
 }
 
 /** Server-env flag that opts a server into proxy routing during its next
