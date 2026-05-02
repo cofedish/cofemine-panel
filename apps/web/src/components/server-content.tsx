@@ -99,7 +99,7 @@ type Failure = {
 };
 
 type InstallInterrupt = {
-  kind: "timeout" | "exhausted" | "generic";
+  kind: "timeout" | "exhausted" | "generic" | "blocked";
   message: string;
 };
 
@@ -752,6 +752,7 @@ function InterruptBanner({
     timeout: "CurseForge: таймаут скачивания",
     exhausted: "CurseForge: попытки исчерпаны",
     generic: "CurseForge: установка прервана",
+    blocked: "CurseForge: 403 — IP заблокирован?",
   };
   const proxyActive = server?.env?.__COFEMINE_INSTALL_PROXY === "1";
 

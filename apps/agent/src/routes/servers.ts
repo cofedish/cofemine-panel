@@ -609,7 +609,12 @@ export async function serversAgentRoutes(app: FastifyInstance): Promise<void> {
     const { id } = req.params as { id: string };
     const container = await findContainer(id);
     if (!container) {
-      return { failures: [], interrupt: null, booted: false };
+      return {
+        failures: [],
+        interrupt: null,
+        booted: false,
+        containerHasProxyEnv: false,
+      };
     }
     // Scope the log read to logs produced since the container's most
     // recent StartedAt. Without this, a successful boot from an earlier
@@ -632,6 +637,21 @@ export async function serversAgentRoutes(app: FastifyInstance): Promise<void> {
     const text = demuxLogBuffer(rawLogs);
     const interrupt = parseInstallInterrupt(text);
     const booted = detectBooted(text);
+    // Reflect whether the container's actual Config.Env carries a
+    // proxy injection (HTTPS_PROXY or socks-flavoured JAVA_TOOL_OPTIONS).
+    // The DB-side flag only records intent — `toggleProxyAndRestart`
+    // can fail mid-flight (reconcile or start throws) and leave the
+    // DB saying "proxy=on" while the live container has nothing.
+    // The watchdog now uses this to detect that desync and force a
+    // clean reprovision instead of sitting on the wrong state.
+    const containerEnv = info?.Config?.Env ?? [];
+    const containerHasProxyEnv = containerEnv.some(
+      (line) =>
+        /^HTTPS_PROXY=/.test(line) ||
+        /^HTTP_PROXY=/.test(line) ||
+        /^JAVA_TOOL_OPTIONS=.*-DsocksProxyHost=/.test(line) ||
+        /^JAVA_TOOL_OPTIONS=.*-Dhttps\.proxyHost=/.test(line)
+    );
     return {
       failures: parseCfFailures(text),
       // If the MC server booted AFTER the last install interrupt, the
@@ -639,6 +659,7 @@ export async function serversAgentRoutes(app: FastifyInstance): Promise<void> {
       // it so UI + watchdog see a clean "booted" state.
       interrupt: booted ? null : interrupt,
       booted,
+      containerHasProxyEnv,
     };
   });
 
@@ -1190,7 +1211,7 @@ function parseCfFailures(text: string): Array<{
 type InstallInterrupt = {
   /** "timeout" for netty ReadTimeoutException, "exhausted" for reactor
    *  RetryExhaustedException, "generic" for the catch-all init log line. */
-  kind: "timeout" | "exhausted" | "generic";
+  kind: "timeout" | "exhausted" | "generic" | "blocked";
   /** One-liner safe to show in UI. */
   message: string;
 };
@@ -1377,6 +1398,23 @@ function parseInstallInterrupt(text: string): InstallInterrupt | null {
       kind: "generic",
       message:
         "CurseForge modpack install was interrupted. Press Start to resume — already-downloaded files are preserved.",
+    };
+  }
+  // CDN-side 403 storm — usually means the host's IP got region-
+  // blocked by CurseForge or Cloudflare. Single 403s happen for
+  // individual restricted mods, but THREE OR MORE in the same boot
+  // is a strong "egress is blocked, route through the proxy"
+  // signal. We emit interrupt early so the watchdog flips proxy on
+  // before the install grinds through its full retry budget for
+  // every mod (which can take HOURS on big modpacks).
+  const blocked = text.match(
+    /FailedRequestException[^\n]*\b403\b[^\n]*Forbidden/g
+  );
+  if (blocked && blocked.length >= 3) {
+    return {
+      kind: "blocked",
+      message:
+        "CurseForge is rejecting downloads with 403 Forbidden — looks like an IP-region block. Route the install through the configured proxy and resume.",
     };
   }
   return null;
