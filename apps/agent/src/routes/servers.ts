@@ -466,15 +466,28 @@ export async function serversAgentRoutes(app: FastifyInstance): Promise<void> {
       req.log
     );
 
-    // CurseForge fingerprint lookup — only files that are still unresolved
-    // after both Modrinth passes. Compute CF's custom Murmur2 hash for
-    // each jar (whitespace-stripped, seed=1) and ask the CF API to map
-    // them to mod IDs + icon URLs. Gated on an x-cf-api-key header so we
-    // don't churn a key the operator hasn't configured.
+    // CurseForge fingerprint lookup. Compute CF's custom Murmur2 hash
+    // for each jar (whitespace-stripped, seed=1) and ask the CF API
+    // to map them to mod IDs + icon URLs. Gated on x-cf-api-key —
+    // we don't churn a key the operator hasn't configured.
+    //
+    // Two modes:
+    //   - default ("missing"): only run CF lookup for files that
+    //     didn't resolve via Modrinth. Saves API calls for plain
+    //     Modrinth servers.
+    //   - x-cf-resolve-all=1: run CF lookup for EVERY jar regardless
+    //     of Modrinth resolution. Used for CURSEFORGE modpack servers,
+    //     where we need the CF modId on every mod so the Content tab's
+    //     "Exclude from pack" (Ban) button can submit a numeric ID to
+    //     CF_EXCLUDE_MODS — without this, popular mods like Waystones
+    //     resolve via Modrinth, get no CF modId, and the Ban button
+    //     stays hidden, so the user can't blacklist them from the pack.
     const cfApiKey = (req.headers["x-cf-api-key"] as string | undefined) ?? "";
+    const cfResolveAll =
+      String(req.headers["x-cf-resolve-all"] ?? "") === "1";
     const cfByName: Record<string, CfProjectMeta> = {};
     if (cfApiKey) {
-      const stillUnresolved: Array<{ subdir: string; file: HashedFile }> = [];
+      const candidates: Array<{ subdir: string; file: HashedFile }> = [];
       const groups: Array<{ subdir: string; files: HashedFile[] }> = [
         { subdir: "mods", files: mods },
         { subdir: "plugins", files: plugins },
@@ -482,16 +495,18 @@ export async function serversAgentRoutes(app: FastifyInstance): Promise<void> {
       ];
       for (const g of groups) {
         for (const f of g.files) {
-          const resolvedByHash = f.sha1 ? versions[f.sha1] : undefined;
-          if (resolvedByHash) continue;
-          const slug = slugFromFilename(f.name);
-          if (slug && projectsBySlug[slug]) continue;
-          stillUnresolved.push({ subdir: g.subdir, file: f });
+          if (!cfResolveAll) {
+            const resolvedByHash = f.sha1 ? versions[f.sha1] : undefined;
+            if (resolvedByHash) continue;
+            const slug = slugFromFilename(f.name);
+            if (slug && projectsBySlug[slug]) continue;
+          }
+          candidates.push({ subdir: g.subdir, file: f });
         }
       }
-      if (stillUnresolved.length > 0) {
+      if (candidates.length > 0) {
         const fpPairs = await Promise.all(
-          stillUnresolved.map(async ({ subdir, file }) => {
+          candidates.map(async ({ subdir, file }) => {
             const full = path.join(base, subdir, file.name);
             try {
               const fp = await cfMurmur2(full);
@@ -520,6 +535,12 @@ export async function serversAgentRoutes(app: FastifyInstance): Promise<void> {
     const enrich = (f: HashedFile): EnrichedFile => {
       const v = f.sha1 ? versions[f.sha1] : undefined;
       const p = v?.project_id ? projects[v.project_id] : undefined;
+      // CF metadata is attached alongside Modrinth's, not instead of:
+      // when the server is a CurseForge modpack we always look up the
+      // CF modId so the UI's exclude-from-pack button has something
+      // to submit, even for mods that ALSO live on Modrinth (Waystones,
+      // JEI, Create — basically every popular mod).
+      const cf = cfByName[f.name];
       if (p) {
         return {
           name: f.name,
@@ -533,6 +554,7 @@ export async function serversAgentRoutes(app: FastifyInstance): Promise<void> {
             versionNumber: v?.version_number as string | undefined,
             pageUrl: `https://modrinth.com/${p.project_type ?? "mod"}/${p.slug}`,
           },
+          ...(cf ? { curseforge: cf } : {}),
         };
       }
       const slugGuess = slugFromFilename(f.name);
@@ -550,9 +572,9 @@ export async function serversAgentRoutes(app: FastifyInstance): Promise<void> {
             // No version match without a hash, just skip the version row.
             pageUrl: `https://modrinth.com/${sp.project_type ?? "mod"}/${sp.slug}`,
           },
+          ...(cf ? { curseforge: cf } : {}),
         };
       }
-      const cf = cfByName[f.name];
       if (cf) {
         return {
           name: f.name,

@@ -420,13 +420,22 @@ export async function serversRoutes(app: FastifyInstance): Promise<void> {
     // look up icons / names for jars that aren't on Modrinth. The key
     // only leaves the API over the internal agent channel, never reaches
     // the browser.
+    //
+    // For CURSEFORGE modpack servers, also force a CF lookup on every
+    // jar (not just the unresolved ones). The Content tab's "exclude
+    // from pack" button needs the numeric CF modId to write into
+    // CF_EXCLUDE_MODS — without this header, popular mods like
+    // Waystones resolve via Modrinth, the agent skips the CF call
+    // for them, and the Ban button never appears.
     const cfKey = await readCurseforgeApiKey();
-    const extra = cfKey ? { "x-cf-api-key": cfKey } : undefined;
+    const extra: Record<string, string> = {};
+    if (cfKey) extra["x-cf-api-key"] = cfKey;
+    if (server.type === "CURSEFORGE") extra["x-cf-resolve-all"] = "1";
     return client.call(
       "GET",
       `/servers/${id}/installed-content`,
       undefined,
-      extra
+      Object.keys(extra).length > 0 ? extra : undefined
     );
   });
 
