@@ -226,10 +226,12 @@ export async function mapRoutes(app: FastifyInstance): Promise<void> {
     }
   );
 
-  // Backwards-compatible: anything not under /dynmap or /bluemap
-  // defaults to dynmap. The previous ServerMap implementation hit
-  // /servers/:id/map/standalone/... etc. directly, and we don't want
-  // to break it while we migrate.
+  // Backwards-compatible: anything not under /dynmap or /bluemap is
+  // probably a stale URL (old client that hit the panel before the
+  // dual-provider split). Probe whichever provider is actually
+  // listening and route to it instead of hard-coding port 8123 — the
+  // hard-code was visible to users as "target: 172.23.0.3:8123,
+  // connection refused" on bluemap-only servers.
   app.get<{ Params: { id: string; "*": string } }>(
     "/servers/:id/map/*",
     async (req, reply) => {
@@ -245,12 +247,39 @@ export async function mapRoutes(app: FastifyInstance): Promise<void> {
         return reply.code(404).send({ error: "Use the dedicated subroute" });
       }
       await assertServerPermission(req, id, "server.view");
+      // Log loudly: by the time we deployed prefixed routes, nothing
+      // in our UI should be hitting this fallthrough. If it fires,
+      // something is calling the panel with a stale URL pattern and
+      // we want to know about it.
+      req.log.warn(
+        { serverId: id, subpath, ua: req.headers["user-agent"] },
+        "legacy /map/* fallthrough hit — caller is using a non-prefixed map URL"
+      );
+      const node = await resolveServerNode(id);
+      if (!node) return reply.code(404).send({ error: "Server / node not found" });
+      const [dynmapUp, bluemapUp] = await Promise.all([
+        pingProvider(
+          node.host,
+          node.name,
+          id,
+          PORT_DYNMAP,
+          "standalone/dynmap_config.json"
+        ),
+        pingProvider(node.host, node.name, id, PORT_BLUEMAP, "settings.json"),
+      ]);
+      const port = dynmapUp ? PORT_DYNMAP : bluemapUp ? PORT_BLUEMAP : null;
+      if (port === null) {
+        return reply.code(502).send({
+          error: "Map server unreachable. Is dynmap or bluemap installed?",
+          reason: "no provider responded on either 8123 or 8100",
+        });
+      }
       return forwardToProvider(
         app,
         req,
         reply,
         id,
-        PORT_DYNMAP,
+        port,
         subpath,
         "Map server unreachable. Is dynmap or bluemap installed?"
       );
