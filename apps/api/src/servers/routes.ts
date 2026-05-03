@@ -677,9 +677,14 @@ export async function serversRoutes(app: FastifyInstance): Promise<void> {
   // route already populates the dropdown from canonical sources, so
   // garbage input would only come from a handcrafted call.
 
-  app.post("/:id/loader-version", async (req) => {
+  app.post("/:id/loader-version", async (req, reply) => {
     const { id } = req.params as { id: string };
-    await assertServerPermission(req, id, "server.edit");
+    try {
+      await assertServerPermission(req, id, "server.edit");
+    } catch (err) {
+      // Already a 403/401 with a message — let it through unchanged.
+      throw err;
+    }
     const body = z
       .object({
         // null clears the override (server falls back to the pack /
@@ -695,6 +700,12 @@ export async function serversRoutes(app: FastifyInstance): Promise<void> {
         mcVersion: z.string().min(1).max(32).optional(),
       })
       .parse(req.body);
+    // Wrap the rest in an explicit try so any unexpected throw —
+    // Prisma constraint, agent network blip, archiver init failure —
+    // gets logged with full stack on the panel side AND propagated
+    // to the client with a non-empty message. Without this the user
+    // saw a bare "Internal Server Error" with nothing to act on.
+    try {
     const server = await prisma.server.findUniqueOrThrow({ where: { id } });
     const env = ((server.env as Record<string, string> | null) ?? {}) as Record<
       string,
@@ -770,6 +781,22 @@ export async function serversRoutes(app: FastifyInstance): Promise<void> {
       metadata: { loader: body.loader, version: body.version },
     });
     return { ok: true, env: next };
+    } catch (err) {
+      // Log the full error with stack on the panel side so we can
+      // tell from `docker logs cofemine-api-1` why the request failed
+      // — the user only saw "Internal Server Error" before this guard.
+      req.log.error(
+        { err, serverId: id, loader: body.loader, version: body.version },
+        "loader-version POST failed"
+      );
+      const e = err as Error & { statusCode?: number };
+      const status = e.statusCode ?? 500;
+      const message =
+        (e.message && e.message.length > 0
+          ? e.message
+          : "loader-version request failed without a message");
+      return reply.code(status).send({ error: message });
+    }
   });
 
   app.get("/:id/loader-version", async (req) => {
