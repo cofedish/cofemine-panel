@@ -19,7 +19,7 @@ import {
   readCurseforgeApiKey,
   reconcileAndReprovision,
 } from "./service.js";
-import { readDownloadProxy } from "../integrations/download-proxy.js";
+import { readDownloadProxy, makeProxyUrl } from "../integrations/download-proxy.js";
 import { resetWatchdogState } from "./install-watchdog.js";
 import { reconcileMany } from "./status.js";
 
@@ -785,11 +785,20 @@ export async function serversRoutes(app: FastifyInstance): Promise<void> {
       loaderJobs.set(id, job);
       void (async () => {
         try {
+          // Pass the configured download-proxy URL (if any) so the
+          // agent's installer-jar download AND the loader installer's
+          // own dependency fetches go through the same xray/socks5
+          // tunnel that CF mods use. Without this, maven.neoforged.net
+          // ETIMEDOUTs from regions where the upstream is blocked
+          // direct (Russia → CF/maven over IPv4).
+          const proxy = await readDownloadProxy();
+          const proxyUrl = proxy ? makeProxyUrl(proxy) : null;
           const client = await NodeClient.forId(server.nodeId);
           await client.call("POST", `/servers/${id}/install-modloader`, {
             loader: body.loader,
             version: body.version,
             mcVersion: body.mcVersion ?? null,
+            proxyUrl,
           });
           await reconcileAndReprovision(id);
           job.state = "done";

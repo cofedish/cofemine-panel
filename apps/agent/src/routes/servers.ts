@@ -235,6 +235,14 @@ export async function serversAgentRoutes(app: FastifyInstance): Promise<void> {
         // mcVersion is required for Forge / Fabric / Quilt URL shapes;
         // for NeoForge the version itself encodes MC compatibility.
         mcVersion: z.string().min(1).max(32).nullable().optional(),
+        // Optional outbound proxy. Forwarded by panel-api when a
+        // download-proxy is configured under Integrations. Agent uses
+        // it both for the installer-jar fetch (undici ProxyAgent) AND
+        // injects HTTP_PROXY/HTTPS_PROXY into the temp container env
+        // so the loader's own dependency-resolution downloads also
+        // tunnel through. ETIMEDOUT on maven.neoforged.net direct is
+        // why this exists.
+        proxyUrl: z.string().url().nullable().optional(),
       })
       .parse(req.body);
 
@@ -275,7 +283,7 @@ export async function serversAgentRoutes(app: FastifyInstance): Promise<void> {
       body.mcVersion ?? null
     );
     try {
-      await downloadInstallerJar(url, installerPath);
+      await downloadInstallerJar(url, installerPath, body.proxyUrl ?? null);
     } catch (err) {
       return reply.code(502).send({
         error: `Failed to download installer: ${(err as Error).message}`,
@@ -298,15 +306,35 @@ export async function serversAgentRoutes(app: FastifyInstance): Promise<void> {
       body.mcVersion ?? null,
       installerName
     );
+    // Inject HTTP/HTTPS proxy env into the temp container so the
+    // NeoForge / Forge installer's *internal* dependency fetches
+    // (which it does via java.net.HttpClient against various mavens)
+    // also tunnel through the configured proxy. Same reasoning as
+    // the main MC container's mc-image-helper proxy injection.
+    const containerEnv: string[] = ["TERM=dumb"];
+    if (body.proxyUrl) {
+      containerEnv.push(
+        `HTTP_PROXY=${body.proxyUrl}`,
+        `HTTPS_PROXY=${body.proxyUrl}`,
+        `http_proxy=${body.proxyUrl}`,
+        `https_proxy=${body.proxyUrl}`,
+        "NO_PROXY=localhost,127.0.0.1,::1,host.docker.internal,*.ru,172.16.0.0/12,10.0.0.0/8,192.168.0.0/16",
+        "no_proxy=localhost,127.0.0.1,::1,host.docker.internal,*.ru,172.16.0.0/12,10.0.0.0/8,192.168.0.0/16"
+      );
+    }
     const temp = await docker.createContainer({
       Image: tempImage,
       Cmd: cmd,
       WorkingDir: "/data",
-      Env: ["TERM=dumb"],
+      Env: containerEnv,
       HostConfig: {
         Binds: [`${dataDir}:/data`],
         AutoRemove: false,
         NetworkMode: config.AGENT_DOCKER_NETWORK,
+        // host.docker.internal mapping is needed when the proxy URL
+        // points at a host-side service (xray on the host's port 2080).
+        // Without this the temp container can't resolve it.
+        ExtraHosts: ["host.docker.internal:host-gateway"],
       },
       Tty: false,
     });
@@ -2502,16 +2530,34 @@ function installerOutputMarker(loader: "neoforge" | "forge" | "fabric" | "quilt"
   }
 }
 
-/** Stream-download a jar to disk via undici. */
+/**
+ * Stream-download a jar to disk via undici, optionally tunnelled
+ * through an HTTP-CONNECT proxy.
+ *
+ * undici's ProxyAgent only speaks HTTP CONNECT, not native SOCKS5.
+ * The user's xray on 2080 is configured as a mixed inbound (HTTP +
+ * SOCKS), so we rewrite a socks5:// URL to http:// and connect via
+ * HTTP CONNECT — xray accepts that on the same port. For a pure
+ * SOCKS5 proxy this would fail at connect time with a clear error,
+ * which is the right diagnostic to surface.
+ */
 async function downloadInstallerJar(
   url: string,
-  destPath: string
+  destPath: string,
+  proxyUrl: string | null
 ): Promise<void> {
+  let dispatcher: import("undici").Dispatcher | undefined;
+  if (proxyUrl) {
+    const httpEquivalent = proxyUrl.replace(/^socks5?:/i, "http:");
+    const { ProxyAgent } = await import("undici");
+    dispatcher = new ProxyAgent(httpEquivalent);
+  }
   const res = await request(url, {
     method: "GET",
     maxRedirections: 5,
-    headersTimeout: 15_000,
+    headersTimeout: 30_000,
     bodyTimeout: 5 * 60_000,
+    dispatcher,
   });
   if (res.statusCode >= 400) {
     await res.body.dump().catch(() => {});
