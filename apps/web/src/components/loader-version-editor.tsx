@@ -236,9 +236,14 @@ function LoaderVersionDialog({
             status.message ?? "Installer failed without a message"
           );
         }
-        // state === "idle" — somehow the job disappeared. Treat as
-        // success since no error was reported, but break out.
-        break;
+        // state === "idle" — the job disappeared from the api's
+        // in-memory map. That means either the api process restarted
+        // mid-install (deploy / crash) or the request never hit the
+        // background spawn. Either way it's NOT success; tell the
+        // user instead of silently closing.
+        throw new Error(
+          "Install job lost (api process restarted or never started). Try again — if it keeps happening, check the api container logs."
+        );
       }
       mutate(`/servers/${server.id}/loader-version`);
       mutate(`/servers/${server.id}`);

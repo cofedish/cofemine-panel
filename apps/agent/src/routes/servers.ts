@@ -248,6 +248,10 @@ export async function serversAgentRoutes(app: FastifyInstance): Promise<void> {
 
     const dataDir = dataDirFor(id);
     await ensureDir(dataDir);
+    req.log.info(
+      { id, loader: body.loader, version: body.version, dataDir },
+      "install-modloader: start"
+    );
 
     // Refuse if container is currently running. itzg locks libraries/
     // jars open while the JVM is up, and the installer would either
@@ -270,14 +274,25 @@ export async function serversAgentRoutes(app: FastifyInstance): Promise<void> {
     // installer crash) shows up in the agent log instead of being
     // silently ignored.
     const stalePaths = staleLoaderPaths(body.loader);
+    const wipeResults: Array<{ path: string; existed: boolean; ok: boolean }> = [];
     for (const p of stalePaths) {
       const full = path.join(dataDir, p);
+      const existed = await fs
+        .access(full)
+        .then(() => true)
+        .catch(() => false);
       try {
         await fs.rm(full, { recursive: true, force: true });
+        wipeResults.push({ path: p, existed, ok: true });
       } catch (err) {
         req.log.warn({ err, path: full }, "stale loader path wipe failed");
+        wipeResults.push({ path: p, existed, ok: false });
       }
     }
+    req.log.info(
+      { wipeResults },
+      "install-modloader: wipe phase complete"
+    );
 
     // Download the installer jar into a hidden file at /data root so
     // the bind-mounted temp container can see it via /data/.
@@ -288,8 +303,17 @@ export async function serversAgentRoutes(app: FastifyInstance): Promise<void> {
       body.version,
       body.mcVersion ?? null
     );
+    req.log.info(
+      { url, installerPath, proxyUrl: body.proxyUrl ?? null },
+      "install-modloader: downloading installer jar"
+    );
     try {
       await downloadInstallerJar(url, installerPath, body.proxyUrl ?? null);
+      const stat = await fs.stat(installerPath);
+      req.log.info(
+        { installerPath, size: stat.size },
+        "install-modloader: installer downloaded"
+      );
     } catch (err) {
       return reply.code(502).send({
         error: `Failed to download installer: ${(err as Error).message}`,
@@ -376,12 +400,20 @@ export async function serversAgentRoutes(app: FastifyInstance): Promise<void> {
       Tty: false,
     });
 
+    req.log.info(
+      { tempImage, cmd, env: containerEnv },
+      "install-modloader: starting installer container"
+    );
     let logsStr = "";
     let exitCode = -1;
     try {
       await temp.start();
       const result = await temp.wait();
       exitCode = result.StatusCode ?? -1;
+      req.log.info(
+        { exitCode },
+        "install-modloader: installer container exited"
+      );
       const logs = await temp.logs({
         stdout: true,
         stderr: true,
@@ -428,6 +460,22 @@ export async function serversAgentRoutes(app: FastifyInstance): Promise<void> {
         logs: logsStr.slice(-2000),
       });
     }
+    req.log.info(
+      { marker: expectMarker },
+      "install-modloader: marker file present, install validated"
+    );
+
+    // Verify the actual version landed where we expect, NOT just that
+    // a run.sh exists. With NeoForge / Forge we expect a directory at
+    // libraries/<loaderPath>/<version>/ — if instead we see a different
+    // version subdir, mc-image-helper / itzg will keep loading the old
+    // one and the override silently fails.
+    const verifyResult = await verifyInstalledVersion(
+      dataDir,
+      body.loader,
+      body.version,
+      req.log
+    );
 
     // The temp container ran as root, so everything it wrote (run.sh,
     // user_jvm_args.txt, the libraries/ subtree) is root-owned. itzg
@@ -436,11 +484,13 @@ export async function serversAgentRoutes(app: FastifyInstance): Promise<void> {
     // append the install proxy to it. chown the affected files +
     // libraries/<loader>/ subtree back to 1000:1000 so itzg owns them.
     await chownInstallerOutput(dataDir, body.loader, req.log);
+    req.log.info({ verifyResult }, "install-modloader: complete");
     return {
       ok: true,
       loader: body.loader,
       version: body.version,
       tail: logsStr.slice(-500),
+      verify: verifyResult,
     };
   });
 
@@ -2630,6 +2680,51 @@ async function chownInstallerOutput(
       log.warn({ err, path: full }, "post-install chown failed");
     }
   }
+}
+
+/**
+ * Confirm that the installer actually produced files for the version
+ * the user asked for, not some other one. NeoForge / Forge install
+ * to libraries/<loaderPath>/<version>/; we check that directory
+ * exists. Logged + returned so the panel UI sees ground truth.
+ */
+async function verifyInstalledVersion(
+  dataDir: string,
+  loader: "neoforge" | "forge" | "fabric" | "quilt",
+  version: string,
+  log: Logger
+): Promise<{ ok: boolean; foundVersion?: string; details?: string }> {
+  if (loader === "fabric" || loader === "quilt") {
+    // These don't shard libraries by version — the launcher jar itself
+    // is the version, and we already check it via installerOutputMarker.
+    return { ok: true };
+  }
+  const baseDir =
+    loader === "neoforge"
+      ? path.join(dataDir, "libraries", "net", "neoforged", "neoforge")
+      : path.join(dataDir, "libraries", "net", "minecraftforge", "forge");
+  let entries: string[] = [];
+  try {
+    entries = await fs.readdir(baseDir);
+  } catch (err) {
+    log.warn(
+      { err, baseDir },
+      "verify: loader libraries dir is missing — installer didn't run for our version"
+    );
+    return { ok: false, details: `${baseDir} doesn't exist` };
+  }
+  if (entries.includes(version)) {
+    return { ok: true, foundVersion: version };
+  }
+  log.warn(
+    { baseDir, expected: version, found: entries },
+    "verify: expected version subdir not found — installer wrote a DIFFERENT version"
+  );
+  return {
+    ok: false,
+    foundVersion: entries[0],
+    details: `expected ${version}, found ${entries.join(", ") || "<empty>"}`,
+  };
 }
 
 async function chownRecursive(
