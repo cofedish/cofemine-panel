@@ -36,6 +36,14 @@ services:
       AGENT_LABEL_PREFIX: "cofemine"
       AGENT_MC_MAX_RETRIES: ${AGENT_MC_MAX_RETRIES:-10}
       AGENT_MC_RETRY_BACKOFF: ${AGENT_MC_RETRY_BACKOFF:-10}
+    # The agent itself needs host.docker.internal resolvable so it
+    # can reach a host-side download proxy (xray on the host's
+    # 2080 port). On Docker Desktop this is automatic; on Linux
+    # Docker the host-gateway alias has to be opted in. Without
+    # this, the loader-installer download fails with ENOTFOUND
+    # host.docker.internal even though the proxy itself is healthy.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       # Bind the SAME host paths into the agent as it will later hand to

@@ -36,6 +36,12 @@ services:
       DOCKER_SOCKET: "/var/run/docker.sock"
       AGENT_MC_MAX_RETRIES: ${AGENT_MC_MAX_RETRIES:-10}
       AGENT_MC_RETRY_BACKOFF: ${AGENT_MC_RETRY_BACKOFF:-10}
+    # Same reason as in docker-compose.prod.yml: the agent needs
+    # host.docker.internal resolvable so it can reach a host-side
+    # download proxy (xray etc.). Docker Desktop sets this up
+    # automatically; Linux Docker requires the explicit alias.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       # Docker socket so the agent can start Minecraft containers.
       - /var/run/docker.sock:/var/run/docker.sock
