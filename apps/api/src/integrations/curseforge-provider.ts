@@ -297,11 +297,42 @@ function extractLoaders(gameVersions: string[]): string[] {
   const loaders = new Set<string>();
   for (const v of gameVersions) {
     const low = v.toLowerCase();
-    for (const k of ["forge", "fabric", "quilt", "neoforge", "paper", "spigot"]) {
-      if (low.includes(k)) loaders.add(k);
+    // Order matters here: "neoforge" contains "forge" as a substring,
+    // so a naive `includes("forge")` match would tag every NeoForge
+    // pack with both "forge" AND "neoforge". The wizard then read
+    // loaders[0] and got "forge", which sent the dynmap/bluemap
+    // install towards the wrong Modrinth project (regular forge build
+    // on a NeoForge server). Per-string we now match neoforge first
+    // and only fall through to plain "forge" when neoforge wasn't
+    // present.
+    if (/\bneoforge\b/.test(low) || low === "neoforge") {
+      loaders.add("neoforge");
+    } else if (/\bforge\b/.test(low) || low === "forge") {
+      loaders.add("forge");
     }
+    if (/\bquilt\b/.test(low) || low === "quilt") loaders.add("quilt");
+    else if (/\bfabric\b/.test(low) || low === "fabric") {
+      loaders.add("fabric");
+    }
+    if (low === "paper" || /\bpaper\b/.test(low)) loaders.add("paper");
+    if (low === "spigot" || /\bspigot\b/.test(low)) loaders.add("spigot");
   }
-  return [...loaders];
+  // Stable priority order for the consumer's loaders[0] read:
+  // most-specific / modern variant first, so packs that tag
+  // themselves with both "Forge" AND "NeoForge" (some packs do this
+  // for discoverability on CF's filters) resolve to the modern
+  // loader. Same logic for quilt vs fabric.
+  const priority = [
+    "neoforge",
+    "quilt",
+    "forge",
+    "fabric",
+    "paper",
+    "spigot",
+  ];
+  return [...loaders].sort(
+    (a, b) => priority.indexOf(a) - priority.indexOf(b)
+  );
 }
 
 /**
