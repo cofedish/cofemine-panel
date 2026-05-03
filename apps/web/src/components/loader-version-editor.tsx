@@ -162,7 +162,10 @@ function LoaderVersionDialog({
     setMcVersion(resolvedMcDefault);
   }, [resolvedMcDefault]);
 
-  const { data, isLoading, error } = useSWR<{ versions: LoaderVersion[] }>(
+  const { data, isLoading, error } = useSWR<{
+    versions: LoaderVersion[];
+    error?: string;
+  }>(
     /^1\.\d+(\.\d+)?$/.test(mcVersion)
       ? `/meta/loader-versions?loader=${loader}&mcVersion=${encodeURIComponent(mcVersion)}`
       : null,
@@ -362,7 +365,12 @@ function LoaderVersionDialog({
             </div>
           ) : error || filtered.length === 0 ? (
             <p className="text-xs text-ink-muted">
-              {t("loaderVersion.noVersions", { loader, mc: mcVersion })}
+              {data?.error
+                ? t("loaderVersion.upstreamError", {
+                    loader,
+                    msg: data.error,
+                  })
+                : t("loaderVersion.noVersions", { loader, mc: mcVersion })}
             </p>
           ) : (
             <select

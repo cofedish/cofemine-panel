@@ -1,5 +1,37 @@
 import type { FastifyInstance } from "fastify";
-import { request } from "undici";
+import { ProxyAgent, request, type Dispatcher } from "undici";
+import { readDownloadProxy, makeProxyUrl } from "../integrations/download-proxy.js";
+
+/**
+ * If a download-proxy is configured under Integrations, build an
+ * undici dispatcher that tunnels through it. Used for outbound calls
+ * to maven.neoforged.net / maven.minecraftforge.net / meta.fabricmc.net
+ * etc. — the same upstreams that ETIMEDOUT direct from regions where
+ * the user has set up the proxy in the first place.
+ *
+ * socks5:// is rewritten to http:// because undici's ProxyAgent only
+ * speaks HTTP CONNECT (xray's mixed inbound on 2080 accepts both).
+ * Refreshed once per minute so a config change doesn't need an api
+ * restart to take effect.
+ */
+let cachedDispatcher: { d: Dispatcher | null; at: number } = {
+  d: null,
+  at: 0,
+};
+async function getOutboundDispatcher(): Promise<Dispatcher | undefined> {
+  const now = Date.now();
+  if (now - cachedDispatcher.at < 60_000) {
+    return cachedDispatcher.d ?? undefined;
+  }
+  const proxy = await readDownloadProxy().catch(() => null);
+  if (!proxy) {
+    cachedDispatcher = { d: null, at: now };
+    return undefined;
+  }
+  const url = makeProxyUrl(proxy).replace(/^socks5?:/i, "http:");
+  cachedDispatcher = { d: new ProxyAgent(url), at: now };
+  return cachedDispatcher.d ?? undefined;
+}
 
 /**
  * Minecraft version metadata. Proxies Mojang's public manifest with a small
@@ -110,13 +142,14 @@ async function fetchLoaderVersions(
  *  the leading "1." stripped). 1.20.x predecessor builds use
  *  "20.x.y" so the same rule fits both. */
 async function fetchNeoForge(mcVersion: string): Promise<LoaderVersion[]> {
+  const dispatcher = await getOutboundDispatcher();
   const res = await request(
     "https://maven.neoforged.net/api/maven/versions/releases/net/neoforged/neoforge",
-    { headersTimeout: 10_000, bodyTimeout: 10_000 }
+    { headersTimeout: 15_000, bodyTimeout: 15_000, dispatcher }
   );
   if (res.statusCode >= 400) {
     await res.body.dump().catch(() => {});
-    return [];
+    throw new Error(`maven.neoforged.net HTTP ${res.statusCode}`);
   }
   const body = (await res.body.json()) as { versions?: string[] };
   const all = body.versions ?? [];
@@ -137,13 +170,14 @@ async function fetchNeoForge(mcVersion: string): Promise<LoaderVersion[]> {
  *  "<mcVersion>-<forgeVersion>" (e.g. "1.20.1-47.2.0"); strip the
  *  MC prefix so the result matches what FORGE_VERSION expects. */
 async function fetchForge(mcVersion: string): Promise<LoaderVersion[]> {
+  const dispatcher = await getOutboundDispatcher();
   const res = await request(
     "https://maven.minecraftforge.net/net/minecraftforge/forge/maven-metadata.xml",
-    { headersTimeout: 10_000, bodyTimeout: 15_000 }
+    { headersTimeout: 15_000, bodyTimeout: 30_000, dispatcher }
   );
   if (res.statusCode >= 400) {
     await res.body.dump().catch(() => {});
-    return [];
+    throw new Error(`maven.minecraftforge.net HTTP ${res.statusCode}`);
   }
   const xml = await res.body.text();
   const versions: string[] = [];
@@ -161,13 +195,15 @@ async function fetchForge(mcVersion: string): Promise<LoaderVersion[]> {
  *  a single global list. mcVersion is accepted for API symmetry but
  *  not used. */
 async function fetchFabric(): Promise<LoaderVersion[]> {
+  const dispatcher = await getOutboundDispatcher();
   const res = await request("https://meta.fabricmc.net/v2/versions/loader", {
-    headersTimeout: 10_000,
-    bodyTimeout: 10_000,
+    headersTimeout: 15_000,
+    bodyTimeout: 15_000,
+    dispatcher,
   });
   if (res.statusCode >= 400) {
     await res.body.dump().catch(() => {});
-    return [];
+    throw new Error(`meta.fabricmc.net HTTP ${res.statusCode}`);
   }
   const body = (await res.body.json()) as Array<{
     version: string;
@@ -179,13 +215,15 @@ async function fetchFabric(): Promise<LoaderVersion[]> {
 }
 
 async function fetchQuilt(): Promise<LoaderVersion[]> {
+  const dispatcher = await getOutboundDispatcher();
   const res = await request("https://meta.quiltmc.org/v3/versions/loader", {
-    headersTimeout: 10_000,
-    bodyTimeout: 10_000,
+    headersTimeout: 15_000,
+    bodyTimeout: 15_000,
+    dispatcher,
   });
   if (res.statusCode >= 400) {
     await res.body.dump().catch(() => {});
-    return [];
+    throw new Error(`meta.quiltmc.org HTTP ${res.statusCode}`);
   }
   const body = (await res.body.json()) as Array<{ version: string }>;
   return body

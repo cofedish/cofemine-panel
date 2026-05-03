@@ -165,6 +165,8 @@ const en: Dict = {
   "loaderVersion.showUnstable": "Show unstable (beta / rc / pre)",
   "loaderVersion.noVersions":
     "No published {loader} versions found for MC {mc}. Try a different MC version.",
+  "loaderVersion.upstreamError":
+    "Couldn't reach the {loader} maven: {msg}. Check the download-proxy config in Integrations.",
   "loaderVersion.repairWarning":
     "Saving rebuilds the container so the new loader version takes effect on the next start. Existing world data is unaffected.",
   "loaderVersion.applyAndRebuild": "Apply & rebuild",
@@ -819,6 +821,8 @@ const ru: Dict = {
   "loaderVersion.showUnstable": "Показать нестабильные (beta / rc / pre)",
   "loaderVersion.noVersions":
     "Не нашли опубликованные версии {loader} под MC {mc}. Попробуй другую версию MC.",
+  "loaderVersion.upstreamError":
+    "Не удалось дотянуться до мавена {loader}: {msg}. Проверь настройки download-proxy в Integrations.",
   "loaderVersion.repairWarning":
     "Сохранение пересоберёт контейнер, новая версия лоадера применится на следующем старте. Данные мира не трогаются.",
   "loaderVersion.applyAndRebuild": "Применить и пересобрать",
