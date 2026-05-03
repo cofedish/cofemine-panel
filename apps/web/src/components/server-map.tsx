@@ -123,18 +123,21 @@ export function ServerMap({
     }
   );
 
-  // --- BlueMap branch ---
-  if (probe?.provider === "bluemap") {
-    return <BlueMapView serverId={serverId} fullHeight={!!fullHeight} />;
-  }
-
   // --- Dynmap branch ---
+  // NOTE: this hook MUST run on every render regardless of which branch
+  // we end up rendering — calling it after a conditional `return` for
+  // the bluemap branch was a Rules-of-Hooks violation: first render
+  // (probe undefined) ran both `useSWR` calls, then once probe became
+  // "bluemap" the early-return skipped this one, the hook count
+  // changed, and React threw "Rendered fewer hooks than expected" as
+  // a generic client-side exception on /servers/:id/map. Gate fetching
+  // via the SWR key instead of via control flow.
   const {
     data: configData,
     error: configError,
     isLoading: configLoading,
   } = useSWR<DynmapConfig>(
-    probe?.provider === "dynmap" || (!probe?.bluemap && !probe?.dynmap)
+    probe?.provider === "dynmap"
       ? `/servers/${serverId}/map/dynmap/standalone/dynmap_config.json`
       : null,
     fetcher,
@@ -143,6 +146,11 @@ export function ServerMap({
       shouldRetryOnError: false,
     }
   );
+
+  // --- BlueMap branch ---
+  if (probe?.provider === "bluemap") {
+    return <BlueMapView serverId={serverId} fullHeight={!!fullHeight} />;
+  }
 
   if (probeLoading || (probe?.provider === "dynmap" && configLoading)) {
     return (
