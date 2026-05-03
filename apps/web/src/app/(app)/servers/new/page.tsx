@@ -259,46 +259,16 @@ export default function CreateServerPage(): JSX.Element {
           console.warn("Failed to upload icon after create:", e);
         }
       }
-      // Pre-place the map jar on disk RIGHT NOW so it shows up in
-      // /data/mods before the user clicks Start. The MODS env we
-      // baked into create body above is the safety net — itzg
-      // downloads the URL on every start, which means the jar
-      // survives an AUTO_CURSEFORGE first-boot mods/ wipe (the pack
-      // installer cleans /data/mods to its own manifest). With both
-      // mechanisms wired up the user sees the file in the Files tab
-      // immediately after create, and it stays there across pack
-      // reinstalls.
-      if (installDynmap && dynmapTarget) {
-        const { gameVersion, loader } = resolveRuntimeFilters(
-          source,
-          effectiveType,
-          version,
-          packVersion
-        );
-        try {
-          await api.post(
-            `/integrations/servers/${res.id}/install/modrinth`,
-            {
-              projectId: dynmapTarget.slug,
-              kind: dynmapTarget.kind,
-              ...(gameVersion ? { gameVersion } : {}),
-              ...(loader ? { loader } : {}),
-            }
-          );
-        } catch (e) {
-          // Non-fatal — the MODS / PLUGINS env entry that we baked
-          // into create body still kicks in at first start and pulls
-          // the jar then. Just surface the error so the user knows
-          // why the file isn't there yet.
-          const msg =
-            e instanceof ApiError
-              ? e.message
-              : e instanceof Error
-                ? e.message
-                : String(e);
-          console.warn("Pre-install of live-map jar failed:", msg);
-        }
-      }
+      // (No pre-install step. We considered downloading the map jar
+      // to /data/mods immediately at create-time so it'd show in the
+      // Files tab before first Start — but for AUTO_CURSEFORGE /
+      // MODRINTH servers itzg's first-boot pack install wipes
+      // /data/mods clean against the pack manifest anyway, erasing
+      // the pre-placed file before it ever loads. The MODS / PLUGINS
+      // env we baked into the create body is enough on its own:
+      // itzg processes those URLs on every start, AFTER the pack
+      // install runs, so the jar lands in mods/ for both modpack and
+      // plain servers without burning bandwidth twice.)
       router.push(`/servers/${res.id}`);
     } catch (e) {
       setErr(e instanceof ApiError ? e.message : String(e));
