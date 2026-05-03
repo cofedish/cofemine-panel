@@ -46,14 +46,86 @@ function resolveAgentToken(nodeName: string): string {
   return perNode ?? process.env.AGENT_TOKEN ?? "";
 }
 
+/**
+ * In-memory cache of serverId → node lookup.
+ *
+ * Why this exists: BlueMap fires dozens of parallel tile fetches the
+ * moment a player walks into a new chunk. The previous code did two
+ * Postgres queries per fetch (server.findUnique + node.findUnique),
+ * so 100 concurrent tiles meant 200 queries on a Prisma pool of ~10
+ * connections. Effect: the entire panel froze while the map was open,
+ * because every other page that needed Postgres got queued behind
+ * the map's flood.
+ *
+ * The serverId → node mapping changes only when an admin moves a
+ * server between nodes (rare, manual). 60s TTL is plenty.
+ */
+type CachedNode = { node: Awaited<ReturnType<typeof prisma.node.findUnique>>; at: number };
+const NODE_CACHE_TTL_MS = 60_000;
+const nodeCache = new Map<string, CachedNode>();
+
 async function resolveServerNode(id: string) {
+  const now = Date.now();
+  const hit = nodeCache.get(id);
+  if (hit && now - hit.at < NODE_CACHE_TTL_MS) return hit.node;
   const server = await prisma.server.findUnique({
     where: { id },
     select: { nodeId: true },
   });
-  if (!server) return null;
+  if (!server) {
+    nodeCache.set(id, { node: null, at: now });
+    return null;
+  }
   const node = await prisma.node.findUnique({ where: { id: server.nodeId } });
+  nodeCache.set(id, { node, at: now });
+  // Cap cache size — don't grow unbounded if a script hits us with
+  // millions of fake server IDs. 500 is comfortably above any real
+  // panel's server count.
+  if (nodeCache.size > 500) {
+    const oldest = nodeCache.keys().next().value;
+    if (oldest) nodeCache.delete(oldest);
+  }
   return node;
+}
+
+/**
+ * Permission cache for the map hot-path. Same reasoning as the node
+ * cache: assertServerPermission queries `permissions` joined to the
+ * user's role on every call, and BlueMap fans out enough requests to
+ * exhaust the DB pool. We cache (userId, serverId, perm) → boolean for
+ * 30s. Auth still goes through the cookie/JWT validation on every
+ * request — it's only the permission lookup that's cached.
+ */
+type CachedPerm = { ok: boolean; at: number };
+const PERM_CACHE_TTL_MS = 30_000;
+const permCache = new Map<string, CachedPerm>();
+
+async function assertServerPermissionCached(
+  req: import("fastify").FastifyRequest,
+  serverId: string,
+  perm: string
+): Promise<void> {
+  // Force JWT/session validation by accessing req.user (populated by
+  // the auth hook). If the user isn't authed, this throws via the
+  // existing auth pipeline; we don't bypass auth, only the perm check.
+  const user = (req as any).user as { id?: string } | undefined;
+  const key = user?.id ? `${user.id}|${serverId}|${perm}` : null;
+  if (key) {
+    const hit = permCache.get(key);
+    if (hit && Date.now() - hit.at < PERM_CACHE_TTL_MS) {
+      if (hit.ok) return;
+      // negative cache: re-run the assert so it throws the proper
+      // 403 with the standard error shape
+    }
+  }
+  await assertServerPermission(req, serverId, perm);
+  if (key) {
+    permCache.set(key, { ok: true, at: Date.now() });
+    if (permCache.size > 2000) {
+      const oldest = permCache.keys().next().value;
+      if (oldest) permCache.delete(oldest);
+    }
+  }
 }
 
 /**
@@ -226,7 +298,7 @@ export async function mapRoutes(app: FastifyInstance): Promise<void> {
   ) => {
     const params = req.params as { id: string; "*"?: string };
     const subpath = (params["*"] as string) ?? "";
-    await assertServerPermission(req, params.id, "server.view");
+    await assertServerPermissionCached(req, params.id, "server.view");
     return forwardToProvider(
       app,
       req,
@@ -246,7 +318,7 @@ export async function mapRoutes(app: FastifyInstance): Promise<void> {
   ) => {
     const params = req.params as { id: string; "*"?: string };
     const subpath = (params["*"] as string) ?? "";
-    await assertServerPermission(req, params.id, "server.view");
+    await assertServerPermissionCached(req, params.id, "server.view");
     return forwardToProvider(
       app,
       req,
