@@ -798,6 +798,158 @@ export async function serversRoutes(app: FastifyInstance): Promise<void> {
     return { loader: null, version: null };
   });
 
+  // ---------- Client modpack manager ----------
+  //
+  // Per-server staging area for jars that should ship to friends as
+  // part of the .mrpack export but NOT live in /data/mods (shaders,
+  // minimaps, Iris/Sodium, Distant Horizons, JEI client extras, etc.).
+  // The agent stores them at /data/.cofemine-client/mods/, hidden from
+  // itzg's mod scanner so they never get loaded by the server JVM.
+  //
+  // Side metadata for every mod (server + client) lives in
+  // /data/.cofemine-client/sides.json and is consulted by the .mrpack
+  // export to set per-file env.client / env.server. "auto" = use the
+  // mod's Modrinth client_side / server_side metadata.
+
+  app.get("/:id/client-mods", async (req) => {
+    const { id } = req.params as { id: string };
+    await assertServerPermission(req, id, "server.view");
+    const server = await prisma.server.findUniqueOrThrow({ where: { id } });
+    const client = await NodeClient.forId(server.nodeId);
+    return client.call("GET", `/servers/${id}/client-mods`);
+  });
+
+  app.post("/:id/client-mods", async (req) => {
+    const { id } = req.params as { id: string };
+    await assertServerPermission(req, id, "server.edit");
+    const body = z
+      .object({
+        filename: z.string().min(1).max(256),
+        contentBase64: z.string().min(1),
+      })
+      .parse(req.body);
+    const server = await prisma.server.findUniqueOrThrow({ where: { id } });
+    const client = await NodeClient.forId(server.nodeId);
+    const res = await client.call(
+      "POST",
+      `/servers/${id}/client-mods`,
+      body
+    );
+    await writeAudit(req, {
+      action: "server.client-mods.upload",
+      resource: id,
+      metadata: { name: body.filename },
+    });
+    return res;
+  });
+
+  app.delete("/:id/client-mods", async (req) => {
+    const { id } = req.params as { id: string };
+    await assertServerPermission(req, id, "server.edit");
+    const q = req.query as { name?: string };
+    const server = await prisma.server.findUniqueOrThrow({ where: { id } });
+    const client = await NodeClient.forId(server.nodeId);
+    await client.call(
+      "DELETE",
+      `/servers/${id}/client-mods?name=${encodeURIComponent(q.name ?? "")}`
+    );
+    await writeAudit(req, {
+      action: "server.client-mods.delete",
+      resource: id,
+      metadata: { name: q.name },
+    });
+    return { ok: true };
+  });
+
+  app.get("/:id/sides", async (req) => {
+    const { id } = req.params as { id: string };
+    await assertServerPermission(req, id, "server.view");
+    const server = await prisma.server.findUniqueOrThrow({ where: { id } });
+    const client = await NodeClient.forId(server.nodeId);
+    return client.call("GET", `/servers/${id}/sides`);
+  });
+
+  app.put("/:id/sides", async (req) => {
+    const { id } = req.params as { id: string };
+    await assertServerPermission(req, id, "server.edit");
+    const server = await prisma.server.findUniqueOrThrow({ where: { id } });
+    const client = await NodeClient.forId(server.nodeId);
+    return client.call("PUT", `/servers/${id}/sides`, req.body);
+  });
+
+  /**
+   * Stream the agent's .mrpack export through to the browser. The
+   * agent generates a ZIP on the fly — server mods + uploaded client
+   * mods, each placed in the appropriate overrides path based on the
+   * sides.json metadata. We don't buffer here; the response is piped
+   * straight from agent → panel → browser.
+   */
+  app.get("/:id/export-mrpack", async (req, reply) => {
+    const { id } = req.params as { id: string };
+    await assertServerPermission(req, id, "server.view");
+    const server = await prisma.server.findUniqueOrThrow({ where: { id } });
+    const node = await prisma.node.findUniqueOrThrow({
+      where: { id: server.nodeId },
+    });
+    // Derive loader + loaderVersion from env so the .mrpack manifest
+    // tells the importer which loader profile to create. Falls back
+    // to the server's stored MC version + a "no loader" pack (vanilla)
+    // if nothing is set.
+    const env = ((server.env as Record<string, string> | null) ?? {}) as Record<
+      string,
+      string
+    >;
+    let loader: string | null = null;
+    let loaderVersion: string | null = null;
+    if (env.NEOFORGE_VERSION) {
+      loader = "neoforge";
+      loaderVersion = env.NEOFORGE_VERSION;
+    } else if (env.FORGE_VERSION) {
+      loader = "forge";
+      loaderVersion = env.FORGE_VERSION;
+    } else if (env.FABRIC_LOADER_VERSION) {
+      loader = "fabric";
+      loaderVersion = env.FABRIC_LOADER_VERSION;
+    } else if (env.QUILT_LOADER_VERSION) {
+      loader = "quilt";
+      loaderVersion = env.QUILT_LOADER_VERSION;
+    }
+    const params = new URLSearchParams();
+    params.set("packName", server.name);
+    params.set("mcVersion", server.version);
+    if (loader) params.set("loader", loader);
+    if (loaderVersion) params.set("loaderVersion", loaderVersion);
+
+    const { Agent: UndiciAgent, request: undiciRequest } = await import("undici");
+    const dispatcher = new UndiciAgent({
+      connections: 4,
+      bodyTimeout: 10 * 60_000, // 10 min — big modpacks zip up slowly
+    });
+    const target = `${node.host.replace(/\/$/, "")}/servers/${id}/export-mrpack?${params.toString()}`;
+    const upstream = await undiciRequest(target, {
+      method: "GET",
+      headers: {
+        authorization: `Bearer ${process.env[
+          `AGENT_TOKEN_${node.name.toUpperCase()}`
+        ] ?? process.env.AGENT_TOKEN ?? ""}`,
+      },
+      dispatcher,
+      headersTimeout: 30_000,
+      bodyTimeout: 10 * 60_000,
+    });
+    if (upstream.statusCode >= 400) {
+      reply.code(upstream.statusCode);
+      return reply.send(upstream.body);
+    }
+    // Mirror critical headers + stream body straight through.
+    for (const h of ["content-type", "content-disposition"] as const) {
+      const v = upstream.headers[h];
+      if (v) reply.header(h, Array.isArray(v) ? v[0]! : v);
+    }
+    reply.code(upstream.statusCode);
+    return reply.send(upstream.body);
+  });
+
   app.get("/:id/crash-reports", async (req) => {
     const { id } = req.params as { id: string };
     await assertServerPermission(req, id, "server.view");

@@ -228,6 +228,25 @@ const en: Dict = {
   "content.exclusions.applied":
     "Exclusion list saved ({n} mod(s) skipped). Container is rebuilding.",
   "content.tabs.exclusions": "Exclusions",
+  "content.tabs.client": "Client pack",
+  "content.tabs.clientHint":
+    "Manage client-only mods (shaders, minimaps, Iris/Sodium) and export the whole pack as .mrpack for friends.",
+  "clientMods.title": "Client-only mods",
+  "clientMods.intro":
+    "Drop jars here that should ship to your friends but NOT to the server (Iris, Sodium, Xaero, shaders, JEI client extras…). They stay in /data/.cofemine-client/ — itzg's mod scanner can't see them, the server JVM never loads them.",
+  "clientMods.upload": "Upload jars",
+  "clientMods.uploading": "Uploading {i}/{n}: {name}",
+  "clientMods.skipNotJar": "Skipped {name} — not a .jar / .zip",
+  "clientMods.skipTooBig": "Skipped {name} — over 100 MB",
+  "clientMods.exportMrpack": "Download .mrpack",
+  "clientMods.exportTooltip":
+    "Server mods + your client mods bundled into a Modrinth-format pack. Friends import it in Prism Launcher / Modrinth App with one click.",
+  "clientMods.empty.title": "No client-only mods uploaded yet.",
+  "clientMods.empty.body":
+    "Drop in shaders, miniмap mods, Iris, Sodium — anything you want a friend's client to have. The server's own /data/mods isn't touched.",
+  "clientMods.confirmRemove.title": "Remove from client pack?",
+  "clientMods.confirmRemove.body":
+    "Delete {name} from the client-mods staging area. Friends downloading the .mrpack after this won't get it.",
   "content.exclusions.intro":
     "These mod IDs are skipped on the next pack install and repair. Remove an entry to bring the mod back next time.",
   "content.exclusions.empty.title": "No mods are excluded.",
@@ -861,6 +880,25 @@ const ru: Dict = {
   "content.exclusions.applied":
     "Список исключений сохранён ({n} мод(а) пропущено). Контейнер пересобирается.",
   "content.tabs.exclusions": "Исключения",
+  "content.tabs.client": "Клиентская сборка",
+  "content.tabs.clientHint":
+    "Управление клиентскими модами (шейдеры, миникарты, Iris/Sodium) и экспорт всей сборки в .mrpack для друзей.",
+  "clientMods.title": "Клиентские моды",
+  "clientMods.intro":
+    "Закидывай сюда jar'ы, которые должны быть у друзей, но НЕ на сервере (Iris, Sodium, Xaero, шейдеры, JEI client extras…). Лежат в /data/.cofemine-client/ — сервер их не видит и не загружает.",
+  "clientMods.upload": "Загрузить jar'ы",
+  "clientMods.uploading": "Загрузка {i}/{n}: {name}",
+  "clientMods.skipNotJar": "Пропущен {name} — не .jar / .zip",
+  "clientMods.skipTooBig": "Пропущен {name} — больше 100 МБ",
+  "clientMods.exportMrpack": "Скачать .mrpack",
+  "clientMods.exportTooltip":
+    "Серверные моды + твои клиентские, упакованные в формат Modrinth. Друг открывает в Prism Launcher / Modrinth App одной кнопкой.",
+  "clientMods.empty.title": "Клиентских модов пока нет.",
+  "clientMods.empty.body":
+    "Загрузи шейдеры, миникарты, Iris, Sodium — всё что хочешь видеть на клиенте у друзей. Серверный /data/mods не трогается.",
+  "clientMods.confirmRemove.title": "Убрать из клиентской сборки?",
+  "clientMods.confirmRemove.body":
+    "Удалить {name} из клиентской папки. Друзья качающие .mrpack после этого его не получат.",
   "content.exclusions.intro":
     "Эти модификации пропускаются при следующей установке/починке сборки. Убери запись — мод вернётся при следующем запуске установщика.",
   "content.exclusions.empty.title": "Нет исключённых модов.",

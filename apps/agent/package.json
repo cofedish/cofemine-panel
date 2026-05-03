@@ -12,6 +12,7 @@
   "dependencies": {
     "@cofemine/shared": "workspace:*",
     "@fastify/websocket": "^10.0.1",
+    "archiver": "^7.0.1",
     "dockerode": "^4.0.2",
     "fastify": "^4.28.1",
     "pino": "^9.3.2",
@@ -20,6 +21,7 @@
     "zod": "^3.23.8"
   },
   "devDependencies": {
+    "@types/archiver": "^6.0.3",
     "@types/dockerode": "^3.3.31",
     "@types/node": "^20.14.10",
     "@types/tar": "^6.1.13",

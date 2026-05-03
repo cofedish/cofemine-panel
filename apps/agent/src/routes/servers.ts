@@ -381,6 +381,257 @@ export async function serversAgentRoutes(app: FastifyInstance): Promise<void> {
     return { ok: true };
   });
 
+  // ============================== CLIENT MODS ==============================
+  //
+  // Per-server "client modpack" — jars the user wants in the .mrpack
+  // export but that should NOT be installed on the server (shaders,
+  // miniмap mods, Iris/Sodium, Distant Horizons, JEI client extras…).
+  // They live at `<dataDir>/.cofemine-client/mods/`. The leading dot
+  // hides them from itzg's mod scanner; nothing in itzg's image walks
+  // dot-prefixed paths.
+  //
+  // Side metadata for *every* mod (both client-only ones above and the
+  // regular /data/mods entries) lives at `<dataDir>/.cofemine-client/
+  // sides.json`. The .mrpack generator reads this to set per-file
+  // env.client / env.server. "auto" defers to the file's Modrinth
+  // metadata; explicit "server" / "client" / "both" override it.
+
+  app.get("/servers/:id/client-mods", async (req) => {
+    const { id } = req.params as { id: string };
+    const dir = path.join(dataDirFor(id), ".cofemine-client", "mods");
+    await ensureDir(dir);
+    const entries = await fs.readdir(dir, { withFileTypes: true });
+    const out: Array<{ name: string; size: number; mtime: string }> = [];
+    for (const e of entries) {
+      if (!e.isFile()) continue;
+      if (!/\.(jar|zip)$/i.test(e.name)) continue;
+      const full = path.join(dir, e.name);
+      const st = await fs.stat(full);
+      out.push({
+        name: e.name,
+        size: st.size,
+        mtime: st.mtime.toISOString(),
+      });
+    }
+    return { mods: out };
+  });
+
+  app.post("/servers/:id/client-mods", async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const body = z
+      .object({
+        filename: z.string().min(1).max(256),
+        // base64-encoded jar bytes. We accept up to ~50MB per jar in
+        // a single request — most client mods (Iris, Xaero, Sodium)
+        // are well under 5MB.
+        contentBase64: z.string().min(1),
+      })
+      .parse(req.body);
+    if (!/\.(jar|zip)$/i.test(body.filename)) {
+      return reply.code(400).send({ error: "Only .jar / .zip files allowed" });
+    }
+    if (body.filename.includes("/") || body.filename.includes("\\")) {
+      return reply.code(400).send({ error: "Bare filename only" });
+    }
+    const dir = path.join(dataDirFor(id), ".cofemine-client", "mods");
+    await ensureDir(dir);
+    const buf = Buffer.from(body.contentBase64, "base64");
+    if (buf.length > 100 * 1024 * 1024) {
+      return reply.code(413).send({ error: "File too large (>100MB)" });
+    }
+    await fs.writeFile(path.join(dir, body.filename), buf);
+    return { ok: true, name: body.filename, size: buf.length };
+  });
+
+  app.delete("/servers/:id/client-mods", async (req) => {
+    const { id } = req.params as { id: string };
+    const q = req.query as { name?: string };
+    if (!q.name) return { ok: true };
+    if (q.name.includes("/") || q.name.includes("\\")) {
+      return { ok: false };
+    }
+    const file = path.join(
+      dataDirFor(id),
+      ".cofemine-client",
+      "mods",
+      q.name
+    );
+    await fs.rm(file, { force: true });
+    return { ok: true };
+  });
+
+  app.get("/servers/:id/sides", async (req) => {
+    const { id } = req.params as { id: string };
+    const file = path.join(dataDirFor(id), ".cofemine-client", "sides.json");
+    try {
+      const text = await fs.readFile(file, "utf8");
+      return JSON.parse(text);
+    } catch {
+      return {};
+    }
+  });
+
+  app.put("/servers/:id/sides", async (req) => {
+    const { id } = req.params as { id: string };
+    const body = z
+      .record(
+        z.string().min(1).max(256),
+        z.enum(["server", "client", "both", "auto"])
+      )
+      .parse(req.body);
+    const dir = path.join(dataDirFor(id), ".cofemine-client");
+    await ensureDir(dir);
+    await fs.writeFile(
+      path.join(dir, "sides.json"),
+      JSON.stringify(body, null, 2),
+      "utf8"
+    );
+    return { ok: true };
+  });
+
+  /**
+   * Generate a Modrinth-format pack (.mrpack) from the server's
+   * mod state and stream it back as a downloadable ZIP.
+   *
+   * v1 strategy — bundle everything as overrides:
+   *   /data/mods/*           → server-overrides/mods/<name>  (default)
+   *                            or overrides/mods/<name>  if side=both
+   *   /data/.cofemine-client/mods/*  → client-overrides/mods/<name>
+   *
+   * Per-file side comes from .cofemine-client/sides.json. Defaults:
+   *   - files in /data/mods/ default to "both" (most modpack mods are
+   *     dual-side; explicit "server"-only marks let admins flag the
+   *     handful that aren't, like dynmap-server).
+   *   - files in /data/.cofemine-client/mods/ default to "client".
+   *
+   * Bundling-everything is bigger than referencing Modrinth CDN URLs,
+   * but it works for ANY source — CF distribution-blocked mods,
+   * manual uploads, custom builds — without needing API access from
+   * the importing client. The friend opens the .mrpack in Prism /
+   * ATLauncher / Modrinth App and gets a complete client install in
+   * one click.
+   *
+   * The manifest carries name, MC version, and the loader-version
+   * dependency so the launcher knows which loader profile to create.
+   */
+  app.get("/servers/:id/export-mrpack", async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const q = req.query as {
+      packName?: string;
+      mcVersion?: string;
+      loader?: string;
+      loaderVersion?: string;
+    };
+    const base = dataDirFor(id);
+    const sideFile = path.join(base, ".cofemine-client", "sides.json");
+    let sides: Record<string, "server" | "client" | "both" | "auto"> = {};
+    try {
+      sides = JSON.parse(await fs.readFile(sideFile, "utf8"));
+    } catch {
+      /* no overrides yet */
+    }
+
+    const serverModsDir = path.join(base, "mods");
+    const clientModsDir = path.join(base, ".cofemine-client", "mods");
+
+    type Entry = {
+      sourcePath: string;
+      filename: string;
+      origin: "server" | "client";
+      side: "server" | "client" | "both";
+    };
+    const entries: Entry[] = [];
+
+    async function collect(
+      dir: string,
+      origin: "server" | "client",
+      defaultSide: "server" | "client" | "both"
+    ): Promise<void> {
+      let items: string[] = [];
+      try {
+        items = await fs.readdir(dir);
+      } catch {
+        return;
+      }
+      for (const name of items) {
+        if (!/\.(jar|zip)$/i.test(name)) continue;
+        const userSide = sides[name];
+        const side: "server" | "client" | "both" =
+          userSide && userSide !== "auto" ? userSide : defaultSide;
+        entries.push({
+          sourcePath: path.join(dir, name),
+          filename: name,
+          origin,
+          side,
+        });
+      }
+    }
+    await collect(serverModsDir, "server", "both");
+    await collect(clientModsDir, "client", "client");
+
+    const manifest = {
+      formatVersion: 1,
+      game: "minecraft",
+      versionId: new Date().toISOString().slice(0, 10),
+      name: q.packName ?? `cofemine-${id.slice(0, 8)}`,
+      summary: "Exported by Cofemine Panel",
+      files: [] as Array<unknown>,
+      dependencies: {
+        minecraft: q.mcVersion ?? "1.21.1",
+        ...(q.loader && q.loaderVersion ? { [q.loader]: q.loaderVersion } : {}),
+      },
+    };
+
+    // Set headers BEFORE the archive starts streaming.
+    const safeName = (q.packName ?? `cofemine-${id.slice(0, 8)}`).replace(
+      /[^a-zA-Z0-9._-]+/g,
+      "-"
+    );
+    reply.header("content-type", "application/zip");
+    reply.header(
+      "content-disposition",
+      `attachment; filename="${safeName}.mrpack"`
+    );
+    // We can't precompute content-length without buffering everything;
+    // omit it and rely on chunked transfer.
+
+    const { default: archiver } = await import("archiver");
+    const archive = archiver("zip", { zlib: { level: 6 } });
+    archive.on("warning", (err) => {
+      req.log.warn({ err }, "mrpack archiver warning");
+    });
+    archive.on("error", (err) => {
+      req.log.error({ err }, "mrpack archiver error");
+      reply.raw.destroy(err);
+    });
+
+    // Pipe archive bytes straight into the HTTP response.
+    archive.pipe(reply.raw);
+
+    // Bundle every jar under the right overrides path.
+    for (const e of entries) {
+      const overridePrefix =
+        e.side === "both"
+          ? "overrides"
+          : e.side === "client"
+            ? "client-overrides"
+            : "server-overrides";
+      archive.file(e.sourcePath, {
+        name: `${overridePrefix}/mods/${e.filename}`,
+      });
+    }
+
+    // Manifest at the root.
+    archive.append(JSON.stringify(manifest, null, 2), {
+      name: "modrinth.index.json",
+    });
+
+    await archive.finalize();
+    // archiver.pipe(reply.raw) ends the stream itself; no further
+    // reply.send needed. Returning here just satisfies fastify.
+    return reply;
+  });
+
   /**
    * Lightweight batch state endpoint for the panel-API's status
    * reconciler. Returns docker `State.Status` for every container

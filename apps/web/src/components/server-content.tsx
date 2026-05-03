@@ -21,6 +21,7 @@ import { ModrinthMark, CurseForgeMark } from "./brand-icons";
 import { useDialog } from "./dialog-provider";
 import { ContentDetailDrawer } from "./content-detail-drawer";
 import { ChangeVersionButton } from "./mod-version-picker";
+import { ClientModsTab } from "./client-mods-tab";
 import { useT } from "@/lib/i18n";
 
 /* ================================ TYPES ================================ */
@@ -252,7 +253,7 @@ function InstalledPanel({
   const dialog = useDialog();
   const { t } = useT();
   const isCFModpack = server?.type === "CURSEFORGE";
-  type Sub = "mods" | "plugins" | "datapacks" | "exclusions";
+  type Sub = "mods" | "plugins" | "datapacks" | "exclusions" | "client";
   const [sub, setSub] = useState<Sub>("mods");
   // If user lands on the Exclusions tab and then switches the server
   // type away from CURSEFORGE (rare but possible), drop them back to
@@ -260,6 +261,22 @@ function InstalledPanel({
   useEffect(() => {
     if (!isCFModpack && sub === "exclusions") setSub("mods");
   }, [isCFModpack, sub]);
+  // The Client tab makes sense on any modded server (modpack or
+  // native loader), so keep it visible whenever the server runs mods
+  // at all — not just on CF.
+  const supportsClientPack = (() => {
+    switch (server?.type) {
+      case "CURSEFORGE":
+      case "MODRINTH":
+      case "FORGE":
+      case "NEOFORGE":
+      case "FABRIC":
+      case "QUILT":
+        return true;
+      default:
+        return false;
+    }
+  })();
   const [detail, setDetail] = useState<{
     provider: "modrinth" | "curseforge";
     projectId: string;
@@ -271,7 +288,7 @@ function InstalledPanel({
     datapacks: installed?.datapacks ?? [],
   };
   const visible: InstalledFile[] =
-    sub === "exclusions" ? [] : groups[sub];
+    sub === "exclusions" || sub === "client" ? [] : groups[sub];
   const [query, setQuery] = useState("");
 
   // CF_EXCLUDE_MODS is the comma-separated modId blacklist itzg's
@@ -291,7 +308,8 @@ function InstalledPanel({
     // removed Waystones" turns into "Waystones came back". So we make
     // delete-and-exclude the default action, falling back to plain
     // delete only when we can't resolve a modId for the jar.
-    const fileType = sub === "exclusions" ? "mods" : sub;
+    const fileType =
+      sub === "exclusions" || sub === "client" ? "mods" : sub;
     const cfModId = file.curseforge?.modId;
     if (isCFModpack && cfModId) {
       const ok = await dialog.confirm({
@@ -401,6 +419,20 @@ function InstalledPanel({
               </span>
             </button>
           )}
+          {supportsClientPack && (
+            <button
+              onClick={() => setSub("client")}
+              className={cn(
+                "inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm border transition-colors",
+                sub === "client"
+                  ? "bg-[rgb(var(--accent-soft))] border-[rgb(var(--accent))]/40 text-[rgb(var(--accent))]"
+                  : "border-line text-ink-secondary hover:bg-surface-2"
+              )}
+              title={t("content.tabs.clientHint")}
+            >
+              {t("content.tabs.client")}
+            </button>
+          )}
         </div>
         <div className="flex items-center gap-2">
           <div className="relative">
@@ -428,6 +460,8 @@ function InstalledPanel({
 
       {sub === "exclusions" ? (
         <ExclusionsTab serverId={serverId} />
+      ) : sub === "client" ? (
+        <ClientModsTab serverId={serverId} />
       ) : filtered.length === 0 ? (
         <div className="tile p-10 text-center text-ink-muted">
           {installed === undefined
