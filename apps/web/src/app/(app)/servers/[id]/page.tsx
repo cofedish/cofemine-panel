@@ -11,6 +11,7 @@ import { ServerProperties } from "@/components/server-properties";
 import { ServerContent } from "@/components/server-content";
 import { ServerDiagnostics } from "@/components/server-diagnostics";
 import { ServerSchedules } from "@/components/server-schedules";
+import { LoaderVersionRow } from "@/components/loader-version-editor";
 import Link from "next/link";
 import { StatusDot } from "@/components/status-dot";
 import { PageHeader } from "@/components/page-header";
@@ -409,6 +410,9 @@ function Overview({
         <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-4 text-sm">
           <Row label={t("server.hero.serverType")}>{data.type}</Row>
           <Row label={t("server.hero.version")}>{data.version}</Row>
+          <Row label={t("server.overview.loaderVersion")}>
+            <LoaderVersionRow server={data} />
+          </Row>
           <Row label={t("server.overview.memoryLimit")}>
             {data.memoryMb} MB
           </Row>

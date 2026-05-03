@@ -661,6 +661,106 @@ export async function serversRoutes(app: FastifyInstance): Promise<void> {
     return { ok: true, excluded: [...set] };
   });
 
+  // ---------- Loader version override ----------
+  //
+  // Lets the user pin a specific NeoForge / Forge / Fabric / Quilt
+  // loader version on an already-existing server, including modpack
+  // servers (CURSEFORGE / MODRINTH) that bake their own version into
+  // the pack manifest. itzg supports this:
+  //   • For CURSEFORGE: NEOFORGE_VERSION + CF_OVERRIDE_LOADER_VERSION=true
+  //   • For Modrinth: setting NEOFORGE_VERSION etc. is enough — itzg
+  //     applies the override after the pack's loader is determined.
+  //   • For native loaders (FORGE / NEOFORGE / FABRIC / QUILT server
+  //     types): just the version env var.
+  //
+  // We don't try to validate the version exists upstream — the meta
+  // route already populates the dropdown from canonical sources, so
+  // garbage input would only come from a handcrafted call.
+
+  app.post("/:id/loader-version", async (req) => {
+    const { id } = req.params as { id: string };
+    await assertServerPermission(req, id, "server.edit");
+    const body = z
+      .object({
+        // null clears the override (server falls back to the pack /
+        // image default).
+        loader: z
+          .enum(["neoforge", "forge", "fabric", "quilt"])
+          .nullable(),
+        version: z.string().min(1).max(64).nullable(),
+      })
+      .parse(req.body);
+    const server = await prisma.server.findUniqueOrThrow({ where: { id } });
+    const env = ((server.env as Record<string, string> | null) ?? {}) as Record<
+      string,
+      string
+    >;
+    // Strip every loader-version key first, so switching loader (e.g.
+    // forge → neoforge) doesn't leave the previous one as a stale
+    // override. itzg picks one based on TYPE / pack manifest, but a
+    // stale FORGE_VERSION + NEOFORGE_VERSION pair has bitten people
+    // before.
+    const loaderKeys = [
+      "NEOFORGE_VERSION",
+      "FORGE_VERSION",
+      "FABRIC_LOADER_VERSION",
+      "QUILT_LOADER_VERSION",
+      "CF_OVERRIDE_LOADER_VERSION",
+    ];
+    const next: Record<string, string> = { ...env };
+    for (const k of loaderKeys) delete next[k];
+    if (body.loader && body.version) {
+      const map: Record<string, string> = {
+        neoforge: "NEOFORGE_VERSION",
+        forge: "FORGE_VERSION",
+        fabric: "FABRIC_LOADER_VERSION",
+        quilt: "QUILT_LOADER_VERSION",
+      };
+      next[map[body.loader]!] = body.version;
+      // CF needs an explicit opt-in to override the pack-shipped
+      // loader version. Setting it for non-CF servers is a no-op,
+      // so cheaper to set unconditionally than to gate.
+      next.CF_OVERRIDE_LOADER_VERSION = "true";
+    }
+    await prisma.server.update({
+      where: { id },
+      data: { env: next as unknown as object },
+    });
+    await reconcileAndReprovision(id);
+    await writeAudit(req, {
+      action: "server.loader-version.set",
+      resource: id,
+      metadata: { loader: body.loader, version: body.version },
+    });
+    return { ok: true, env: next };
+  });
+
+  app.get("/:id/loader-version", async (req) => {
+    const { id } = req.params as { id: string };
+    await assertServerPermission(req, id, "server.view");
+    const server = await prisma.server.findUniqueOrThrow({ where: { id } });
+    const env = ((server.env as Record<string, string> | null) ?? {}) as Record<
+      string,
+      string
+    >;
+    // Whichever of the four version env vars is currently set wins.
+    // We prefer the "current loader's" var when it's clear (FORGE /
+    // NEOFORGE / FABRIC / QUILT server types) but for modpacks the
+    // first non-empty wins.
+    const candidates: Array<{ loader: string; key: string }> = [
+      { loader: "neoforge", key: "NEOFORGE_VERSION" },
+      { loader: "forge", key: "FORGE_VERSION" },
+      { loader: "fabric", key: "FABRIC_LOADER_VERSION" },
+      { loader: "quilt", key: "QUILT_LOADER_VERSION" },
+    ];
+    for (const c of candidates) {
+      if (env[c.key]) {
+        return { loader: c.loader, version: env[c.key]! };
+      }
+    }
+    return { loader: null, version: null };
+  });
+
   app.get("/:id/crash-reports", async (req) => {
     const { id } = req.params as { id: string };
     await assertServerPermission(req, id, "server.view");

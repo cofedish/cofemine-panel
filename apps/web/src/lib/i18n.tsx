@@ -132,6 +132,26 @@ const en: Dict = {
   "server.overview.runtime": "Runtime configuration",
   "server.overview.memoryLimit": "Memory limit",
   "server.overview.cpuLimit": "CPU limit",
+  "server.overview.loaderVersion": "Loader version",
+  "loaderVersion.usingPackDefault": "(using pack default)",
+  "loaderVersion.change": "Change",
+  "loaderVersion.dialogTitle": "Override loader version",
+  "loaderVersion.dialogSubtitle":
+    "Pin a specific NeoForge / Forge / Fabric / Quilt version for this server. The container will rebuild and the next start will run on the chosen version. MC: {mc}",
+  "loaderVersion.loader": "Loader",
+  "loaderVersion.loaderHint":
+    "On modpack servers we can't always tell which loader the pack uses — pick the one your pack ships.",
+  "loaderVersion.version": "Version",
+  "loaderVersion.pickVersion": "— pick version —",
+  "loaderVersion.showUnstable": "Show unstable (beta / rc / pre)",
+  "loaderVersion.noVersions":
+    "No published {loader} versions found for MC {mc}. Try a different MC version.",
+  "loaderVersion.repairWarning":
+    "Saving rebuilds the container so the new loader version takes effect on the next start. Existing world data is unaffected.",
+  "loaderVersion.applyAndRebuild": "Apply & rebuild",
+  "loaderVersion.clearOverride": "Clear override",
+  "loaderVersion.saved": "Loader pinned to {loader} {version}. Rebuilding…",
+  "loaderVersion.cleared": "Override cleared. Falling back to pack / image default.",
   "server.overview.unlimited": "unlimited",
   "server.overview.ports": "Ports",
   "server.overview.env": "Env vars",
@@ -726,6 +746,26 @@ const ru: Dict = {
   "server.overview.runtime": "Конфигурация рантайма",
   "server.overview.memoryLimit": "Лимит памяти",
   "server.overview.cpuLimit": "Лимит CPU",
+  "server.overview.loaderVersion": "Версия лоадера",
+  "loaderVersion.usingPackDefault": "(как в сборке)",
+  "loaderVersion.change": "Изменить",
+  "loaderVersion.dialogTitle": "Переопределить версию лоадера",
+  "loaderVersion.dialogSubtitle":
+    "Зафиксировать конкретную версию NeoForge / Forge / Fabric / Quilt. Контейнер пересоберётся и следующий старт пойдёт на выбранной версии. MC: {mc}",
+  "loaderVersion.loader": "Лоадер",
+  "loaderVersion.loaderHint":
+    "Для сборок мы не всегда знаем точный лоадер — выбери тот, на котором собрана твоя сборка.",
+  "loaderVersion.version": "Версия",
+  "loaderVersion.pickVersion": "— выбрать версию —",
+  "loaderVersion.showUnstable": "Показать нестабильные (beta / rc / pre)",
+  "loaderVersion.noVersions":
+    "Не нашли опубликованные версии {loader} под MC {mc}. Попробуй другую версию MC.",
+  "loaderVersion.repairWarning":
+    "Сохранение пересоберёт контейнер, новая версия лоадера применится на следующем старте. Данные мира не трогаются.",
+  "loaderVersion.applyAndRebuild": "Применить и пересобрать",
+  "loaderVersion.clearOverride": "Сбросить",
+  "loaderVersion.saved": "Лоадер закреплён за {loader} {version}. Пересобираю…",
+  "loaderVersion.cleared": "Override сброшен. Возвращаемся к версии из сборки / образа.",
   "server.overview.unlimited": "без лимита",
   "server.overview.ports": "Порты",
   "server.overview.env": "Переменные окружения",
