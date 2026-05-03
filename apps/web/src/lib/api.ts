@@ -29,7 +29,23 @@ async function call<T>(
   const text = await res.text();
   const data = text ? tryJson(text) : undefined;
   if (!res.ok) {
-    throw new ApiError(res.status, (data as any)?.error ?? res.statusText, data);
+    // Build a non-empty message no matter what the server returned.
+    // Empty messages are common when the upstream proxy returns a
+    // 502 with no body, or HTTP/2 strips the reason phrase — without
+    // this fallback the panel's error dialog renders an empty box
+    // and the user has no idea what failed.
+    const bodyError =
+      (data as any)?.error ||
+      (typeof data === "string" ? (data as string) : "");
+    const reason =
+      typeof (data as any)?.reason === "string"
+        ? ` (${(data as any).reason})`
+        : "";
+    const fallback = `Request failed: HTTP ${res.status}${
+      res.statusText ? " " + res.statusText : ""
+    }`;
+    const msg = (bodyError ? `${bodyError}${reason}` : fallback) || fallback;
+    throw new ApiError(res.status, msg, data);
   }
   return data as T;
 }
