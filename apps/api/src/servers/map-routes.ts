@@ -1,7 +1,22 @@
 import type { FastifyInstance } from "fastify";
-import { request } from "undici";
+import { Agent, request } from "undici";
 import { prisma } from "../db.js";
 import { assertServerPermission } from "../auth/rbac.js";
+
+/**
+ * Dedicated undici Agent for panel→agent map proxy hops. Same
+ * reasoning as the agent-side pool: BlueMap fans out tile/asset
+ * fetches in parallel, and the live-players poll runs alongside.
+ * The default 10-conn pool would cause /live/players.json polls to
+ * queue behind tile downloads and surface as intermittent 502s in
+ * the UI plus players "disappearing" from the side list.
+ */
+const mapProxyAgent = new Agent({
+  connections: 64,
+  pipelining: 1,
+  keepAliveTimeout: 30_000,
+  keepAliveMaxTimeout: 60_000,
+});
 
 /**
  * Live-map proxy. Bridges the panel UI to a dynmap or BlueMap HTTP
@@ -64,29 +79,39 @@ async function forwardToProvider(
   const target = `${node.host.replace(/\/$/, "")}/servers/${serverId}/proxy/${port}/${subpath}${qs}`;
 
   try {
+    // Forward enough of the request for caching + ranged fetches to
+    // work end-to-end. accept-encoding is critical: without it the
+    // upstream (BlueMap container) returns uncompressed JSON tiles,
+    // which are several times larger and exhaust the connection pool.
+    const fwdHeaders: Record<string, string> = {
+      authorization: `Bearer ${resolveAgentToken(node.name)}`,
+      accept: String(req.headers["accept"] ?? "*/*"),
+    };
+    const ae = req.headers["accept-encoding"];
+    if (ae) fwdHeaders["accept-encoding"] = String(ae);
+    const inm = req.headers["if-none-match"];
+    if (inm) fwdHeaders["if-none-match"] = String(inm);
+    const ims = req.headers["if-modified-since"];
+    if (ims) fwdHeaders["if-modified-since"] = String(ims);
+    const range = req.headers["range"];
+    if (range) fwdHeaders["range"] = String(range);
+
     const upstream = await request(target, {
       method: "GET",
-      headers: {
-        authorization: `Bearer ${resolveAgentToken(node.name)}`,
-        accept: req.headers["accept"] ?? "*/*",
-        ...(req.headers["if-none-match"]
-          ? { "if-none-match": String(req.headers["if-none-match"]) }
-          : {}),
-        ...(req.headers["if-modified-since"]
-          ? {
-              "if-modified-since": String(req.headers["if-modified-since"]),
-            }
-          : {}),
-      },
-      headersTimeout: 8_000,
-      bodyTimeout: 30_000,
+      headers: fwdHeaders,
+      dispatcher: mapProxyAgent,
+      headersTimeout: 20_000,
+      bodyTimeout: 60_000,
     });
     const passHeaders = [
       "content-type",
       "content-length",
+      "content-encoding",
+      "vary",
       "cache-control",
       "etag",
       "last-modified",
+      "accept-ranges",
     ] as const;
     for (const h of passHeaders) {
       const v = upstream.headers[h];

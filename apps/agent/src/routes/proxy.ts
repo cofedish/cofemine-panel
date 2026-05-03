@@ -1,7 +1,28 @@
 import type { FastifyInstance } from "fastify";
-import { request } from "undici";
+import { Agent, request } from "undici";
 import { docker } from "../docker.js";
 import { config } from "../config.js";
+
+/**
+ * Dedicated undici Agent for the map proxy.
+ *
+ * Why a dedicated agent: BlueMap fires dozens of parallel tile/asset
+ * fetches the moment a player moves into a new area, plus a 2-second
+ * /maps/.../live/players.json poll on top. With the global undici
+ * default (10 connections per origin) the players-poll would queue
+ * behind tile downloads and hit headersTimeout, manifesting as an
+ * intermittent 502 in the panel UI and players "disappearing" from
+ * the side list even though they were still on the server.
+ *
+ * 64 connections per origin is way more than BlueMap will ever
+ * exhaust on a normal server; it's effectively "no queueing".
+ */
+const proxyAgent = new Agent({
+  connections: 64,
+  pipelining: 1,
+  keepAliveTimeout: 30_000,
+  keepAliveMaxTimeout: 60_000,
+});
 
 /**
  * HTTP forwarder from the agent to a managed Minecraft container's
@@ -113,21 +134,35 @@ export async function proxyAgentRoutes(app: FastifyInstance): Promise<void> {
     const targetUrl = `http://${ip}:${portNum}/${subpath}${qs}`;
 
     try {
+      // Forward the few headers the upstream cares about. Drop hop-by-
+      // hop / auth — the upstream only sees what it needs.
+      // Crucially we forward `accept-encoding` and `range`: without
+      // accept-encoding BlueMap returns uncompressed JSON tiles, which
+      // are several times larger and saturate the connection pool;
+      // without range BlueMap can't serve byte-range requests for
+      // textures.
+      const fwdHeaders: Record<string, string> = {
+        accept: String(req.headers["accept"] ?? "*/*"),
+      };
+      const ae = req.headers["accept-encoding"];
+      if (ae) fwdHeaders["accept-encoding"] = String(ae);
+      const inm = req.headers["if-none-match"];
+      if (inm) fwdHeaders["if-none-match"] = String(inm);
+      const ims = req.headers["if-modified-since"];
+      if (ims) fwdHeaders["if-modified-since"] = String(ims);
+      const range = req.headers["range"];
+      if (range) fwdHeaders["range"] = String(range);
+
       const upstream = await request(targetUrl, {
         method: "GET",
-        headers: {
-          // Pass through a few headers the upstream might care about.
-          // Drop hop-by-hop / auth headers from the panel — the
-          // upstream only sees what it needs.
-          accept: req.headers["accept"] ?? "*/*",
-          "if-none-match": req.headers["if-none-match"] ?? "",
-          "if-modified-since": req.headers["if-modified-since"] ?? "",
-        },
-        // Reasonable upper bounds: dynmap tile responses are small,
-        // config/world JSON tiny, and we don't want a slow upstream
-        // to hold the agent worker forever.
-        headersTimeout: 8_000,
-        bodyTimeout: 30_000,
+        headers: fwdHeaders,
+        dispatcher: proxyAgent,
+        // Bump from the original 8s/30s. BlueMap can take a few
+        // seconds to return a freshly-rendered tile or to flush a
+        // large texture; the previous tight timeouts surfaced as
+        // periodic 502 spikes the user reported during play.
+        headersTimeout: 20_000,
+        bodyTimeout: 60_000,
       });
 
       // Mirror status + relevant content headers. `content-encoding`

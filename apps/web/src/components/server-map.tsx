@@ -619,7 +619,15 @@ function BlueMapView({
       ? `/servers/${serverId}/map/bluemap/maps/${encodeURIComponent(firstMapId)}/live/players.json`
       : null,
     fetcher,
-    { refreshInterval: POLL_INTERVAL, revalidateOnFocus: false }
+    {
+      refreshInterval: POLL_INTERVAL,
+      revalidateOnFocus: false,
+      // Keep showing the previous successful payload while a poll is
+      // in-flight or transiently failing. Without this, a single 502
+      // from the proxy made the side panel flash to "No players
+      // online" mid-game even though everyone was still connected.
+      keepPreviousData: true,
+    }
   );
 
   // BlueMap's viewer is at the root of port 8100 (their static
