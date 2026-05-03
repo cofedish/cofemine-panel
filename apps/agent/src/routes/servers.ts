@@ -306,21 +306,52 @@ export async function serversAgentRoutes(app: FastifyInstance): Promise<void> {
       body.mcVersion ?? null,
       installerName
     );
-    // Inject HTTP/HTTPS proxy env into the temp container so the
-    // NeoForge / Forge installer's *internal* dependency fetches
-    // (which it does via java.net.HttpClient against various mavens)
-    // also tunnel through the configured proxy. Same reasoning as
-    // the main MC container's mc-image-helper proxy injection.
+    // Inject proxy settings into the temp container so the loader's
+    // internal dependency fetches (NeoForge installer pulls a tree
+    // of libraries from multiple mavens via java.net.HttpURLConnection)
+    // also go through the configured tunnel.
+    //
+    // Why both env AND JVM properties: Java's built-in HttpURLConnection
+    // ignores HTTP_PROXY env vars completely — it only reads JVM
+    // system properties (-Dhttp.proxyHost / -Dhttp.proxyPort etc.).
+    // We pass those via JAVA_TOOL_OPTIONS, which the JVM reads at
+    // startup. The HTTP_PROXY env vars are still useful as a belt
+    // for any non-Java tool the installer might shell out to.
     const containerEnv: string[] = ["TERM=dumb"];
     if (body.proxyUrl) {
+      // Parse the proxy URL — we want hostname + port. socks5:// is
+      // rewritten to http:// because Java's proxy properties only
+      // speak HTTP CONNECT (xray's mixed inbound on 2080 accepts both).
+      const httpProxyUrl = body.proxyUrl.replace(/^socks5?:/i, "http:");
+      let host = "";
+      let port = "";
+      try {
+        const u = new URL(httpProxyUrl);
+        host = u.hostname;
+        port = u.port || "80";
+      } catch {
+        /* malformed — skip JVM props, the env-based fallback may still help */
+      }
+      const javaToolOptions = host
+        ? [
+            `-Dhttp.proxyHost=${host}`,
+            `-Dhttp.proxyPort=${port}`,
+            `-Dhttps.proxyHost=${host}`,
+            `-Dhttps.proxyPort=${port}`,
+            "-Dhttp.nonProxyHosts=localhost|127.0.0.1|host.docker.internal|*.ru",
+          ].join(" ")
+        : "";
       containerEnv.push(
-        `HTTP_PROXY=${body.proxyUrl}`,
-        `HTTPS_PROXY=${body.proxyUrl}`,
-        `http_proxy=${body.proxyUrl}`,
-        `https_proxy=${body.proxyUrl}`,
+        `HTTP_PROXY=${httpProxyUrl}`,
+        `HTTPS_PROXY=${httpProxyUrl}`,
+        `http_proxy=${httpProxyUrl}`,
+        `https_proxy=${httpProxyUrl}`,
         "NO_PROXY=localhost,127.0.0.1,::1,host.docker.internal,*.ru,172.16.0.0/12,10.0.0.0/8,192.168.0.0/16",
         "no_proxy=localhost,127.0.0.1,::1,host.docker.internal,*.ru,172.16.0.0/12,10.0.0.0/8,192.168.0.0/16"
       );
+      if (javaToolOptions) {
+        containerEnv.push(`JAVA_TOOL_OPTIONS=${javaToolOptions}`);
+      }
     }
     const temp = await docker.createContainer({
       Image: tempImage,
