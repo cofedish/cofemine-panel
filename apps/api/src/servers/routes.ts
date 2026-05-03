@@ -977,6 +977,48 @@ export async function serversRoutes(app: FastifyInstance): Promise<void> {
     return { ok: true };
   });
 
+  app.get("/:id/client-mods/auto-detect", async (req) => {
+    const { id } = req.params as { id: string };
+    await assertServerPermission(req, id, "server.view");
+    const server = await prisma.server.findUniqueOrThrow({ where: { id } });
+    const client = await NodeClient.forId(server.nodeId);
+    return client.call("GET", `/servers/${id}/client-mods/auto-detect`);
+  });
+
+  app.post("/:id/client-mods/download", async (req) => {
+    const { id } = req.params as { id: string };
+    await assertServerPermission(req, id, "server.edit");
+    const body = z
+      .object({
+        files: z
+          .array(
+            z.object({
+              filename: z.string().min(1).max(256),
+              downloadUrl: z.string().url(),
+            })
+          )
+          .min(1)
+          .max(200),
+      })
+      .parse(req.body);
+    const server = await prisma.server.findUniqueOrThrow({ where: { id } });
+    const proxy = await readDownloadProxy();
+    const proxyUrl = proxy ? makeProxyUrl(proxy) : null;
+    const clientNode = await NodeClient.forId(server.nodeId);
+    const result = await clientNode.call<{
+      results: Array<{ filename: string; ok: boolean; error?: string }>;
+    }>("POST", `/servers/${id}/client-mods/download`, {
+      files: body.files,
+      proxyUrl,
+    });
+    await writeAudit(req, {
+      action: "server.client-mods.bulk-download",
+      resource: id,
+      metadata: { count: body.files.length },
+    });
+    return result;
+  });
+
   app.get("/:id/sides", async (req) => {
     const { id } = req.params as { id: string };
     await assertServerPermission(req, id, "server.view");

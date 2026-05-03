@@ -141,19 +141,57 @@ function LoaderVersionDialog({
   // either a real MC version like "1.21.1" or itzg's "LATEST" sentinel
   // (which means "newest stable Mojang release at boot time"). The
   // loader-versions API needs an actual numeric MC version to filter
-  // NeoForge / Forge builds, so we resolve "LATEST" to Mojang's current
-  // latest release via /meta/mc-versions and let the user override the
-  // resolved value if they want to force a specific MC version.
+  // NeoForge / Forge builds.
+  //
+  // For real MC versions, use as-is. For "LATEST", first try to derive
+  // from installed mods' gameVersions (the pack's actual MC), then
+  // fall back to Mojang's current release as a last resort. Mojang's
+  // latest is usually WRONG (way ahead of the pack) so this fallback
+  // ordering matters.
   const isRealMcVersion = /^1\.\d+(\.\d+)?$/.test(server.version);
+  const { data: installed } = useSWR<{
+    mods: Array<{
+      modrinth?: { gameVersions?: string[] };
+      curseforge?: { gameVersions?: string[] };
+    }>;
+  }>(
+    !isRealMcVersion ? `/servers/${server.id}/installed-content` : null,
+    fetcher,
+    { revalidateOnFocus: false }
+  );
   const { data: mcMeta } = useSWR<{
     latest: { release: string; snapshot: string };
   }>(
     !isRealMcVersion ? "/meta/mc-versions?include=release" : null,
     fetcher
   );
+  const fromInstalled = useMemo(() => {
+    if (isRealMcVersion) return null;
+    const counts = new Map<string, number>();
+    for (const m of installed?.mods ?? []) {
+      const versions = [
+        ...(m.modrinth?.gameVersions ?? []),
+        ...(m.curseforge?.gameVersions ?? []),
+      ];
+      for (const v of versions) {
+        if (/^1\.\d+(\.\d+)?$/.test(v)) {
+          counts.set(v, (counts.get(v) ?? 0) + 1);
+        }
+      }
+    }
+    let best: string | null = null;
+    let bestN = 0;
+    for (const [v, n] of counts) {
+      if (n > bestN) {
+        best = v;
+        bestN = n;
+      }
+    }
+    return best;
+  }, [isRealMcVersion, installed]);
   const resolvedMcDefault = isRealMcVersion
     ? server.version
-    : mcMeta?.latest?.release ?? "1.21.1";
+    : fromInstalled ?? mcMeta?.latest?.release ?? "1.21.1";
   const [mcVersion, setMcVersion] = useState<string>(resolvedMcDefault);
   // Keep mcVersion in sync with the resolved default until the user
   // edits it manually — without this, the dropdown stays empty for a

@@ -146,8 +146,50 @@ function ModVersionDialog({
     file.modrinth?.title ?? file.curseforge?.title ?? file.name;
   const currentVersionLabel = file.modrinth?.versionNumber;
 
+  // server.version is whatever was stored at create-time. For modpack
+  // servers created before we stored the pack's real MC, that's the
+  // literal string "LATEST" — useless for filtering versions. Resolve
+  // by majority-vote across installed mods' Modrinth/CF gameVersions
+  // metadata: the most-common 1.X.Y wins. Falls back to whatever
+  // server.version had if nothing useful comes back.
+  const isRealMcVersion = /^1\.\d+(\.\d+)?$/.test(serverMcVersion);
+  const { data: installed } = useSWR<{
+    mods: Array<{
+      modrinth?: { gameVersions?: string[] };
+      curseforge?: { gameVersions?: string[] };
+    }>;
+  }>(
+    !isRealMcVersion ? `/servers/${serverId}/installed-content` : null,
+    fetcher,
+    { revalidateOnFocus: false }
+  );
+  const effectiveMcVersion = useMemo(() => {
+    if (isRealMcVersion) return serverMcVersion;
+    const counts = new Map<string, number>();
+    for (const m of installed?.mods ?? []) {
+      const versions = [
+        ...(m.modrinth?.gameVersions ?? []),
+        ...(m.curseforge?.gameVersions ?? []),
+      ];
+      for (const v of versions) {
+        if (/^1\.\d+(\.\d+)?$/.test(v)) {
+          counts.set(v, (counts.get(v) ?? 0) + 1);
+        }
+      }
+    }
+    let best = serverMcVersion;
+    let bestN = 0;
+    for (const [v, n] of counts) {
+      if (n > bestN) {
+        best = v;
+        bestN = n;
+      }
+    }
+    return best;
+  }, [isRealMcVersion, serverMcVersion, installed]);
+
   const queryParams = new URLSearchParams();
-  if (serverMcVersion) queryParams.set("gameVersion", serverMcVersion);
+  if (effectiveMcVersion) queryParams.set("gameVersion", effectiveMcVersion);
   if (serverLoader) queryParams.set("loader", serverLoader);
   const versionsUrl = `/integrations/${provider}/projects/${encodeURIComponent(
     projectId
@@ -161,13 +203,15 @@ function ModVersionDialog({
     if (!versions) return [];
     if (includeIncompatible) return versions;
     return versions.filter((v) => {
-      const mcOk = serverMcVersion ? v.gameVersions.includes(serverMcVersion) : true;
+      const mcOk = effectiveMcVersion
+        ? v.gameVersions.includes(effectiveMcVersion)
+        : true;
       const loaderOk = serverLoader
         ? v.loaders.length === 0 || v.loaders.includes(serverLoader)
         : true;
       return mcOk && loaderOk;
     });
-  }, [versions, includeIncompatible, serverMcVersion, serverLoader]);
+  }, [versions, includeIncompatible, effectiveMcVersion, serverLoader]);
 
   async function swap(): Promise<void> {
     if (!picked) return;
@@ -191,7 +235,7 @@ function ModVersionDialog({
       const body: Record<string, unknown> = {
         projectId,
         kind: type,
-        gameVersion: serverMcVersion,
+        gameVersion: effectiveMcVersion,
         loader: serverLoader,
       };
       if (provider === "modrinth") body.versionId = picked;

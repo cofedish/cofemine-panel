@@ -565,6 +565,134 @@ export async function serversAgentRoutes(app: FastifyInstance): Promise<void> {
     return { mods: out };
   });
 
+  /**
+   * Scan mc-image-helper's CF cache and discover client-only mods
+   * the pack intentionally excluded from the server install (Iris,
+   * Sodium, Mouse Tweaks, Xaero — anything tagged "Client" in CF's
+   * gameVersions).
+   *
+   * Returns the catalog without downloading anything. The Client Pack
+   * tab uses this to render a "Pack ships these client-only mods,
+   * download them all?" prompt.
+   *
+   * Source: <dataDir>/.cache/curseforge/getModInfo/*.json. Each file
+   * is a CF /mods/<id> response cached by mc-image-helper. We pick
+   * the file whose displayName / gameVersions matches "Client" + the
+   * pack's MC version + the pack's loader.
+   */
+  app.get("/servers/:id/client-mods/auto-detect", async (req) => {
+    const { id } = req.params as { id: string };
+    const cacheDir = path.join(
+      dataDirFor(id),
+      ".cache",
+      "curseforge",
+      "getModInfo"
+    );
+    let entries: string[];
+    try {
+      entries = await fs.readdir(cacheDir);
+    } catch {
+      return { detected: [], reason: "no CF cache yet — pack hasn't installed" };
+    }
+    type Detected = {
+      modId: number;
+      slug?: string;
+      title: string;
+      filename: string;
+      downloadUrl: string;
+      icon?: string | null;
+      size?: number;
+    };
+    const detected: Detected[] = [];
+    const clientDir = path.join(dataDirFor(id), ".cofemine-client", "mods");
+    let alreadyDownloaded: Set<string> = new Set();
+    try {
+      const have = await fs.readdir(clientDir);
+      alreadyDownloaded = new Set(have);
+    } catch {
+      /* dir doesn't exist yet — that's fine */
+    }
+    for (const e of entries) {
+      if (!e.endsWith(".json")) continue;
+      let mod: any;
+      try {
+        const raw = await fs.readFile(path.join(cacheDir, e), "utf8");
+        mod = JSON.parse(raw);
+      } catch {
+        continue;
+      }
+      // Find a "Client"-tagged file in this mod's latest releases.
+      // CF marks client-only releases by including the literal string
+      // "Client" in the file's gameVersions array.
+      const files = (mod.latestFiles ?? []) as any[];
+      const clientFile = files.find((f) => {
+        const gvs = (f.gameVersions ?? []) as string[];
+        return gvs.includes("Client");
+      });
+      if (!clientFile) continue;
+      if (!clientFile.downloadUrl) continue;
+      // Skip mods where the user already has the file in client-mods.
+      if (alreadyDownloaded.has(clientFile.fileName)) continue;
+      detected.push({
+        modId: mod.id,
+        slug: mod.slug,
+        title: mod.name ?? `CF mod #${mod.id}`,
+        filename: clientFile.fileName,
+        downloadUrl: clientFile.downloadUrl,
+        icon: mod.logo?.url ?? null,
+        size: clientFile.fileLength,
+      });
+    }
+    return { detected };
+  });
+
+  /**
+   * Bulk-download a list of client-mod URLs (typically the output of
+   * /client-mods/auto-detect) into <dataDir>/.cofemine-client/mods/.
+   * Used by the panel UI's "Add all detected client mods" button.
+   *
+   * Streams each download to disk (no buffering) and reports per-file
+   * success / failure so the UI can show partial-failure state.
+   */
+  app.post("/servers/:id/client-mods/download", async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const body = z
+      .object({
+        files: z
+          .array(
+            z.object({
+              filename: z.string().min(1).max(256),
+              downloadUrl: z.string().url(),
+            })
+          )
+          .min(1)
+          .max(200),
+        proxyUrl: z.string().url().nullable().optional(),
+      })
+      .parse(req.body);
+    const dir = path.join(dataDirFor(id), ".cofemine-client", "mods");
+    await ensureDir(dir);
+    const results: Array<{ filename: string; ok: boolean; error?: string }> = [];
+    for (const f of body.files) {
+      const dest = path.join(dir, f.filename);
+      try {
+        await downloadInstallerJar(
+          f.downloadUrl,
+          dest,
+          body.proxyUrl ?? null
+        );
+        results.push({ filename: f.filename, ok: true });
+      } catch (err) {
+        results.push({
+          filename: f.filename,
+          ok: false,
+          error: (err as Error).message,
+        });
+      }
+    }
+    return reply.send({ results });
+  });
+
   app.post("/servers/:id/client-mods", async (req, reply) => {
     const { id } = req.params as { id: string };
     const body = z

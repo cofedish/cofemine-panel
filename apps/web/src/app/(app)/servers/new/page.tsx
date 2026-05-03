@@ -247,7 +247,14 @@ export default function CreateServerPage(): JSX.Element {
               }
             : {}),
         };
-        body.version = "LATEST";
+        // Store the pack's actual MC version, NOT itzg's "LATEST"
+        // sentinel. Storing "LATEST" had the pack install resolve a
+        // real version on first boot, but the panel's downstream
+        // features (mod-version picker, loader-version dialog) need
+        // a real numeric version to filter compatible builds. Falling
+        // back to LATEST only when the pack picker didn't surface
+        // a gameVersion.
+        body.version = packVersion?.gameVersion ?? "LATEST";
       }
       const res = await api.post<{ id: string }>("/servers", body);
       // Icon upload happens separately — the server needs to exist first

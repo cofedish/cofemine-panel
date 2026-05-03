@@ -32,6 +32,16 @@ type ClientMod = {
   mtime: string;
 };
 
+type DetectedClientMod = {
+  modId: number;
+  slug?: string;
+  title: string;
+  filename: string;
+  downloadUrl: string;
+  icon?: string | null;
+  size?: number;
+};
+
 export function ClientModsTab({ serverId }: { serverId: string }): JSX.Element {
   const { t } = useT();
   const dialog = useDialog();
@@ -42,7 +52,58 @@ export function ClientModsTab({ serverId }: { serverId: string }): JSX.Element {
     `/servers/${serverId}/client-mods`,
     fetcher
   );
+  const { data: detected } = useSWR<{ detected: DetectedClientMod[] }>(
+    `/servers/${serverId}/client-mods/auto-detect`,
+    fetcher,
+    { revalidateOnFocus: false }
+  );
   const items = data?.mods ?? [];
+  const detectedItems = detected?.detected ?? [];
+
+  async function downloadDetected(): Promise<void> {
+    if (detectedItems.length === 0) return;
+    setUploading(true);
+    setProgress(
+      t("clientMods.autoDownloading", { n: detectedItems.length })
+    );
+    try {
+      const result = await api.post<{
+        results: Array<{ filename: string; ok: boolean; error?: string }>;
+      }>(`/servers/${serverId}/client-mods/download`, {
+        files: detectedItems.map((d) => ({
+          filename: d.filename,
+          downloadUrl: d.downloadUrl,
+        })),
+      });
+      const failed = result.results.filter((r) => !r.ok);
+      const ok = result.results.length - failed.length;
+      mutate(`/servers/${serverId}/client-mods`);
+      mutate(`/servers/${serverId}/client-mods/auto-detect`);
+      if (failed.length > 0) {
+        dialog.toast({
+          tone: "warning",
+          message: t("clientMods.autoSomeFail", {
+            ok,
+            n: result.results.length,
+          }),
+        });
+      } else {
+        dialog.toast({
+          tone: "success",
+          message: t("clientMods.autoAllOk", { n: ok }),
+        });
+      }
+    } catch (e) {
+      dialog.alert({
+        tone: "danger",
+        title: t("common.error"),
+        message: e instanceof ApiError ? e.message : String(e),
+      });
+    } finally {
+      setUploading(false);
+      setProgress("");
+    }
+  }
 
   async function uploadFiles(files: FileList | null): Promise<void> {
     if (!files || files.length === 0) return;
@@ -167,6 +228,63 @@ export function ClientModsTab({ serverId }: { serverId: string }): JSX.Element {
           )}
         </div>
       </div>
+
+      {detectedItems.length > 0 && (
+        <div className="tile p-4 space-y-3 border-[rgb(var(--accent))]/30">
+          <header className="flex items-start gap-3 flex-wrap">
+            <PackageOpen size={16} className="text-[rgb(var(--accent))] shrink-0 mt-0.5" />
+            <div className="flex-1 min-w-0">
+              <h3 className="text-sm font-medium">
+                {t("clientMods.autoDetected.title", {
+                  n: detectedItems.length,
+                })}
+              </h3>
+              <p className="text-[11px] text-ink-muted leading-relaxed mt-0.5">
+                {t("clientMods.autoDetected.body")}
+              </p>
+            </div>
+            <button
+              className="btn btn-primary"
+              onClick={() => void downloadDetected()}
+              disabled={uploading}
+            >
+              {uploading ? (
+                <Loader2 size={14} className="animate-spin" />
+              ) : (
+                <Download size={14} />
+              )}
+              {t("clientMods.autoDetected.downloadAll")}
+            </button>
+          </header>
+          <ul className="grid grid-cols-1 md:grid-cols-2 gap-2">
+            {detectedItems.slice(0, 12).map((d) => (
+              <li
+                key={d.modId}
+                className="flex items-center gap-2 text-xs text-ink-muted"
+              >
+                {d.icon ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={d.icon}
+                    alt=""
+                    className="w-6 h-6 rounded shrink-0 object-cover"
+                  />
+                ) : (
+                  <PackageOpen size={14} className="shrink-0 opacity-50" />
+                )}
+                <span className="truncate">{d.title}</span>
+              </li>
+            ))}
+          </ul>
+          {detectedItems.length > 12 && (
+            <p className="text-[11px] text-ink-muted">
+              {t("clientMods.autoDetected.more", {
+                n: detectedItems.length - 12,
+              })}
+            </p>
+          )}
+        </div>
+      )}
 
       {isLoading ? (
         <div className="tile p-10 text-center text-ink-muted">

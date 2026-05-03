@@ -251,6 +251,15 @@ const en: Dict = {
   "clientMods.confirmRemove.title": "Remove from client pack?",
   "clientMods.confirmRemove.body":
     "Delete {name} from the client-mods staging area. Friends downloading the .mrpack after this won't get it.",
+  "clientMods.autoDetected.title":
+    "Pack ships {n} client-only mods that aren't on the server",
+  "clientMods.autoDetected.body":
+    "These were excluded from the server install (Iris, Sodium, Mouse Tweaks, Xaero, etc.) but are needed on the client. Download them to ship with the .mrpack.",
+  "clientMods.autoDetected.downloadAll": "Download all",
+  "clientMods.autoDetected.more": "and {n} more…",
+  "clientMods.autoDownloading": "Downloading {n} client mods…",
+  "clientMods.autoAllOk": "Downloaded all {n} client mods.",
+  "clientMods.autoSomeFail": "Downloaded {ok}/{n}; some failed (check logs).",
   "content.exclusions.intro":
     "These mod IDs are skipped on the next pack install and repair. Remove an entry to bring the mod back next time.",
   "content.exclusions.empty.title": "No mods are excluded.",
@@ -907,6 +916,15 @@ const ru: Dict = {
   "clientMods.confirmRemove.title": "Убрать из клиентской сборки?",
   "clientMods.confirmRemove.body":
     "Удалить {name} из клиентской папки. Друзья качающие .mrpack после этого его не получат.",
+  "clientMods.autoDetected.title":
+    "Сборка содержит {n} клиентских модов, которых нет на сервере",
+  "clientMods.autoDetected.body":
+    "Они были исключены из серверной установки (Iris, Sodium, Mouse Tweaks, Xaero и т.д.), но нужны клиенту. Скачай их, чтобы попали в .mrpack.",
+  "clientMods.autoDetected.downloadAll": "Скачать всё",
+  "clientMods.autoDetected.more": "и ещё {n}…",
+  "clientMods.autoDownloading": "Скачиваю {n} клиентских модов…",
+  "clientMods.autoAllOk": "Скачано {n} клиентских модов.",
+  "clientMods.autoSomeFail": "Скачано {ok}/{n}; часть не удалась (проверь логи).",
   "content.exclusions.intro":
     "Эти модификации пропускаются при следующей установке/починке сборки. Убери запись — мод вернётся при следующем запуске установщика.",
   "content.exclusions.empty.title": "Нет исключённых модов.",
