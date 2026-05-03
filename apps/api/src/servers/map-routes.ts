@@ -2,6 +2,7 @@ import type { FastifyInstance } from "fastify";
 import { Agent, request } from "undici";
 import { prisma } from "../db.js";
 import { assertServerPermission } from "../auth/rbac.js";
+import type { Permission } from "@cofemine/shared";
 
 /**
  * Dedicated undici Agent for panel→agent map proxy hops. Same
@@ -103,7 +104,7 @@ const permCache = new Map<string, CachedPerm>();
 async function assertServerPermissionCached(
   req: import("fastify").FastifyRequest,
   serverId: string,
-  perm: string
+  perm: Permission
 ): Promise<void> {
   // Force JWT/session validation by accessing req.user (populated by
   // the auth hook). If the user isn't authed, this throws via the
