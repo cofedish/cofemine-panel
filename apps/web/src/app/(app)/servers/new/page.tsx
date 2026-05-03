@@ -259,16 +259,37 @@ export default function CreateServerPage(): JSX.Element {
           console.warn("Failed to upload icon after create:", e);
         }
       }
-      // (No pre-install step. We considered downloading the map jar
-      // to /data/mods immediately at create-time so it'd show in the
-      // Files tab before first Start — but for AUTO_CURSEFORGE /
-      // MODRINTH servers itzg's first-boot pack install wipes
-      // /data/mods clean against the pack manifest anyway, erasing
-      // the pre-placed file before it ever loads. The MODS / PLUGINS
-      // env we baked into the create body is enough on its own:
-      // itzg processes those URLs on every start, AFTER the pack
-      // install runs, so the jar lands in mods/ for both modpack and
-      // plain servers without burning bandwidth twice.)
+      // (No pre-install step. itzg's first-boot pack install wipes
+      // /data/mods clean against the pack manifest, so any jar
+      // pre-placed at create-time is erased before it ever loads.
+      // The MODS / PLUGINS env we baked into the create body is the
+      // sole mechanism: itzg processes those URLs on every start
+      // AFTER the pack install runs, so the jar lands in mods/ on
+      // first start.)
+
+      // BlueMap-specific: the mod refuses to start until you accept
+      // its required-download notice (block textures from Mojang).
+      // Without intervention the user sees
+      //   "BlueMap is missing important resources!
+      //    You must accept the required file download in order for
+      //    BlueMap to work!"
+      // every boot. We write the consent into core.conf upfront so
+      // it's there before BlueMap's first run generates its config.
+      // BlueMap merges existing config keys with defaults at startup,
+      // so this single line survives across boots and pack reinstalls.
+      if (installDynmap && dynmapTarget?.slug === "bluemap") {
+        try {
+          await api.put(`/servers/${res.id}/files`, {
+            path: "/config/bluemap/core.conf",
+            content: BLUEMAP_CORE_CONF_ACCEPT,
+          });
+        } catch (e) {
+          console.warn(
+            "Failed to pre-write BlueMap accept-download config:",
+            e
+          );
+        }
+      }
       router.push(`/servers/${res.id}`);
     } catch (e) {
       setErr(e instanceof ApiError ? e.message : String(e));
@@ -1457,6 +1478,24 @@ function resolveRuntimeFilters(
     loader: packVersion?.loader,
   };
 }
+
+/**
+ * BlueMap's pre-flight consent file. The `accept-download: true`
+ * line tells BlueMap it's allowed to fetch its required resource
+ * pack (block textures from Mojang) on first run; without it the
+ * mod refuses to load and prints "BlueMap is missing important
+ * resources!" every boot. BlueMap reads its config in HOCON format
+ * and merges any keys the user supplied with its built-in defaults,
+ * so this minimal one-liner is enough — BlueMap fills in the rest
+ * on first start.
+ */
+const BLUEMAP_CORE_CONF_ACCEPT = `# Pre-written by Cofemine Panel.
+# accept-download must be true for BlueMap to fetch its required
+# texture resources (Mojang block models) on first run. The
+# remaining settings are filled in with BlueMap defaults the first
+# time the plugin loads.
+accept-download: true
+`;
 
 /**
  * Look up the newest Modrinth version of `slug` that's compatible
