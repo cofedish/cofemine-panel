@@ -130,13 +130,21 @@ export async function proxyAgentRoutes(app: FastifyInstance): Promise<void> {
         bodyTimeout: 30_000,
       });
 
-      // Mirror status + relevant content headers.
+      // Mirror status + relevant content headers. `content-encoding`
+      // is critical: BlueMap serves its world tiles as gzipped JSON
+      // (`.prbm` / `.json.gz`-style payloads with content-encoding: gzip)
+      // and stripping the header makes the browser hand the gzipped
+      // bytes to the JS client as plain → silently fails to parse →
+      // black map outside the small initial area.
       const passHeaders = [
         "content-type",
         "content-length",
+        "content-encoding",
+        "vary",
         "cache-control",
         "etag",
         "last-modified",
+        "accept-ranges",
       ] as const;
       for (const h of passHeaders) {
         const v = upstream.headers[h];
