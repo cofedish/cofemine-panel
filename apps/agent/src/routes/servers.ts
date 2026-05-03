@@ -289,6 +289,10 @@ export async function serversAgentRoutes(app: FastifyInstance): Promise<void> {
         wipeResults.push({ path: p, existed, ok: false });
       }
     }
+    // Glob-wipe cached installer jars at /data root that
+    // mc-image-helper will otherwise re-run on next boot to "fix"
+    // the loader back to the pack-shipped version.
+    await wipeRootInstallerJars(dataDir, body.loader, req.log);
     req.log.info(
       { wipeResults },
       "install-modloader: wipe phase complete"
@@ -349,33 +353,55 @@ export async function serversAgentRoutes(app: FastifyInstance): Promise<void> {
     // for any non-Java tool the installer might shell out to.
     const containerEnv: string[] = ["TERM=dumb"];
     if (body.proxyUrl) {
-      // Parse the proxy URL — we want hostname + port. socks5:// is
-      // rewritten to http:// because Java's proxy properties only
-      // speak HTTP CONNECT (xray's mixed inbound on 2080 accepts both).
-      const httpProxyUrl = body.proxyUrl.replace(/^socks5?:/i, "http:");
+      // The JVM's proxy properties differ between protocols:
+      //   - HTTP/HTTPS proxy → -Dhttp.proxyHost / -Dhttps.proxyHost
+      //   - SOCKS5         → -DsocksProxyHost / -DsocksProxyPort
+      // Mixing them up means the installer's URLConnection silently
+      // ignores the property and goes direct, which is what the user
+      // hit on the SOCKS-only port 10808.
+      const isSocks = body.proxyUrl.startsWith("socks");
       let host = "";
       let port = "";
       try {
-        const u = new URL(httpProxyUrl);
+        const u = new URL(body.proxyUrl);
         host = u.hostname;
-        port = u.port || "80";
+        port = u.port || (isSocks ? "1080" : "80");
       } catch {
         /* malformed — skip JVM props, the env-based fallback may still help */
       }
       const javaToolOptions = host
-        ? [
-            `-Dhttp.proxyHost=${host}`,
-            `-Dhttp.proxyPort=${port}`,
-            `-Dhttps.proxyHost=${host}`,
-            `-Dhttps.proxyPort=${port}`,
-            "-Dhttp.nonProxyHosts=localhost|127.0.0.1|host.docker.internal|*.ru",
-          ].join(" ")
+        ? (isSocks
+            ? [
+                `-DsocksProxyHost=${host}`,
+                `-DsocksProxyPort=${port}`,
+                "-DsocksNonProxyHosts=localhost|127.0.0.1|host.docker.internal|*.ru",
+              ]
+            : [
+                `-Dhttp.proxyHost=${host}`,
+                `-Dhttp.proxyPort=${port}`,
+                `-Dhttps.proxyHost=${host}`,
+                `-Dhttps.proxyPort=${port}`,
+                "-Dhttp.nonProxyHosts=localhost|127.0.0.1|host.docker.internal|*.ru",
+              ]
+          ).join(" ")
         : "";
+      // ALL_PROXY honours SOCKS in tools that look at it (curl, etc.);
+      // HTTP_PROXY only on HTTP-CONNECT proxies. Set both so non-Java
+      // shell-outs the installer might do also tunnel correctly.
+      if (isSocks) {
+        containerEnv.push(
+          `ALL_PROXY=${body.proxyUrl}`,
+          `all_proxy=${body.proxyUrl}`
+        );
+      } else {
+        containerEnv.push(
+          `HTTP_PROXY=${body.proxyUrl}`,
+          `HTTPS_PROXY=${body.proxyUrl}`,
+          `http_proxy=${body.proxyUrl}`,
+          `https_proxy=${body.proxyUrl}`
+        );
+      }
       containerEnv.push(
-        `HTTP_PROXY=${httpProxyUrl}`,
-        `HTTPS_PROXY=${httpProxyUrl}`,
-        `http_proxy=${httpProxyUrl}`,
-        `https_proxy=${httpProxyUrl}`,
         "NO_PROXY=localhost,127.0.0.1,::1,host.docker.internal,*.ru,172.16.0.0/12,10.0.0.0/8,192.168.0.0/16",
         "no_proxy=localhost,127.0.0.1,::1,host.docker.internal,*.ru,172.16.0.0/12,10.0.0.0/8,192.168.0.0/16"
       );
@@ -2515,12 +2541,21 @@ function isBoringPackage(top: string): boolean {
  * Wiped before running the installer so the new run.sh / launch jars
  * land on a clean slate. Mod jars and world data are NOT in this list.
  */
+/**
+ * Per-loader and shared paths that need to be removed before our
+ * installer runs, otherwise mc-image-helper / itzg short-circuits
+ * and reinstalls the OLD version on next boot.
+ *
+ * The non-obvious one (which surfaced in real-world testing): for
+ * NeoForge / Forge, mc-image-helper drops a copy of the installer
+ * jar at /data/neoforge-<ver>-installer.jar (or forge-...) during
+ * the initial pack install, then re-runs THAT jar on subsequent
+ * boots. Even after we wiped run.sh + libraries and dropped fresh
+ * 21.1.228 versions, mc-image-helper would find the cached 21.1.172
+ * installer at /data root and overwrite everything back to 21.1.172.
+ * So the wipe HAS to clear those root-level installer jars too.
+ */
 function staleLoaderPaths(loader: "neoforge" | "forge" | "fabric" | "quilt"): string[] {
-  // Common across all loaders: run.sh / launcher artefacts AND the
-  // mc-image-helper / itzg state files that say "loader X already
-  // installed". Without wiping these, mc-image-helper short-circuits
-  // and reports the OLD version is still installed even though we
-  // just put fresh jars on disk — the exact symptom user hit.
   const common = [
     "run.sh",
     "run.bat",
@@ -2535,9 +2570,15 @@ function staleLoaderPaths(loader: "neoforge" | "forge" | "fabric" | "quilt"): st
   ];
   switch (loader) {
     case "neoforge":
-      return [...common, "libraries/net/neoforged"];
+      return [
+        ...common,
+        "libraries/net/neoforged",
+      ];
     case "forge":
-      return [...common, "libraries/net/minecraftforge"];
+      return [
+        ...common,
+        "libraries/net/minecraftforge",
+      ];
     case "fabric":
       return [
         ...common,
@@ -2551,6 +2592,46 @@ function staleLoaderPaths(loader: "neoforge" | "forge" | "fabric" | "quilt"): st
         "quilt-server-launcher.jar",
         ".quilt-installer-version",
       ];
+  }
+}
+
+/**
+ * mc-image-helper drops `neoforge-<ver>-installer.jar` (or
+ * `forge-<ver>-installer.jar`) at /data root during pack install
+ * and re-runs it on every subsequent boot, which silently restores
+ * the pack-shipped loader version no matter what NEOFORGE_VERSION
+ * we set. Glob-wipe these by listing /data and matching the pattern
+ * — we can't enumerate via the file API since we don't know the old
+ * version number ahead of time.
+ */
+async function wipeRootInstallerJars(
+  dataDir: string,
+  loader: "neoforge" | "forge" | "fabric" | "quilt",
+  log: Logger
+): Promise<void> {
+  const prefix =
+    loader === "neoforge"
+      ? "neoforge-"
+      : loader === "forge"
+        ? "forge-"
+        : null;
+  if (!prefix) return;
+  let entries: string[];
+  try {
+    entries = await fs.readdir(dataDir);
+  } catch {
+    return;
+  }
+  for (const e of entries) {
+    if (e.startsWith(prefix) && /-installer\.jar(\.log)?$/.test(e)) {
+      const full = path.join(dataDir, e);
+      try {
+        await fs.rm(full, { force: true });
+        log.info({ path: full }, "wiped cached installer jar");
+      } catch (err) {
+        log.warn({ err, path: full }, "couldn't wipe cached installer jar");
+      }
+    }
   }
 }
 
@@ -2748,26 +2829,30 @@ async function chownRecursive(
 }
 
 /**
- * Stream-download a jar to disk via undici, optionally tunnelled
- * through an HTTP-CONNECT proxy.
+ * Stream-download a jar to disk, optionally through a proxy.
  *
- * undici's ProxyAgent only speaks HTTP CONNECT, not native SOCKS5.
- * The user's xray on 2080 is configured as a mixed inbound (HTTP +
- * SOCKS), so we rewrite a socks5:// URL to http:// and connect via
- * HTTP CONNECT — xray accepts that on the same port. For a pure
- * SOCKS5 proxy this would fail at connect time with a clear error,
- * which is the right diagnostic to surface.
+ * Two paths because undici's ProxyAgent only speaks HTTP CONNECT,
+ * which a SOCKS5-only inbound (xray's default `socks` inbound) just
+ * rejects with 400. So:
+ *   - http:// proxies → undici ProxyAgent (fast, native).
+ *   - socks5:// proxies → SocksProxyAgent on Node's https module
+ *     (one extra dependency but actually speaks the protocol).
+ *
+ * Both stream the response straight to disk so a 50MB installer
+ * doesn't spike RSS.
  */
 async function downloadInstallerJar(
   url: string,
   destPath: string,
   proxyUrl: string | null
 ): Promise<void> {
+  if (proxyUrl?.startsWith("socks")) {
+    return downloadViaSocks(url, destPath, proxyUrl);
+  }
   let dispatcher: import("undici").Dispatcher | undefined;
   if (proxyUrl) {
-    const httpEquivalent = proxyUrl.replace(/^socks5?:/i, "http:");
     const { ProxyAgent } = await import("undici");
-    dispatcher = new ProxyAgent(httpEquivalent);
+    dispatcher = new ProxyAgent(proxyUrl);
   }
   const res = await request(url, {
     method: "GET",
@@ -2793,4 +2878,62 @@ async function downloadInstallerJar(
   } finally {
     await fh.close();
   }
+}
+
+/**
+ * SOCKS5 download path — uses Node's built-in https module (which
+ * accepts a custom http.Agent) wired up to socks-proxy-agent.
+ */
+async function downloadViaSocks(
+  url: string,
+  destPath: string,
+  socksUrl: string
+): Promise<void> {
+  const [{ SocksProxyAgent }, https, { createWriteStream }] = await Promise.all([
+    import("socks-proxy-agent"),
+    import("node:https"),
+    import("node:fs"),
+  ]);
+  const agent = new SocksProxyAgent(socksUrl);
+  await new Promise<void>((resolve, reject) => {
+    const req = https.get(
+      url,
+      {
+        agent: agent as any,
+        // Follow redirects manually — see below — but Node's https
+        // doesn't auto-redirect, so for now bail loudly if upstream
+        // 30x's. mavens for the loaders we support don't redirect.
+        timeout: 60_000,
+      },
+      (res) => {
+        if ((res.statusCode ?? 0) >= 400) {
+          res.resume();
+          reject(new Error(`HTTP ${res.statusCode}`));
+          return;
+        }
+        if (res.statusCode === 301 || res.statusCode === 302) {
+          res.resume();
+          const location = res.headers.location;
+          if (!location) {
+            reject(new Error(`HTTP ${res.statusCode} with no Location header`));
+            return;
+          }
+          downloadViaSocks(location, destPath, socksUrl).then(resolve, reject);
+          return;
+        }
+        const fileStream = createWriteStream(destPath);
+        res.pipe(fileStream);
+        fileStream.on("finish", () => {
+          fileStream.close();
+          resolve();
+        });
+        fileStream.on("error", reject);
+        res.on("error", reject);
+      }
+    );
+    req.on("error", reject);
+    req.on("timeout", () => {
+      req.destroy(new Error("socks download: connect timeout"));
+    });
+  });
 }

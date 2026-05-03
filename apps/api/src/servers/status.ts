@@ -127,9 +127,19 @@ async function clearForceSynchronizeIfSet(serverId: string): Promise<void> {
       string,
       string
     >;
-    if (env.CF_FORCE_SYNCHRONIZE !== "true") return;
+    // Clear any of the one-shot reinstall flags. They were set when
+    // the user clicked Apply on the loader-version dialog; once the
+    // server boots cleanly on the new loader, they're no longer
+    // needed and would just slow every subsequent restart with a
+    // redundant download check.
+    const oneShotKeys = [
+      "CF_FORCE_REINSTALL_MODLOADER",
+      "CF_FORCE_SYNCHRONIZE",
+    ];
+    const stale = oneShotKeys.filter((k) => env[k] === "true");
+    if (stale.length === 0) return;
     const next = { ...env };
-    delete next.CF_FORCE_SYNCHRONIZE;
+    for (const k of stale) delete next[k];
     await prisma.server.update({
       where: { id: serverId },
       data: { env: next as unknown as object },

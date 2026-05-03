@@ -742,28 +742,47 @@ export async function serversRoutes(app: FastifyInstance): Promise<void> {
       "FORGE_VERSION",
       "FABRIC_LOADER_VERSION",
       "QUILT_LOADER_VERSION",
-      "CF_OVERRIDE_LOADER_VERSION",
-      // Strip the force-sync flag too — once the loader is correctly
-      // installed we don't want to re-download the entire pack on
-      // every restart. The next override-apply re-sets it.
-      "CF_FORCE_SYNCHRONIZE",
-      // Legacy from the previous attempt — strip if still present.
+      // The actual env that itzg's start-deployAutoCF script reads
+      // for AUTO_CURSEFORGE. Maps to mc-image-helper's
+      // --mod-loader-version flag.
+      "CF_MOD_LOADER_VERSION",
       "CF_FORCE_REINSTALL_MODLOADER",
+      "CF_FORCE_SYNCHRONIZE",
+      // Legacy from previous attempts; strip if still present.
+      "CF_OVERRIDE_LOADER_VERSION",
     ];
     const next: Record<string, string> = { ...env };
     for (const k of loaderKeys) delete next[k];
     if (body.loader && body.version) {
-      const map: Record<string, string> = {
+      // Native loader server types (FORGE / NEOFORGE / FABRIC /
+      // QUILT) read the X_VERSION env at boot. Modpack server types
+      // (CURSEFORGE / MODRINTH) instead use mc-image-helper which
+      // reads CF_MOD_LOADER_VERSION + CF_FORCE_REINSTALL_MODLOADER.
+      // Get the wrong env name here and itzg silently ignores the
+      // override — the original "21.1.218 still loads" bug.
+      const nativeMap: Record<string, string> = {
         neoforge: "NEOFORGE_VERSION",
         forge: "FORGE_VERSION",
         fabric: "FABRIC_LOADER_VERSION",
         quilt: "QUILT_LOADER_VERSION",
       };
-      next[map[body.loader]!] = body.version;
-      // CF needs an explicit opt-in to override the pack-shipped
-      // loader version. Setting it for non-CF servers is a no-op,
-      // so cheaper to set unconditionally than to gate.
-      next.CF_OVERRIDE_LOADER_VERSION = "true";
+      // Set the native env (used by FORGE / NEOFORGE / FABRIC /
+      // QUILT server types AND read by some modpack-pack tooling
+      // for completeness — harmless on modpack servers since itzg's
+      // CF flow ignores it).
+      next[nativeMap[body.loader]!] = body.version;
+      // Set the CF/modpack-flavoured env. mc-image-helper for
+      // AUTO_CURSEFORGE only respects this one — without it the
+      // override silently no-ops. Setting it on a non-CF server
+      // is harmless (itzg's non-CF flow doesn't read it).
+      if (server.type === "CURSEFORGE") {
+        next.CF_MOD_LOADER_VERSION = body.version;
+        // Tells mc-image-helper to actually re-download / re-install
+        // the loader at the version above instead of short-circuiting
+        // because "the pack is already installed". Auto-cleared by
+        // the status reconciler once the server boots cleanly.
+        next.CF_FORCE_REINSTALL_MODLOADER = "true";
+      }
     }
     await prisma.server.update({
       where: { id },
