@@ -677,6 +677,27 @@ export async function serversRoutes(app: FastifyInstance): Promise<void> {
   // route already populates the dropdown from canonical sources, so
   // garbage input would only come from a handcrafted call.
 
+  // In-memory tracker for the long-running loader install. The
+  // installer can take 30-120s on first run (image pull + maven
+  // download + installer execution). Holding the HTTP request open
+  // that long ran into idle timeouts somewhere in the Caddy → web →
+  // api proxy chain and surfaced as an opaque "Internal Server
+  // Error" to the user. So we kick the installer off as a background
+  // job, return the request immediately, and let the UI poll for
+  // status. State survives only the lifetime of the api process —
+  // that's fine: the underlying env update is in DB, so a restart
+  // mid-install just means the user sees no toast; the loader still
+  // gets installed when the request completes.
+  type LoaderJob = {
+    state: "running" | "done" | "failed";
+    message: string;
+    loader: string | null;
+    version: string | null;
+    startedAt: number;
+    finishedAt: number | null;
+  };
+  const loaderJobs = new Map<string, LoaderJob>();
+
   app.post("/:id/loader-version", async (req, reply) => {
     const { id } = req.params as { id: string };
     try {
@@ -748,39 +769,61 @@ export async function serversRoutes(app: FastifyInstance): Promise<void> {
       where: { id },
       data: { env: next as unknown as object },
     });
-    // Run the loader installer directly in a one-shot container.
-    // This is the ONLY safe path for CF modpack servers — letting
-    // itzg / mc-image-helper redo the install (via CF_FORCE_SYNCHRONIZE)
-    // wipes any mods the user added on top of the pack and resets every
-    // mod to its pack-default version, which is exactly NOT what
-    // someone changing the loader version wants. The installer touches
-    // run.sh + libraries/net/<loader>/ only; /data/mods, /data/world,
-    // /data/config etc. are untouched.
+    // Kick off the installer in the background. The HTTP request
+    // returns now; the UI polls GET /:id/loader-version-status to
+    // see when it finishes. See the comment on `loaderJobs` for why
+    // this had to go async.
     if (body.loader && body.version) {
-      try {
-        const client = await NodeClient.forId(server.nodeId);
-        await client.call("POST", `/servers/${id}/install-modloader`, {
-          loader: body.loader,
-          version: body.version,
-          mcVersion: body.mcVersion ?? null,
-        });
-      } catch (err) {
-        req.log.warn({ err }, "loader installer call failed");
-        const e = err as Error & { statusCode?: number };
-        const wrapped = new Error(
-          `Loader installer failed: ${e.message ?? "unknown error"}. Server env was updated, but the loader was NOT reinstalled — your mods are untouched.`
-        );
-        (wrapped as any).statusCode = e.statusCode ?? 500;
-        throw wrapped;
-      }
+      const job: LoaderJob = {
+        state: "running",
+        message: "Installing modloader…",
+        loader: body.loader,
+        version: body.version,
+        startedAt: Date.now(),
+        finishedAt: null,
+      };
+      loaderJobs.set(id, job);
+      void (async () => {
+        try {
+          const client = await NodeClient.forId(server.nodeId);
+          await client.call("POST", `/servers/${id}/install-modloader`, {
+            loader: body.loader,
+            version: body.version,
+            mcVersion: body.mcVersion ?? null,
+          });
+          await reconcileAndReprovision(id);
+          job.state = "done";
+          job.message = `Modloader ${body.loader} ${body.version} installed.`;
+          job.finishedAt = Date.now();
+        } catch (err) {
+          // eslint-disable-next-line no-console
+          console.warn(
+            `[loader-version] background install failed for ${id}:`,
+            err instanceof Error ? err.message : err
+          );
+          job.state = "failed";
+          job.message =
+            err instanceof Error && err.message
+              ? err.message
+              : "Installer failed without a message";
+          job.finishedAt = Date.now();
+        }
+      })();
+    } else {
+      // Override cleared — just reprovision so the env change lands.
+      // This is fast (no installer), so we still await it.
+      await reconcileAndReprovision(id);
     }
-    await reconcileAndReprovision(id);
     await writeAudit(req, {
       action: "server.loader-version.set",
       resource: id,
       metadata: { loader: body.loader, version: body.version },
     });
-    return { ok: true, env: next };
+    return reply.code(202).send({
+      ok: true,
+      async: Boolean(body.loader && body.version),
+      env: next,
+    });
     } catch (err) {
       // Log the full error with stack on the panel side so we can
       // tell from `docker logs cofemine-api-1` why the request failed
@@ -797,6 +840,14 @@ export async function serversRoutes(app: FastifyInstance): Promise<void> {
           : "loader-version request failed without a message");
       return reply.code(status).send({ error: message });
     }
+  });
+
+  app.get("/:id/loader-version-status", async (req) => {
+    const { id } = req.params as { id: string };
+    await assertServerPermission(req, id, "server.view");
+    const job = loaderJobs.get(id);
+    if (!job) return { state: "idle" };
+    return job;
   });
 
   app.get("/:id/loader-version", async (req) => {

@@ -186,20 +186,64 @@ function LoaderVersionDialog({
     return includeUnstable ? all : all.filter((v) => v.stable);
   }, [data, includeUnstable]);
 
+  const [progress, setProgress] = useState<string>("");
+
   async function save(): Promise<void> {
     if (!version) return;
     setBusy(true);
+    setProgress(t("loaderVersion.starting"));
     try {
       await api.post(`/servers/${server.id}/loader-version`, {
         loader,
         version,
         mcVersion,
       });
+      // Backend kicked off install in background. Poll status until
+      // it transitions to done or failed. Cap total wait at 5 minutes
+      // so a wedged installer doesn't trap the user in the dialog.
+      const startedAt = Date.now();
+      const POLL_MS = 2_000;
+      const TIMEOUT_MS = 5 * 60_000;
+      let finalMessage = "";
+      while (Date.now() - startedAt < TIMEOUT_MS) {
+        await new Promise((r) => setTimeout(r, POLL_MS));
+        let status: {
+          state?: string;
+          message?: string;
+          finishedAt?: number | null;
+        };
+        try {
+          status = await api.get(
+            `/servers/${server.id}/loader-version-status`
+          );
+        } catch {
+          // Treat poll errors as transient — keep trying within timeout.
+          continue;
+        }
+        if (status.state === "running") {
+          setProgress(status.message ?? t("loaderVersion.installing"));
+          continue;
+        }
+        if (status.state === "done") {
+          finalMessage = status.message ?? "";
+          break;
+        }
+        if (status.state === "failed") {
+          throw new Error(
+            status.message ?? "Installer failed without a message"
+          );
+        }
+        // state === "idle" — somehow the job disappeared. Treat as
+        // success since no error was reported, but break out.
+        break;
+      }
       mutate(`/servers/${server.id}/loader-version`);
       mutate(`/servers/${server.id}`);
       dialog.toast({
         tone: "success",
-        message: t("loaderVersion.saved", { loader, version }),
+        message:
+          finalMessage ||
+          t("loaderVersion.saved", { loader, version }),
       });
       onClose();
     } catch (e) {
@@ -210,6 +254,7 @@ function LoaderVersionDialog({
       });
     } finally {
       setBusy(false);
+      setProgress("");
     }
   }
 
@@ -347,6 +392,12 @@ function LoaderVersionDialog({
         <p className="text-[11px] text-ink-muted leading-relaxed">
           {t("loaderVersion.repairWarning")}
         </p>
+        {busy && progress && (
+          <div className="text-xs text-ink-muted flex items-center gap-2 bg-surface-2 rounded-md p-2">
+            <Loader2 size={12} className="animate-spin shrink-0" />
+            <span>{progress}</span>
+          </div>
+        )}
 
         <footer className="flex items-center gap-2 justify-end">
           {current.version && (
