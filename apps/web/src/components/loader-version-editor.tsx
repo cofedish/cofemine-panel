@@ -137,8 +137,35 @@ function LoaderVersionDialog({
   const [busy, setBusy] = useState(false);
   const [includeUnstable, setIncludeUnstable] = useState(false);
 
+  // server.version is the literal value the user picked at create time:
+  // either a real MC version like "1.21.1" or itzg's "LATEST" sentinel
+  // (which means "newest stable Mojang release at boot time"). The
+  // loader-versions API needs an actual numeric MC version to filter
+  // NeoForge / Forge builds, so we resolve "LATEST" to Mojang's current
+  // latest release via /meta/mc-versions and let the user override the
+  // resolved value if they want to force a specific MC version.
+  const isRealMcVersion = /^1\.\d+(\.\d+)?$/.test(server.version);
+  const { data: mcMeta } = useSWR<{
+    latest: { release: string; snapshot: string };
+  }>(
+    !isRealMcVersion ? "/meta/mc-versions?include=release" : null,
+    fetcher
+  );
+  const resolvedMcDefault = isRealMcVersion
+    ? server.version
+    : mcMeta?.latest?.release ?? "1.21.1";
+  const [mcVersion, setMcVersion] = useState<string>(resolvedMcDefault);
+  // Keep mcVersion in sync with the resolved default until the user
+  // edits it manually — without this, the dropdown stays empty for a
+  // tick after Mojang's manifest comes back.
+  useEffect(() => {
+    setMcVersion(resolvedMcDefault);
+  }, [resolvedMcDefault]);
+
   const { data, isLoading, error } = useSWR<{ versions: LoaderVersion[] }>(
-    `/meta/loader-versions?loader=${loader}&mcVersion=${encodeURIComponent(server.version)}`,
+    /^1\.\d+(\.\d+)?$/.test(mcVersion)
+      ? `/meta/loader-versions?loader=${loader}&mcVersion=${encodeURIComponent(mcVersion)}`
+      : null,
     fetcher
   );
 
@@ -222,9 +249,34 @@ function LoaderVersionDialog({
         <header>
           <h3 className="heading-md">{t("loaderVersion.dialogTitle")}</h3>
           <p className="text-xs text-ink-muted mt-1">
-            {t("loaderVersion.dialogSubtitle", { mc: server.version })}
+            {t("loaderVersion.dialogSubtitle", {
+              mc: isRealMcVersion ? server.version : resolvedMcDefault,
+            })}
           </p>
+          {!isRealMcVersion && (
+            <p className="text-[11px] text-ink-muted mt-1">
+              {t("loaderVersion.mcResolvedNote", {
+                stored: server.version,
+                resolved: resolvedMcDefault,
+              })}
+            </p>
+          )}
         </header>
+
+        <div>
+          <label className="text-xs font-medium block mb-1.5">
+            {t("loaderVersion.mcVersion")}
+          </label>
+          <input
+            className="input !py-1.5 text-sm w-32 font-mono"
+            value={mcVersion}
+            onChange={(e) => setMcVersion(e.target.value.trim())}
+            placeholder="1.21.1"
+          />
+          <p className="text-[11px] text-ink-muted mt-1">
+            {t("loaderVersion.mcVersionHint")}
+          </p>
+        </div>
 
         {locked === null && (
           <div>
@@ -264,10 +316,7 @@ function LoaderVersionDialog({
             </div>
           ) : error || filtered.length === 0 ? (
             <p className="text-xs text-ink-muted">
-              {t("loaderVersion.noVersions", {
-                loader,
-                mc: server.version,
-              })}
+              {t("loaderVersion.noVersions", { loader, mc: mcVersion })}
             </p>
           ) : (
             <select

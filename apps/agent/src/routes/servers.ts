@@ -1627,34 +1627,78 @@ type Logger = {
 };
 
 /**
- * Stop a container and *actually* stop it. dockerode's `container.stop`
- * resolves with an error if the container is already stopped — fine —
- * but also if SIGTERM hits a stuck JVM and the daemon's grace period
- * expires without a clean exit. Previously we swallowed that silently,
- * then the next Start would fail with "port is already allocated" because
- * the old container was still holding 25565. Now we verify the state
- * after stop and fall back to kill + wait.
+ * Stop a container and *actually* stop it.
+ *
+ * Resilience checklist, every line earned by a real failure:
+ *
+ *   1. Disable the restart policy first (`RestartPolicy=no`). Without
+ *      this, a container caught mid-crash-loop comes right back up
+ *      after SIGTERM/SIGKILL because dockerd's `unless-stopped` policy
+ *      counts the kill as a crash, not a user stop. Symptom the user
+ *      hit: clicking Stop → 502 → server visibly back to "running"
+ *      seconds later.
+ *
+ *   2. Swallow non-fatal `container.stop` errors. dockerode throws on
+ *      "already stopped" (benign) and also on transient daemon-busy
+ *      states during a tight restart-loop. We log and proceed —
+ *      kill+wait below is the source of truth.
+ *
+ *   3. Use a short SIGTERM grace (5s, not 20). 20 seconds was fine for
+ *      a healthy server flushing chunks; for a crashed JVM it just
+ *      means the user waits 20s before the panel responds. With the
+ *      restart policy already off, escalating early to SIGKILL is safe.
+ *
+ *   4. Hard-cap the wait-for-not-running step. If dockerd is fully
+ *      hung, `wait` would block the agent's HTTP worker forever; a
+ *      6s ceiling lets the user's Stop request return promptly with
+ *      a "couldn't fully verify, but restart policy is off" outcome.
  */
 async function stopReliably(container: any, log: Logger): Promise<void> {
+  // Step 1: take the container off auto-restart. If this errors we
+  // continue anyway — the kill below still runs, and if the container
+  // does come back, the worst case is the user clicking Stop again.
   try {
-    await container.stop({ t: 20 });
+    await container.update({ RestartPolicy: { Name: "no" } });
+  } catch (err) {
+    log.warn({ err }, "failed to clear RestartPolicy before stop");
+  }
+
+  // Step 2: graceful SIGTERM with a short grace.
+  try {
+    await container.stop({ t: 5 });
   } catch (err) {
     const msg = String(err);
-    // "container already stopped" is the only benign case
-    if (!/already stopped|is not running/i.test(msg)) {
-      log.warn({ err }, "stop returned an error; will verify state");
+    if (!/already stopped|is not running|304/i.test(msg)) {
+      log.warn({ err }, "stop returned an error; escalating to kill");
     }
   }
-  // Confirm. If Docker still reports Running, escalate to kill.
+
+  // Step 3: confirm + escalate. If Docker still reports Running, SIGKILL.
   try {
     const info = await container.inspect();
     if (info.State?.Running) {
       log.warn({}, "container still running after stop; sending SIGKILL");
       await container.kill().catch(() => {});
-      await container.wait({ condition: "not-running" }).catch(() => {});
     }
   } catch (err) {
     log.warn({ err }, "inspect after stop failed");
+  }
+
+  // Step 4: bounded wait so the HTTP worker doesn't hang on a wedged daemon.
+  await Promise.race([
+    container.wait({ condition: "not-running" }).catch(() => {}),
+    new Promise<void>((resolve) => setTimeout(resolve, 6_000)),
+  ]);
+}
+
+/** Re-enable `unless-stopped` so the container survives reboots and
+ *  one-off crashes. Called from start/restart paths after stopReliably
+ *  cleared the policy on its way down. */
+async function restoreRestartPolicy(container: any, log: Logger): Promise<void> {
+  try {
+    await container.update({ RestartPolicy: { Name: "unless-stopped" } });
+  } catch (err) {
+    log.warn({ err }, "failed to restore RestartPolicy on start");
   }
 }
 
@@ -1670,6 +1714,10 @@ async function startWithPortRecovery(
   serverId: string,
   log: Logger
 ): Promise<void> {
+  // stopReliably clears RestartPolicy so a crash-loop container
+  // actually goes down on user Stop. Restore it on the next user Start
+  // so a normal MC crash brings the server back up under the watchdog.
+  await restoreRestartPolicy(container, log);
   try {
     await container.start();
     return;

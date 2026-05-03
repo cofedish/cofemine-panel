@@ -138,6 +138,11 @@ const en: Dict = {
   "loaderVersion.dialogTitle": "Override loader version",
   "loaderVersion.dialogSubtitle":
     "Pin a specific NeoForge / Forge / Fabric / Quilt version for this server. The container will rebuild and the next start will run on the chosen version. MC: {mc}",
+  "loaderVersion.mcResolvedNote":
+    "Server is configured as MC \"{stored}\" — assuming {resolved} for filtering loader builds. Edit below if it's wrong.",
+  "loaderVersion.mcVersion": "Minecraft version",
+  "loaderVersion.mcVersionHint":
+    "Used to filter the loader-version dropdown. Defaults to the server's stored version, or the latest Mojang release when stored as \"LATEST\".",
   "loaderVersion.loader": "Loader",
   "loaderVersion.loaderHint":
     "On modpack servers we can't always tell which loader the pack uses — pick the one your pack ships.",
@@ -752,6 +757,11 @@ const ru: Dict = {
   "loaderVersion.dialogTitle": "Переопределить версию лоадера",
   "loaderVersion.dialogSubtitle":
     "Зафиксировать конкретную версию NeoForge / Forge / Fabric / Quilt. Контейнер пересоберётся и следующий старт пойдёт на выбранной версии. MC: {mc}",
+  "loaderVersion.mcResolvedNote":
+    "Сервер сконфигурирован как MC «{stored}» — для фильтрации сборок лоадера используем {resolved}. Поправь ниже, если неверно.",
+  "loaderVersion.mcVersion": "Версия Minecraft",
+  "loaderVersion.mcVersionHint":
+    "Используется для фильтра версий лоадера. По умолчанию — версия сервера, либо последний релиз Mojang, если в сервере записано «LATEST».",
   "loaderVersion.loader": "Лоадер",
   "loaderVersion.loaderHint":
     "Для сборок мы не всегда знаем точный лоадер — выбери тот, на котором собрана твоя сборка.",
