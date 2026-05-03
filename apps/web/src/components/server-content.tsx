@@ -15,6 +15,7 @@ import {
   ExternalLink,
   RefreshCw,
   Ban,
+  X,
 } from "lucide-react";
 import { ModrinthMark, CurseForgeMark } from "./brand-icons";
 import { useDialog } from "./dialog-provider";
@@ -249,7 +250,15 @@ function InstalledPanel({
 }): JSX.Element {
   const dialog = useDialog();
   const { t } = useT();
-  const [sub, setSub] = useState<"mods" | "plugins" | "datapacks">("mods");
+  const isCFModpack = server?.type === "CURSEFORGE";
+  type Sub = "mods" | "plugins" | "datapacks" | "exclusions";
+  const [sub, setSub] = useState<Sub>("mods");
+  // If user lands on the Exclusions tab and then switches the server
+  // type away from CURSEFORGE (rare but possible), drop them back to
+  // the default tab — the exclusions tab is meaningless otherwise.
+  useEffect(() => {
+    if (!isCFModpack && sub === "exclusions") setSub("mods");
+  }, [isCFModpack, sub]);
   const [detail, setDetail] = useState<{
     provider: "modrinth" | "curseforge";
     projectId: string;
@@ -260,69 +269,72 @@ function InstalledPanel({
     plugins: installed?.plugins ?? [],
     datapacks: installed?.datapacks ?? [],
   };
-  const visible = groups[sub];
+  const visible: InstalledFile[] =
+    sub === "exclusions" ? [] : groups[sub];
   const [query, setQuery] = useState("");
 
-  // CurseForge exclusion list — staged in local state so the user
-  // can add/remove multiple mods in one go and apply once. Reading
-  // from server.env.CF_EXCLUDE_MODS (CSV of numeric mod IDs).
-  const isCFModpack = server?.type === "CURSEFORGE";
+  // CF_EXCLUDE_MODS is the comma-separated modId blacklist itzg's
+  // pack installer skips. We only need the count from this view —
+  // the actual list management lives on the Exclusions subtab via
+  // /:id/cf-exclusions endpoints (so we don't have to round-trip
+  // env edits through PATCH /servers + repair every time).
   const initialExcluded = useMemo(
     () => parseExcludedIds(server?.env?.CF_EXCLUDE_MODS),
     [server?.env?.CF_EXCLUDE_MODS]
   );
-  const [excludedDraft, setExcludedDraft] =
-    useState<Set<string>>(initialExcluded);
-  useEffect(() => {
-    setExcludedDraft(initialExcluded);
-  }, [initialExcluded]);
-  const exclusionsDirty = !setsEqual(excludedDraft, initialExcluded);
-
-  function toggleExclude(modId: string, exclude: boolean): void {
-    const next = new Set(excludedDraft);
-    if (exclude) next.add(modId);
-    else next.delete(modId);
-    setExcludedDraft(next);
-  }
-
-  async function applyExclusions(): Promise<void> {
-    if (!server) return;
-    try {
-      const csv = serializeExcludedIds(excludedDraft);
-      const nextEnv: Record<string, string> = { ...server.env };
-      if (csv) nextEnv.CF_EXCLUDE_MODS = csv;
-      else delete nextEnv.CF_EXCLUDE_MODS;
-      await api.patch(`/servers/${serverId}`, { env: nextEnv });
-      await api.post(`/servers/${serverId}/repair`);
-      mutate(`/servers/${serverId}`);
-      mutate(`/servers/${serverId}/installed-content`);
-      dialog.toast({
-        tone: "success",
-        message: t("content.exclusions.applied", {
-          n: excludedDraft.size,
-        }),
-      });
-    } catch (e) {
-      dialog.alert({
-        tone: "danger",
-        title: t("common.error"),
-        message: e instanceof ApiError ? e.message : String(e),
-      });
-    }
-  }
 
   async function remove(file: InstalledFile): Promise<void> {
+    // On CF modpack servers, deleting the jar without also blacklisting
+    // its modId is almost never what the user wants — itzg's installer
+    // re-downloads it on the next start/repair, and the user's "I
+    // removed Waystones" turns into "Waystones came back". So we make
+    // delete-and-exclude the default action, falling back to plain
+    // delete only when we can't resolve a modId for the jar.
+    const fileType = sub === "exclusions" ? "mods" : sub;
+    const cfModId = file.curseforge?.modId;
+    if (isCFModpack && cfModId) {
+      const ok = await dialog.confirm({
+        tone: "danger",
+        danger: true,
+        title: t("content.installConfirm.deleteAndExclude.title"),
+        message: t("content.installConfirm.deleteAndExclude.body", {
+          name: file.modrinth?.title ?? file.curseforge?.title ?? file.name,
+        }),
+        okLabel: t("content.installConfirm.deleteAndExclude.ok"),
+      });
+      if (!ok) return;
+      try {
+        await api.post(`/servers/${serverId}/cf-exclusions/exclude`, {
+          type: fileType,
+          filename: file.name,
+          modId: cfModId,
+        });
+        mutate(`/servers/${serverId}/installed-content`);
+        mutate(`/servers/${serverId}/cf-exclusions`);
+        mutate(`/servers/${serverId}`);
+      } catch (e) {
+        dialog.alert({
+          tone: "danger",
+          title: t("common.error"),
+          message: e instanceof ApiError ? e.message : String(e),
+        });
+      }
+      return;
+    }
     const ok = await dialog.confirm({
       tone: "danger",
       danger: true,
       title: t("content.installConfirm.delete.title"),
-      message: t("content.installConfirm.delete.body", { name: file.name }),
+      message:
+        isCFModpack && !cfModId
+          ? t("content.installConfirm.deleteNoModId.body", { name: file.name })
+          : t("content.installConfirm.delete.body", { name: file.name }),
       okLabel: t("common.delete"),
     });
     if (!ok) return;
     try {
       await api.del(
-        `/servers/${serverId}/installed-content?type=${sub}&name=${encodeURIComponent(file.name)}`
+        `/servers/${serverId}/installed-content?type=${fileType}&name=${encodeURIComponent(file.name)}`
       );
       mutate(`/servers/${serverId}/installed-content`);
     } catch (e) {
@@ -334,11 +346,11 @@ function InstalledPanel({
     }
   }
 
-  const filtered = useMemo(() => {
+  const filtered = useMemo<InstalledFile[]>(() => {
     const q = query.trim().toLowerCase();
     if (!q) return visible;
     return visible.filter(
-      (f) =>
+      (f: InstalledFile) =>
         f.name.toLowerCase().includes(q) ||
         f.modrinth?.title?.toLowerCase().includes(q) ||
         f.modrinth?.slug?.toLowerCase().includes(q)
@@ -348,14 +360,14 @@ function InstalledPanel({
   return (
     <section className="space-y-4">
       <div className="flex items-center justify-between gap-3 flex-wrap">
-        <div className="flex gap-1">
-          {(["mods", "plugins", "datapacks"] as const).map((t) => {
-            const count = groups[t].length;
-            const active = t === sub;
+        <div className="flex gap-1 flex-wrap">
+          {(["mods", "plugins", "datapacks"] as const).map((tab) => {
+            const count = groups[tab].length;
+            const active = tab === sub;
             return (
               <button
-                key={t}
-                onClick={() => setSub(t)}
+                key={tab}
+                onClick={() => setSub(tab)}
                 className={cn(
                   "inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm border transition-colors capitalize",
                   active
@@ -363,13 +375,31 @@ function InstalledPanel({
                     : "border-line text-ink-secondary hover:bg-surface-2"
                 )}
               >
-                {t}
+                {tab}
                 <span className="text-[10px] opacity-70 tabular-nums">
                   {count}
                 </span>
               </button>
             );
           })}
+          {isCFModpack && (
+            <button
+              onClick={() => setSub("exclusions")}
+              className={cn(
+                "inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm border transition-colors",
+                sub === "exclusions"
+                  ? "bg-[rgb(var(--warning-soft))] border-[rgb(var(--warning))]/40 text-[rgb(var(--warning))]"
+                  : "border-line text-ink-secondary hover:bg-surface-2"
+              )}
+              title="Mods blacklisted from the next pack install"
+            >
+              <Ban size={12} />
+              {t("content.tabs.exclusions")}
+              <span className="text-[10px] opacity-70 tabular-nums">
+                {initialExcluded.size}
+              </span>
+            </button>
+          )}
         </div>
         <div className="flex items-center gap-2">
           <div className="relative">
@@ -395,21 +425,9 @@ function InstalledPanel({
         </div>
       </div>
 
-      {/* CF exclusions panel — only relevant for AUTO_CURSEFORGE
-          servers, where mods that itzg's pack-installer can't fetch
-          go on a permanent skip-list. Without a UI the user had to
-          edit env CSV by hand, which is what this widget replaces. */}
-      {isCFModpack && (
-        <ExclusionsPanel
-          excluded={excludedDraft}
-          installedMods={installed?.mods ?? []}
-          dirty={exclusionsDirty}
-          onToggle={toggleExclude}
-          onApply={applyExclusions}
-        />
-      )}
-
-      {filtered.length === 0 ? (
+      {sub === "exclusions" ? (
+        <ExclusionsTab serverId={serverId} />
+      ) : filtered.length === 0 ? (
         <div className="tile p-10 text-center text-ink-muted">
           {installed === undefined
             ? t("common.loading")
@@ -419,29 +437,18 @@ function InstalledPanel({
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-          {filtered.map((f) => {
-            const cfId = f.curseforge?.modId
-              ? String(f.curseforge.modId)
-              : null;
-            const isExcluded = cfId != null && excludedDraft.has(cfId);
-            return (
-              <InstalledCard
-                key={f.name}
-                file={f}
-                onDelete={() => remove(f)}
-                onOpen={() => {
-                  const det = installedDetailKey(f);
-                  if (det) setDetail(det);
-                }}
-                onToggleExclude={
-                  isCFModpack && cfId
-                    ? () => toggleExclude(cfId, !isExcluded)
-                    : undefined
-                }
-                isExcluded={isExcluded}
-              />
-            );
-          })}
+          {filtered.map((f) => (
+            <InstalledCard
+              key={f.name}
+              file={f}
+              onDelete={() => remove(f)}
+              onOpen={() => {
+                const det = installedDetailKey(f);
+                if (det) setDetail(det);
+              }}
+              isExcluded={false}
+            />
+          ))}
         </div>
       )}
 
@@ -631,107 +638,128 @@ function InstalledCard({
 }
 
 /**
- * Sticky panel above the installed grid that summarises the active
- * CF_EXCLUDE_MODS skip-list and gives the user a single "Apply"
- * affordance after toggling exclusions. The toggle itself happens
- * on individual InstalledCards (Ban button), or on entries already
- * in this panel via the unbutton.
+ * Dedicated tab listing the CF modpack's currently-excluded mods.
  *
- * Apply triggers a server PATCH (env update) followed by a repair
- * (reprovision) — both wrapped in the toast/error path of the
- * parent. Skipped mods stay skipped across rebuilds because the
- * value lives in env, not in /data.
+ * Data source: GET /servers/:id/cf-exclusions, which reads the
+ * server's CF_EXCLUDE_MODS env var and enriches each numeric modId
+ * with name/slug/icon via a single CF /v1/mods POST. The user's
+ * primary path to add a mod here is "Trash on a CF server" — that
+ * triggers POST /:id/cf-exclusions/exclude server-side, which both
+ * deletes the jar AND adds the modId atomically (so the install
+ * doesn't bring it back on next repair).
+ *
+ * The X button on each row calls DELETE /:id/cf-exclusions/:modId,
+ * which removes from CF_EXCLUDE_MODS and reprovisions; the next pack
+ * install / repair will pull the mod back in naturally.
  */
-function ExclusionsPanel({
-  excluded,
-  installedMods,
-  dirty,
-  onToggle,
-  onApply,
-}: {
-  excluded: Set<string>;
-  installedMods: InstalledFile[];
-  dirty: boolean;
-  onToggle: (modId: string, exclude: boolean) => void;
-  onApply: () => void | Promise<void>;
-}): JSX.Element | null {
-  // Resolve mod-id → human title via the installed-mods list. Files
-  // that match an excluded id by `curseforge.modId` give us the name;
-  // entries whose mods aren't in the current installed list (they
-  // were never actually installed because they were excluded already)
-  // just show the numeric id.
-  const titleByModId = useMemo(() => {
-    const map = new Map<string, string>();
-    for (const f of installedMods) {
-      const mid = f.curseforge?.modId;
-      if (!mid) continue;
-      const title =
-        f.curseforge?.title ?? f.modrinth?.title ?? prettifyFilename(f.name);
-      map.set(String(mid), title);
-    }
-    return map;
-  }, [installedMods]);
+type CfExclusionEntry = {
+  modId: number;
+  name?: string;
+  slug?: string;
+  icon?: string | null;
+  pageUrl?: string;
+};
 
-  if (excluded.size === 0 && !dirty) {
-    // Hide entirely until the user starts staging exclusions —
-    // saves vertical space on a clean install.
-    return null;
+function ExclusionsTab({ serverId }: { serverId: string }): JSX.Element {
+  const dialog = useDialog();
+  const { t } = useT();
+  const { data, isLoading } = useSWR<{ excluded: CfExclusionEntry[] }>(
+    `/servers/${serverId}/cf-exclusions`,
+    fetcher,
+    { refreshInterval: 30_000 }
+  );
+  const items = data?.excluded ?? [];
+
+  async function removeOne(modId: number): Promise<void> {
+    const ok = await dialog.confirm({
+      tone: "warning",
+      title: t("content.exclusions.confirmRemove.title"),
+      message: t("content.exclusions.confirmRemove.body"),
+      okLabel: t("content.exclusions.confirmRemove.ok"),
+    });
+    if (!ok) return;
+    try {
+      await api.del(`/servers/${serverId}/cf-exclusions/${modId}`);
+      mutate(`/servers/${serverId}/cf-exclusions`);
+      mutate(`/servers/${serverId}`);
+    } catch (e) {
+      dialog.alert({
+        tone: "danger",
+        title: t("common.error"),
+        message: e instanceof ApiError ? e.message : String(e),
+      });
+    }
   }
 
-  return (
-    <section className="tile p-4 space-y-3 border-[rgb(var(--warning))]/30">
-      <header className="flex items-center gap-2 flex-wrap">
-        <Ban size={14} className="text-[rgb(var(--warning))] shrink-0" />
-        <h3 className="text-sm font-medium">CF excluded mods</h3>
-        <span className="text-[10px] text-ink-muted tabular-nums">
-          {excluded.size}
-        </span>
-        <p className="text-xs text-ink-muted flex-1 min-w-[200px]">
-          These mod ids are skipped when the modpack reinstalls.
-          Useful when an author disables third-party download for one
-          mod and you've replaced it with a Modrinth alternative.
+  if (isLoading && items.length === 0) {
+    return (
+      <div className="tile p-10 text-center text-ink-muted">
+        {t("common.loading")}
+      </div>
+    );
+  }
+  if (items.length === 0) {
+    return (
+      <div className="tile p-10 text-center text-ink-muted max-w-2xl mx-auto">
+        <Ban size={28} className="mx-auto opacity-40" />
+        <p className="mt-3 text-sm">{t("content.exclusions.empty.title")}</p>
+        <p className="mt-1 text-xs leading-relaxed">
+          {t("content.exclusions.empty.body")}
         </p>
-        {dirty && (
-          <button
-            type="button"
-            className="btn btn-primary"
-            onClick={() => void onApply()}
-            title="Patch env + rebuild the container"
+      </div>
+    );
+  }
+  return (
+    <div className="space-y-2">
+      <p className="text-xs text-ink-muted">{t("content.exclusions.intro")}</p>
+      <ul className="grid grid-cols-1 md:grid-cols-2 gap-2">
+        {items.map((item) => (
+          <li
+            key={item.modId}
+            className="tile p-3 flex items-center gap-3"
           >
-            Apply &amp; rebuild
-          </button>
-        )}
-      </header>
-      {excluded.size > 0 && (
-        <ul className="flex flex-wrap gap-1.5">
-          {[...excluded].map((modId) => {
-            const title = titleByModId.get(modId);
-            return (
-              <li
-                key={modId}
-                className="inline-flex items-center gap-1.5 px-2 py-1 rounded-md bg-[rgb(var(--warning-soft))] text-[rgb(var(--warning))] text-xs"
-              >
-                <span className="font-medium">
-                  {title ?? `#${modId}`}
-                </span>
-                {title && (
-                  <span className="opacity-60 tabular-nums">#{modId}</span>
+            {item.icon ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={item.icon}
+                alt=""
+                className="w-10 h-10 rounded-md shrink-0 object-cover"
+              />
+            ) : (
+              <div className="w-10 h-10 rounded-md shrink-0 grid place-items-center bg-[rgb(var(--warning-soft))]">
+                <Ban size={16} className="text-[rgb(var(--warning))]" />
+              </div>
+            )}
+            <div className="flex-1 min-w-0">
+              <div className="text-sm font-medium truncate">
+                {item.name ?? `CurseForge mod #${item.modId}`}
+              </div>
+              <div className="text-[11px] text-ink-muted flex items-center gap-2 mt-0.5">
+                <span className="tabular-nums">#{item.modId}</span>
+                {item.pageUrl && (
+                  <a
+                    href={item.pageUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="link inline-flex items-center gap-1"
+                  >
+                    page <ExternalLink size={10} />
+                  </a>
                 )}
-                <button
-                  type="button"
-                  onClick={() => onToggle(modId, false)}
-                  className="hover:opacity-70"
-                  aria-label="Remove from exclusions"
-                  title="Remove from exclusions"
-                >
-                  ×
-                </button>
-              </li>
-            );
-          })}
-        </ul>
-      )}
-    </section>
+              </div>
+            </div>
+            <button
+              className="btn-icon btn-ghost !h-8 !w-8 shrink-0"
+              onClick={() => removeOne(item.modId)}
+              aria-label="Remove from exclusions"
+              title={t("content.exclusions.remove")}
+            >
+              <X size={14} />
+            </button>
+          </li>
+        ))}
+      </ul>
+    </div>
   );
 }
 

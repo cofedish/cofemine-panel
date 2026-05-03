@@ -1,5 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
+import { request } from "undici";
 import {
   consoleCommandSchema,
   createServerSchema,
@@ -21,6 +22,82 @@ import {
 import { readDownloadProxy } from "../integrations/download-proxy.js";
 import { resetWatchdogState } from "./install-watchdog.js";
 import { reconcileMany } from "./status.js";
+
+/** Parse the CSV-of-numeric-modIds form that itzg expects in
+ *  CF_EXCLUDE_MODS. Permissive on whitespace and stray empty
+ *  entries (some pack manifests carry trailing commas). */
+function parseExcludedIds(csv: string | undefined): Set<string> {
+  if (!csv) return new Set();
+  return new Set(
+    csv
+      .split(",")
+      .map((s) => s.trim())
+      .filter((s) => /^\d+$/.test(s))
+  );
+}
+
+function serializeExcludedIds(set: Set<string>): string {
+  return [...set].filter((s) => /^\d+$/.test(s)).join(",");
+}
+
+/** Fetch CF mod metadata for a list of numeric ids in a single
+ *  /v1/mods POST. Returns enriched objects in the order ids were
+ *  given; ids with no CF match come back as `{ modId }` only. */
+type CfExcludedEntry = {
+  modId: number;
+  name?: string;
+  slug?: string;
+  icon?: string | null;
+  pageUrl?: string;
+};
+async function curseforgeBulkLookup(
+  ids: string[],
+  apiKey: string,
+  log?: { warn: (obj: unknown, msg?: string) => void }
+): Promise<CfExcludedEntry[]> {
+  const numeric = [...new Set(ids.map((s) => Number(s)))].filter((n) =>
+    Number.isFinite(n)
+  );
+  if (numeric.length === 0) return [];
+  try {
+    const res = await request("https://api.curseforge.com/v1/mods", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        accept: "application/json",
+        "x-api-key": apiKey,
+      },
+      body: JSON.stringify({ modIds: numeric }),
+    });
+    if (res.statusCode >= 400) {
+      await res.body.dump().catch(() => {});
+      return numeric.map((modId) => ({ modId }));
+    }
+    const body = (await res.body.json()) as any;
+    const byId = new Map<number, any>();
+    for (const m of body?.data ?? []) {
+      if (typeof m?.id === "number") byId.set(m.id, m);
+    }
+    return numeric.map((modId) => {
+      const m = byId.get(modId);
+      if (!m) return { modId };
+      return {
+        modId,
+        name: (m.name as string) ?? undefined,
+        slug: (m.slug as string) ?? undefined,
+        icon: (m.logo?.url as string | undefined) ?? null,
+        pageUrl:
+          (m.links?.websiteUrl as string | undefined) ??
+          (m.slug
+            ? `https://www.curseforge.com/minecraft/mc-mods/${m.slug}`
+            : undefined),
+      };
+    });
+  } catch (err) {
+    log?.warn({ err }, "curseforge bulk lookup failed");
+    return numeric.map((modId) => ({ modId }));
+  }
+}
 
 export async function serversRoutes(app: FastifyInstance): Promise<void> {
   // List servers visible to the user.
@@ -455,6 +532,133 @@ export async function serversRoutes(app: FastifyInstance): Promise<void> {
       metadata: { type: q.type, name: q.name },
     });
     return { ok: true };
+  });
+
+  // ---------- CurseForge modpack exclusions ----------
+  //
+  // CF_EXCLUDE_MODS is a comma-separated list of numeric modIds that
+  // itzg's auto-installer skips on the next pack install. We surface
+  // it as three operations:
+  //
+  //   POST   /:id/cf-exclusions/exclude   { type, filename, modId }
+  //     → add the mod to the list AND delete the existing jar from
+  //       disk in one go (the user just clicked Trash on a CF-modpack
+  //       server and wants the mod gone for good, not just locally).
+  //   GET    /:id/cf-exclusions
+  //     → enriched view of the current list (modId → {name, slug, icon})
+  //       so the dedicated Exclusions tab can render proper cards.
+  //   DELETE /:id/cf-exclusions/:modId
+  //     → remove from the list. We do NOT auto-reinstall the jar; the
+  //       next CF install / repair brings it back naturally.
+  //
+  // All three only make sense on type=CURSEFORGE servers. We hard-fail
+  // with 409 on other server types so the UI never has to filter.
+
+  app.post("/:id/cf-exclusions/exclude", async (req) => {
+    const { id } = req.params as { id: string };
+    await assertServerPermission(req, id, "server.edit");
+    const body = z
+      .object({
+        type: z.enum(["mods", "plugins", "datapacks"]),
+        filename: z.string().min(1),
+        modId: z.number().int().positive(),
+      })
+      .parse(req.body);
+    const server = await prisma.server.findUniqueOrThrow({ where: { id } });
+    if (server.type !== "CURSEFORGE") {
+      const err = new Error("This server is not a CurseForge modpack");
+      (err as any).statusCode = 409;
+      throw err;
+    }
+    const env = ((server.env as Record<string, string> | null) ?? {}) as Record<
+      string,
+      string
+    >;
+    const existing = parseExcludedIds(env.CF_EXCLUDE_MODS);
+    existing.add(String(body.modId));
+    const nextEnv = { ...env, CF_EXCLUDE_MODS: serializeExcludedIds(existing) };
+    await prisma.server.update({
+      where: { id },
+      data: { env: nextEnv as unknown as object },
+    });
+    // Delete the file on the agent side. If it's already gone (race
+    // with a parallel delete), don't fail the exclusion — the env
+    // change is the more important half.
+    try {
+      const client = await NodeClient.forId(server.nodeId);
+      await client.call(
+        "DELETE",
+        `/servers/${id}/installed-content?type=${encodeURIComponent(
+          body.type
+        )}&name=${encodeURIComponent(body.filename)}`
+      );
+    } catch (err) {
+      // Log but don't throw — env update already committed.
+      req.log.warn({ err }, "exclude-mod: file delete failed (non-fatal)");
+    }
+    // Reprovision so CF_EXCLUDE_MODS lands in the running container's
+    // env for the next install attempt.
+    await reconcileAndReprovision(id);
+    await writeAudit(req, {
+      action: "server.cf-exclusions.add",
+      resource: id,
+      metadata: { modId: body.modId, filename: body.filename },
+    });
+    return { ok: true, excluded: [...existing] };
+  });
+
+  app.get("/:id/cf-exclusions", async (req) => {
+    const { id } = req.params as { id: string };
+    await assertServerPermission(req, id, "server.view");
+    const server = await prisma.server.findUniqueOrThrow({ where: { id } });
+    const env = ((server.env as Record<string, string> | null) ?? {}) as Record<
+      string,
+      string
+    >;
+    const ids = [...parseExcludedIds(env.CF_EXCLUDE_MODS)];
+    if (ids.length === 0) return { excluded: [] };
+    const cfKey = await readCurseforgeApiKey();
+    if (!cfKey) {
+      // No CF integration → can't enrich names. Return the bare ids
+      // so the UI can still show "modId 12345" placeholders.
+      return {
+        excluded: ids.map((modId) => ({ modId: Number(modId) })),
+      };
+    }
+    const enriched = await curseforgeBulkLookup(ids, cfKey, req.log);
+    return { excluded: enriched };
+  });
+
+  app.delete("/:id/cf-exclusions/:modId", async (req) => {
+    const { id, modId } = req.params as { id: string; modId: string };
+    await assertServerPermission(req, id, "server.edit");
+    const server = await prisma.server.findUniqueOrThrow({ where: { id } });
+    if (server.type !== "CURSEFORGE") {
+      const err = new Error("This server is not a CurseForge modpack");
+      (err as any).statusCode = 409;
+      throw err;
+    }
+    const env = ((server.env as Record<string, string> | null) ?? {}) as Record<
+      string,
+      string
+    >;
+    const set = parseExcludedIds(env.CF_EXCLUDE_MODS);
+    set.delete(String(modId));
+    const nextEnv = { ...env };
+    const ser = serializeExcludedIds(set);
+    if (ser) nextEnv.CF_EXCLUDE_MODS = ser;
+    else delete nextEnv.CF_EXCLUDE_MODS;
+    await prisma.server.update({
+      where: { id },
+      data: { env: nextEnv as unknown as object },
+    });
+    await reconcileAndReprovision(id);
+    await writeAudit(req, {
+      action: "server.cf-exclusions.remove",
+      resource: id,
+      metadata: { modId },
+    });
+    return { ok: true, excluded: [...set] };
   });
 
   app.get("/:id/crash-reports", async (req) => {

@@ -529,6 +529,35 @@ export async function serversAgentRoutes(app: FastifyInstance): Promise<void> {
           const hit = cfHits[pair.fp];
           if (hit) cfByName[pair.name] = hit;
         }
+        // Slug fallback for everything fingerprinting missed. Modpack
+        // authors often recompress jars (different Murmur2 hash, same
+        // filename / slug), and that's the case where Waystones et al.
+        // get rendered without a CF modId — meaning the user can't add
+        // them to CF_EXCLUDE_MODS. The slug guesser is best-effort but
+        // catches all the popular packs.
+        const stillMissing = candidates.filter(
+          ({ file }) => !cfByName[file.name]
+        );
+        if (stillMissing.length > 0) {
+          const fileBySlug = new Map<string, string>();
+          for (const { file } of stillMissing) {
+            const slug = slugFromFilename(file.name);
+            if (slug && !fileBySlug.has(slug)) {
+              fileBySlug.set(slug, file.name);
+            }
+          }
+          if (fileBySlug.size > 0) {
+            const slugHits = await curseforgeSlugLookup(
+              [...fileBySlug.keys()],
+              cfApiKey,
+              req.log
+            );
+            for (const [slug, filename] of fileBySlug) {
+              const hit = slugHits[slug];
+              if (hit) cfByName[filename] = hit;
+            }
+          }
+        }
       }
     }
 
@@ -979,6 +1008,94 @@ function slugFromFilename(name: string): string {
 // barely changes between polls.
 const cfFpCache = new Map<number, { at: number; meta: CfProjectMeta | null }>();
 const CF_FP_TTL_MS = 60 * 60 * 1000; // 1 hour
+
+// Slug → CF metadata cache. Slugs (canonical) are immutable once a CF
+// project is published, so 1h TTL is fine — same reasoning as fingerprints.
+const cfSlugCache = new Map<string, { at: number; meta: CfProjectMeta | null }>();
+
+/**
+ * Resolve a CF project by slug via /v1/mods/search?slug=X. Used as a
+ * fallback when the fingerprint lookup misses — happens often for
+ * mods that the modpack author re-bundled (recompressed jar = different
+ * Murmur2 hash) but whose filename still carries the original slug
+ * (e.g. "waystones-neoforge-1.21.1-21.1.25.jar" → slug=waystones).
+ *
+ * Returns metadata in the same shape as the fingerprint helper, so
+ * the rest of the enrichment pipeline doesn't care which path resolved
+ * the mod.
+ */
+async function curseforgeSlugLookup(
+  slugs: string[],
+  apiKey: string,
+  log?: { warn: (obj: unknown, msg?: string) => void }
+): Promise<Record<string, CfProjectMeta>> {
+  const now = Date.now();
+  const out: Record<string, CfProjectMeta> = {};
+  const needFetch: string[] = [];
+  for (const slug of slugs) {
+    const cached = cfSlugCache.get(slug);
+    if (cached && now - cached.at < CF_FP_TTL_MS) {
+      if (cached.meta) out[slug] = cached.meta;
+    } else {
+      needFetch.push(slug);
+    }
+  }
+  if (needFetch.length === 0) return out;
+
+  // CF's search endpoint is one slug per call (slug is an exact-match
+  // filter, not a fuzzy term). We parallelise but cap concurrency so a
+  // big modpack with hundreds of un-fingerprinted jars doesn't stampede
+  // the CF API rate limit.
+  const CONCURRENCY = 8;
+  const queue = [...needFetch];
+  async function worker(): Promise<void> {
+    while (queue.length > 0) {
+      const slug = queue.shift();
+      if (!slug) return;
+      try {
+        const url = `https://api.curseforge.com/v1/mods/search?gameId=432&slug=${encodeURIComponent(
+          slug
+        )}`;
+        const res = await request(url, {
+          method: "GET",
+          headers: { "x-api-key": apiKey, accept: "application/json" },
+        });
+        if (res.statusCode >= 400) {
+          await res.body.dump().catch(() => {});
+          cfSlugCache.set(slug, { at: now, meta: null });
+          continue;
+        }
+        const body = (await res.body.json()) as any;
+        const m = (body?.data ?? [])[0];
+        if (!m || typeof m.id !== "number") {
+          cfSlugCache.set(slug, { at: now, meta: null });
+          continue;
+        }
+        const meta: CfProjectMeta = {
+          modId: m.id,
+          slug: m.slug,
+          title: (m.name as string) ?? `CurseForge mod ${m.id}`,
+          summary: m.summary as string | undefined,
+          icon: (m.logo?.url as string | undefined) ?? null,
+          pageUrl:
+            (m.links?.websiteUrl as string | undefined) ??
+            (m.slug
+              ? `https://www.curseforge.com/minecraft/mc-mods/${m.slug}`
+              : undefined),
+        };
+        cfSlugCache.set(slug, { at: now, meta });
+        out[slug] = meta;
+      } catch (err) {
+        log?.warn({ err, slug }, "curseforge slug lookup failed");
+        cfSlugCache.set(slug, { at: now, meta: null });
+      }
+    }
+  }
+  await Promise.all(
+    Array.from({ length: Math.min(CONCURRENCY, needFetch.length) }, worker)
+  );
+  return out;
+}
 
 /**
  * Look up CurseForge "fingerprints" (Murmur2 hashes of mod jars with

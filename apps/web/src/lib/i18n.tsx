@@ -188,6 +188,23 @@ const en: Dict = {
     "Install succeeded but repair failed: {msg}",
   "content.exclusions.applied":
     "Exclusion list saved ({n} mod(s) skipped). Container is rebuilding.",
+  "content.tabs.exclusions": "Exclusions",
+  "content.exclusions.intro":
+    "These mod IDs are skipped on the next pack install and repair. Remove an entry to bring the mod back next time.",
+  "content.exclusions.empty.title": "No mods are excluded.",
+  "content.exclusions.empty.body":
+    "Delete a mod from the Mods tab and it lands here automatically — the pack installer skips it on every repair so it doesn't come back.",
+  "content.exclusions.remove": "Remove from exclusions",
+  "content.exclusions.confirmRemove.title": "Remove from exclusions?",
+  "content.exclusions.confirmRemove.body":
+    "The mod will be downloaded again on the next pack install or repair.",
+  "content.exclusions.confirmRemove.ok": "Remove",
+  "content.installConfirm.deleteAndExclude.title": "Delete and exclude?",
+  "content.installConfirm.deleteAndExclude.body":
+    "Delete {name} from disk AND add it to the pack's exclusion list. itzg's installer won't bring it back on repair.",
+  "content.installConfirm.deleteAndExclude.ok": "Delete + exclude",
+  "content.installConfirm.deleteNoModId.body":
+    "Delete {name}? Note: we couldn't resolve a CurseForge modId for this jar, so it's NOT added to the exclusion list — itzg may re-download it on the next repair.",
 
   "diagnostics.title": "Crash reports",
   "diagnostics.subtitle":
@@ -765,6 +782,23 @@ const ru: Dict = {
     "Установка прошла, но пересборка упала: {msg}",
   "content.exclusions.applied":
     "Список исключений сохранён ({n} мод(а) пропущено). Контейнер пересобирается.",
+  "content.tabs.exclusions": "Исключения",
+  "content.exclusions.intro":
+    "Эти модификации пропускаются при следующей установке/починке сборки. Убери запись — мод вернётся при следующем запуске установщика.",
+  "content.exclusions.empty.title": "Нет исключённых модов.",
+  "content.exclusions.empty.body":
+    "Удали мод во вкладке Mods — он автоматически попадёт сюда. Установщик сборки будет его пропускать, так что он больше не вернётся.",
+  "content.exclusions.remove": "Убрать из исключений",
+  "content.exclusions.confirmRemove.title": "Убрать из исключений?",
+  "content.exclusions.confirmRemove.body":
+    "Мод снова скачается при следующей установке или починке сборки.",
+  "content.exclusions.confirmRemove.ok": "Убрать",
+  "content.installConfirm.deleteAndExclude.title": "Удалить и исключить?",
+  "content.installConfirm.deleteAndExclude.body":
+    "Удалить {name} с диска И добавить в список исключений сборки. Установщик itzg не будет его возвращать при починке.",
+  "content.installConfirm.deleteAndExclude.ok": "Удалить + исключить",
+  "content.installConfirm.deleteNoModId.body":
+    "Удалить {name}? Не удалось определить CurseForge modId этого jar'а, поэтому в исключения он НЕ попадёт — установщик может скачать его заново при следующей починке.",
 
   "diagnostics.title": "Отчёты о крэшах",
   "diagnostics.subtitle":
