@@ -69,6 +69,66 @@ function pickContainerIp(
 }
 
 /**
+ * In-memory cache of serverId → resolved container IP/running state.
+ *
+ * Why this exists: BlueMap fans out 100+ parallel tile/asset fetches
+ * the moment a player walks into a new chunk. Without a cache, each
+ * proxied request did two Docker API calls (listContainers filtered
+ * by label, then container.inspect) over the single docker.sock —
+ * which is serialised at the daemon level and quickly becomes the
+ * dominant bottleneck. Symptom: the panel page itself stalled on
+ * "Loading…" because its API calls were blocked behind the map
+ * traffic's queue of Docker lookups.
+ *
+ * 10s TTL is short enough that a container restart-with-new-IP
+ * recovers within one BlueMap-burst window, but long enough to
+ * absorb every burst the iframe generates inside that window.
+ */
+type CachedTarget = { ip: string | null; running: boolean; at: number };
+const TARGET_CACHE_TTL_MS = 10_000;
+const targetCache = new Map<string, CachedTarget>();
+
+async function resolveContainerTarget(
+  serverId: string
+): Promise<CachedTarget> {
+  const now = Date.now();
+  const hit = targetCache.get(serverId);
+  if (hit && now - hit.at < TARGET_CACHE_TTL_MS) return hit;
+  const container = await findContainerByServerId(serverId);
+  if (!container) {
+    const miss = { ip: null, running: false, at: now };
+    targetCache.set(serverId, miss);
+    return miss;
+  }
+  let inspect: import("dockerode").ContainerInspectInfo;
+  try {
+    inspect = await container.inspect();
+  } catch {
+    const miss = { ip: null, running: false, at: now };
+    targetCache.set(serverId, miss);
+    return miss;
+  }
+  const target: CachedTarget = {
+    ip: pickContainerIp(inspect),
+    running: inspect.State?.Running === true,
+    at: now,
+  };
+  targetCache.set(serverId, target);
+  if (targetCache.size > 500) {
+    const oldest = targetCache.keys().next().value;
+    if (oldest) targetCache.delete(oldest);
+  }
+  return target;
+}
+
+/** Drop a cached entry — call when a container is recreated /
+ *  destroyed so the next request re-resolves immediately instead of
+ *  waiting for the TTL. */
+export function invalidateProxyTarget(serverId: string): void {
+  targetCache.delete(serverId);
+}
+
+/**
  * Translate a failed upstream `request()` call into a short, human-
  * readable failure mode. Walks the `cause` chain because undici wraps
  * the underlying socket error one or two levels deep.
@@ -107,21 +167,18 @@ export async function proxyAgentRoutes(app: FastifyInstance): Promise<void> {
       return reply.code(400).send({ error: "Invalid port" });
     }
 
-    const container = await findContainerByServerId(id);
-    if (!container) {
+    // Use the short-TTL cache so a BlueMap tile-burst doesn't hit
+    // docker.sock 200x — see resolveContainerTarget for rationale.
+    const target = await resolveContainerTarget(id);
+    if (!target.running && target.ip === null) {
+      // Could be "container missing" or "inspect failed" — either way
+      // there's nothing to forward to. Re-check on next TTL tick.
       return reply.code(404).send({ error: "Container not found" });
     }
-
-    let inspect: import("dockerode").ContainerInspectInfo;
-    try {
-      inspect = await container.inspect();
-    } catch {
-      return reply.code(404).send({ error: "Container not found" });
-    }
-    if (inspect.State?.Running !== true) {
+    if (!target.running) {
       return reply.code(409).send({ error: "Container not running" });
     }
-    const ip = pickContainerIp(inspect);
+    const ip = target.ip;
     if (!ip) {
       return reply.code(503).send({
         error: `Container is not attached to the ${config.AGENT_DOCKER_NETWORK} network`,
