@@ -265,12 +265,18 @@ export async function serversAgentRoutes(app: FastifyInstance): Promise<void> {
     // Wipe stale loader artifacts the installer would regenerate.
     // run.sh in particular hardcodes the old version on the JVM
     // command line — without removing it, even a fresh installer run
-    // can be ignored by itzg's start path.
+    // can be ignored by itzg's start path. We log per-path success
+    // so a wipe failure (e.g. a root-owned file from a previous
+    // installer crash) shows up in the agent log instead of being
+    // silently ignored.
     const stalePaths = staleLoaderPaths(body.loader);
     for (const p of stalePaths) {
-      await fs
-        .rm(path.join(dataDir, p), { recursive: true, force: true })
-        .catch(() => {});
+      const full = path.join(dataDir, p);
+      try {
+        await fs.rm(full, { recursive: true, force: true });
+      } catch (err) {
+        req.log.warn({ err, path: full }, "stale loader path wipe failed");
+      }
     }
 
     // Download the installer jar into a hidden file at /data root so
@@ -422,6 +428,14 @@ export async function serversAgentRoutes(app: FastifyInstance): Promise<void> {
         logs: logsStr.slice(-2000),
       });
     }
+
+    // The temp container ran as root, so everything it wrote (run.sh,
+    // user_jvm_args.txt, the libraries/ subtree) is root-owned. itzg
+    // runs the MC server as uid 1000 via gosu and chokes with
+    // "Permission denied" on user_jvm_args.txt the moment it tries to
+    // append the install proxy to it. chown the affected files +
+    // libraries/<loader>/ subtree back to 1000:1000 so itzg owns them.
+    await chownInstallerOutput(dataDir, body.loader, req.log);
     return {
       ok: true,
       loader: body.loader,
@@ -2452,7 +2466,23 @@ function isBoringPackage(top: string): boolean {
  * land on a clean slate. Mod jars and world data are NOT in this list.
  */
 function staleLoaderPaths(loader: "neoforge" | "forge" | "fabric" | "quilt"): string[] {
-  const common = ["run.sh", "run.bat", "user_jvm_args.txt"];
+  // Common across all loaders: run.sh / launcher artefacts AND the
+  // mc-image-helper / itzg state files that say "loader X already
+  // installed". Without wiping these, mc-image-helper short-circuits
+  // and reports the OLD version is still installed even though we
+  // just put fresh jars on disk — the exact symptom user hit.
+  const common = [
+    "run.sh",
+    "run.bat",
+    "user_jvm_args.txt",
+    // mc-image-helper install-state markers (varies by version)
+    ".cache/cf-modloader.txt",
+    ".installed-modloader",
+    ".curseforge-state",
+    ".cf-state.json",
+    ".cf-installed",
+    "installs",
+  ];
   switch (loader) {
     case "neoforge":
       return [...common, "libraries/net/neoforged"];
@@ -2558,6 +2588,67 @@ function installerOutputMarker(loader: "neoforge" | "forge" | "fabric" | "quilt"
       return "fabric-server-launch.jar";
     case "quilt":
       return "quilt-server-launcher.jar";
+  }
+}
+
+/**
+ * After the installer container exits, walk the paths it wrote and
+ * fix ownership to 1000:1000 (itzg's runtime uid). The installer ran
+ * as root so its outputs are root-owned by default; itzg's gosu drop
+ * to uid 1000 then can't write user_jvm_args.txt and bombs out with
+ * the exact "Permission denied" the user kept hitting.
+ *
+ * We don't chown the entire data dir because most of it (mods, world,
+ * config) is already 1000-owned and walking 10k+ files on a big
+ * modpack adds seconds. Just the loader's own outputs.
+ */
+async function chownInstallerOutput(
+  dataDir: string,
+  loader: "neoforge" | "forge" | "fabric" | "quilt",
+  log: Logger
+): Promise<void> {
+  const targets: string[] = ["run.sh", "run.bat", "user_jvm_args.txt"];
+  switch (loader) {
+    case "neoforge":
+      targets.push("libraries/net/neoforged");
+      break;
+    case "forge":
+      targets.push("libraries/net/minecraftforge");
+      break;
+    case "fabric":
+      targets.push("fabric-server-launcher.jar", "fabric-server-launch.jar");
+      break;
+    case "quilt":
+      targets.push("quilt-server-launcher.jar");
+      break;
+  }
+  for (const rel of targets) {
+    const full = path.join(dataDir, rel);
+    try {
+      await chownRecursive(full, 1000, 1000);
+    } catch (err) {
+      log.warn({ err, path: full }, "post-install chown failed");
+    }
+  }
+}
+
+async function chownRecursive(
+  target: string,
+  uid: number,
+  gid: number
+): Promise<void> {
+  let stat: import("node:fs").Stats;
+  try {
+    stat = await fs.lstat(target);
+  } catch {
+    return; // path doesn't exist — nothing to chown
+  }
+  await fs.chown(target, uid, gid);
+  if (stat.isDirectory()) {
+    const entries = await fs.readdir(target);
+    for (const e of entries) {
+      await chownRecursive(path.join(target, e), uid, gid);
+    }
   }
 }
 
