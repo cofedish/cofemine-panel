@@ -773,6 +773,11 @@ export async function serversRoutes(app: FastifyInstance): Promise<void> {
       "FABRIC_LOADER_VERSION",
       "QUILT_LOADER_VERSION",
       "CF_OVERRIDE_LOADER_VERSION",
+      // Strip the force-sync flag too — once the loader is correctly
+      // installed we don't want to re-download the entire pack on
+      // every restart. The next override-apply re-sets it.
+      "CF_FORCE_SYNCHRONIZE",
+      // Legacy from the previous attempt — strip if still present.
       "CF_FORCE_REINSTALL_MODLOADER",
     ];
     const next: Record<string, string> = { ...env };
@@ -790,16 +795,20 @@ export async function serversRoutes(app: FastifyInstance): Promise<void> {
       // so cheaper to set unconditionally than to gate.
       next.CF_OVERRIDE_LOADER_VERSION = "true";
       // For AUTO_CURSEFORGE: bumping NEOFORGE_VERSION alone doesn't
-      // re-trigger loader install when the pack was already installed
-      // on a previous boot — mc-image-helper resolves the loader once
-      // at first install and skips it after. CF_FORCE_REINSTALL_MODLOADER
-      // tells itzg to redownload the loader on the next boot, picking
-      // up whatever NEOFORGE_VERSION says. Idempotent on subsequent
-      // boots: if the installed version already matches, itzg noops.
+      // re-trigger loader install. mc-image-helper has its OWN state
+      // file ("Requested CurseForge modpack ... is already installed
+      // for ..." log line) — it short-circuits before our libraries/
+      // wipe even matters. The documented itzg way to force a full
+      // re-resolve (pack + loader) is CF_FORCE_SYNCHRONIZE=true. It
+      // re-downloads and re-installs everything, picking up the new
+      // NEOFORGE_VERSION via CF_OVERRIDE_LOADER_VERSION=true. Heavy,
+      // but it's the only thing that consistently works across
+      // mc-image-helper versions.
+      //
       // Only set on CF servers — Modrinth and native loaders honour
       // NEOFORGE_VERSION directly.
       if (server.type === "CURSEFORGE") {
-        next.CF_FORCE_REINSTALL_MODLOADER = "true";
+        next.CF_FORCE_SYNCHRONIZE = "true";
       }
     }
     await prisma.server.update({

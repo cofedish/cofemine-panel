@@ -109,8 +109,38 @@ export async function reconcileServerStatus(
   // Fire-and-forget; the hook reads the server's env flag itself.
   if (live === "running" && db !== "running") {
     void firePendingMapInstall(serverId);
+    // Loader-override one-shot: if CF_FORCE_SYNCHRONIZE is set, the
+    // user just changed the loader version and we needed itzg to
+    // re-resolve the pack. Now that the server is up on the new
+    // loader, clear the flag so the NEXT restart isn't a full pack
+    // re-download. Fire-and-forget — the boot already succeeded.
+    void clearForceSynchronizeIfSet(serverId);
   }
   return live;
+}
+
+async function clearForceSynchronizeIfSet(serverId: string): Promise<void> {
+  try {
+    const server = await prisma.server.findUnique({ where: { id: serverId } });
+    if (!server) return;
+    const env = ((server.env as Record<string, string> | null) ?? {}) as Record<
+      string,
+      string
+    >;
+    if (env.CF_FORCE_SYNCHRONIZE !== "true") return;
+    const next = { ...env };
+    delete next.CF_FORCE_SYNCHRONIZE;
+    await prisma.server.update({
+      where: { id: serverId },
+      data: { env: next as unknown as object },
+    });
+    // No reprovision here on purpose: the env change only matters at
+    // next start, and we don't want to bounce a freshly-booted server.
+    // The next user-initiated restart picks up the cleared env.
+  } catch {
+    // Non-fatal — at worst the user pays for one extra full sync next
+    // restart. They can clear the flag manually via "Сбросить" too.
+  }
 }
 
 /**
