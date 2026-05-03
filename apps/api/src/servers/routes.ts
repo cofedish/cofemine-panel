@@ -23,6 +23,42 @@ import { readDownloadProxy } from "../integrations/download-proxy.js";
 import { resetWatchdogState } from "./install-watchdog.js";
 import { reconcileMany } from "./status.js";
 
+/** Paths inside /data we wipe to force itzg to reinstall a loader.
+ *  Each list is best-effort — if a path doesn't exist (because a
+ *  different loader was previously installed, or the pack uses a
+ *  non-standard layout), the agent's DELETE just returns ok. */
+function cachedLoaderPaths(loader: "neoforge" | "forge" | "fabric" | "quilt"): string[] {
+  switch (loader) {
+    case "neoforge":
+      return [
+        "libraries/net/neoforged",
+        ".cache/cf-modloader.txt",
+        ".installed-modloader",
+      ];
+    case "forge":
+      return [
+        "libraries/net/minecraftforge",
+        ".cache/cf-modloader.txt",
+        ".installed-modloader",
+      ];
+    case "fabric":
+      return [
+        "fabric-server-launcher.jar",
+        "fabric-server-launch.jar",
+        ".fabric-installer-version",
+        ".cache/cf-modloader.txt",
+        ".installed-modloader",
+      ];
+    case "quilt":
+      return [
+        "quilt-server-launcher.jar",
+        ".quilt-installer-version",
+        ".cache/cf-modloader.txt",
+        ".installed-modloader",
+      ];
+  }
+}
+
 /** Parse the CSV-of-numeric-modIds form that itzg expects in
  *  CF_EXCLUDE_MODS. Permissive on whitespace and stray empty
  *  entries (some pack manifests carry trailing commas). */
@@ -706,6 +742,7 @@ export async function serversRoutes(app: FastifyInstance): Promise<void> {
       "FABRIC_LOADER_VERSION",
       "QUILT_LOADER_VERSION",
       "CF_OVERRIDE_LOADER_VERSION",
+      "CF_FORCE_REINSTALL_MODLOADER",
     ];
     const next: Record<string, string> = { ...env };
     for (const k of loaderKeys) delete next[k];
@@ -721,11 +758,48 @@ export async function serversRoutes(app: FastifyInstance): Promise<void> {
       // loader version. Setting it for non-CF servers is a no-op,
       // so cheaper to set unconditionally than to gate.
       next.CF_OVERRIDE_LOADER_VERSION = "true";
+      // For AUTO_CURSEFORGE: bumping NEOFORGE_VERSION alone doesn't
+      // re-trigger loader install when the pack was already installed
+      // on a previous boot — mc-image-helper resolves the loader once
+      // at first install and skips it after. CF_FORCE_REINSTALL_MODLOADER
+      // tells itzg to redownload the loader on the next boot, picking
+      // up whatever NEOFORGE_VERSION says. Idempotent on subsequent
+      // boots: if the installed version already matches, itzg noops.
+      // Only set on CF servers — Modrinth and native loaders honour
+      // NEOFORGE_VERSION directly.
+      if (server.type === "CURSEFORGE") {
+        next.CF_FORCE_REINSTALL_MODLOADER = "true";
+      }
     }
     await prisma.server.update({
       where: { id },
       data: { env: next as unknown as object },
     });
+    // For CF servers, clear the cached loader install on disk so itzg
+    // is *forced* to redownload — `CF_FORCE_REINSTALL_MODLOADER` alone
+    // is sometimes ignored by older mc-image-helper builds. We delete
+    // the loader's library tree + the install marker; mod jars and
+    // world data are untouched.
+    if (server.type === "CURSEFORGE" && body.loader) {
+      try {
+        const client = await NodeClient.forId(server.nodeId);
+        for (const p of cachedLoaderPaths(body.loader)) {
+          await client
+            .call(
+              "DELETE",
+              `/servers/${id}/files?path=${encodeURIComponent(p)}`
+            )
+            .catch(() => {
+              /* missing path is fine — different loader was installed */
+            });
+        }
+      } catch (err) {
+        req.log.warn(
+          { err },
+          "loader cache clear failed; relying on CF_FORCE_REINSTALL_MODLOADER"
+        );
+      }
+    }
     await reconcileAndReprovision(id);
     await writeAudit(req, {
       action: "server.loader-version.set",
