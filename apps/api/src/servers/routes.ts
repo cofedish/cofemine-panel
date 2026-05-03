@@ -24,37 +24,68 @@ import { resetWatchdogState } from "./install-watchdog.js";
 import { reconcileMany } from "./status.js";
 
 /** Paths inside /data we wipe to force itzg to reinstall a loader.
- *  Each list is best-effort — if a path doesn't exist (because a
- *  different loader was previously installed, or the pack uses a
- *  non-standard layout), the agent's DELETE just returns ok. */
+ *
+ * Critical detail: NeoForge / Forge installers write a `run.sh` (and
+ * Windows `run.bat`) at /data root with the loader version BAKED INTO
+ * the launch args. itzg then exec's that script to start the server.
+ * That means bumping NEOFORGE_VERSION env on its own doesn't change
+ * what actually runs — `/data/run.sh` still points at the old jar.
+ * So the wipe list HAS to include run.sh / run.bat / user_jvm_args.txt
+ * along with the libraries tree, otherwise the user gets exactly what
+ * the bug report described: env says 21.1.228, JVM still launches
+ * 21.1.218 because run.sh hardcodes it.
+ *
+ * Also wipe the broader install-state markers — mc-image-helper writes
+ * different ones across versions, and we'd rather over-delete than
+ * leave one that short-circuits the reinstall. Paths that don't exist
+ * are silently ignored by the agent's DELETE.
+ *
+ * Mod jars (/data/mods) and world data (/data/world*) are NOT in any
+ * of these lists.
+ */
 function cachedLoaderPaths(loader: "neoforge" | "forge" | "fabric" | "quilt"): string[] {
+  // Common to every loader: itzg + mc-image-helper install-state files
+  // and the run.sh / user_jvm_args.txt that NeoForge / Forge generate.
+  const common = [
+    "run.sh",
+    "run.bat",
+    "user_jvm_args.txt",
+    ".cache/cf-modloader.txt",
+    ".installed-modloader",
+    ".curseforge-state",
+    ".cf-state.json",
+    ".cf-installed",
+    "installs",
+  ];
   switch (loader) {
     case "neoforge":
       return [
+        ...common,
         "libraries/net/neoforged",
-        ".cache/cf-modloader.txt",
-        ".installed-modloader",
+        // mc-image-helper sometimes drops a copy of the universal jar
+        // at /data root for direct invocation. Naming pattern:
+        // neoforge-<ver>-universal.jar / -server.jar / -launcher.jar.
+        // We can't enumerate by glob through the file API, but most
+        // installs only land run.sh + libraries; the wildcard is
+        // covered by the libraries wipe.
       ];
     case "forge":
       return [
+        ...common,
         "libraries/net/minecraftforge",
-        ".cache/cf-modloader.txt",
-        ".installed-modloader",
       ];
     case "fabric":
       return [
+        ...common,
         "fabric-server-launcher.jar",
         "fabric-server-launch.jar",
         ".fabric-installer-version",
-        ".cache/cf-modloader.txt",
-        ".installed-modloader",
       ];
     case "quilt":
       return [
+        ...common,
         "quilt-server-launcher.jar",
         ".quilt-installer-version",
-        ".cache/cf-modloader.txt",
-        ".installed-modloader",
       ];
   }
 }
