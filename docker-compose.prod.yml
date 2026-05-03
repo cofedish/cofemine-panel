@@ -74,13 +74,49 @@ services:
       driver: json-file
       options: { max-size: "10m", max-file: "5" }
 
+  # Dedicated process for the live-map proxy. Same Docker image as api
+  # (so they share the build, the Prisma generated client, all of node
+  # _modules) but a different entrypoint — boots only the /servers/:id/
+  # map/* routes and the shared auth hook. The reason it's a separate
+  # service: BlueMap fans out 100+ parallel tile fetches per player
+  # move, and serving that traffic in the same process as the panel
+  # API made unrelated panel pages feel "Loading…" laggy. Splitting
+  # gives map traffic its own pid + event loop + undici/Prisma pools,
+  # and lets the OS schedule it on a different core from `api`. The
+  # session cookie + permission check are still enforced; this isn't
+  # a public exposure of the map.
+  map-proxy:
+    image: ${API_IMAGE:-ghcr.io/cofedish/cofemine-panel/api:latest}
+    restart: always
+    # The api image runs through `tsx` (not compiled `node dist/...`)
+    # because @cofemine/shared is exported as raw .ts. Use the same
+    # loader for consistency with how api/main.ts is launched.
+    command: ["pnpm", "exec", "tsx", "src/map-proxy-main.ts"]
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}?schema=public
+      JWT_SECRET: ${JWT_SECRET}
+      SECRETS_KEY: ${SECRETS_KEY}
+      WEB_ORIGIN: ${WEB_ORIGIN:-http://localhost:3000}
+      AGENT_TOKEN: ${AGENT_TOKEN}
+      AGENT_PUBLIC_URL: http://agent:4100
+      MAP_PROXY_PORT: 4500
+    depends_on:
+      db: { condition: service_healthy }
+      agent: { condition: service_started }
+    networks: [cofemine_internal]
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "5" }
+
   web:
     image: ${WEB_IMAGE:-ghcr.io/cofedish/cofemine-panel/web:latest}
     restart: always
     environment:
       NODE_ENV: production
       API_INTERNAL_URL: http://api:4000
-    depends_on: [api]
+      MAP_PROXY_INTERNAL_URL: http://map-proxy:4500
+    depends_on: [api, map-proxy]
     volumes:
       # Background-music drop-in. AUDIO_DIR points to a host directory
       # holding manifest.json + your mp3/ogg/etc. Default resolves to

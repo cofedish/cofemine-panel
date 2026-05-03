@@ -80,6 +80,36 @@ services:
     networks:
       - cofemine_internal
 
+  # Dedicated process for the live-map proxy. Same image as `api`,
+  # different entrypoint. See docker-compose.prod.yml for the full
+  # rationale; in short, BlueMap's parallel tile-fetch storm shouldn't
+  # share the panel API's event loop.
+  map-proxy:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    restart: unless-stopped
+    # The api image runs through `tsx` (not compiled `node dist/...`)
+    # because @cofemine/shared is exported as raw .ts. Use the same
+    # loader for consistency with how api/main.ts is launched.
+    command: ["pnpm", "exec", "tsx", "src/map-proxy-main.ts"]
+    environment:
+      NODE_ENV: production
+      MAP_PROXY_PORT: "4500"
+      MAP_PROXY_HOST: "0.0.0.0"
+      DATABASE_URL: postgresql://${POSTGRES_USER:-cofemine}:${POSTGRES_PASSWORD:-cofemine}@db:5432/${POSTGRES_DB:-cofemine}?schema=public
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET required}
+      SECRETS_KEY: ${SECRETS_KEY:?SECRETS_KEY required}
+      AGENT_TOKEN: ${AGENT_TOKEN}
+      AGENT_PUBLIC_URL: http://agent:4100
+    depends_on:
+      db:
+        condition: service_healthy
+      agent:
+        condition: service_started
+    networks:
+      - cofemine_internal
+
   web:
     build:
       context: .
@@ -88,8 +118,10 @@ services:
     environment:
       NODE_ENV: production
       API_INTERNAL_URL: http://api:4000
+      MAP_PROXY_INTERNAL_URL: http://map-proxy:4500
     depends_on:
       - api
+      - map-proxy
     ports:
       - "${WEB_PORT:-3000}:3000"
     volumes:
