@@ -190,41 +190,50 @@ export async function mapRoutes(app: FastifyInstance): Promise<void> {
     }
   );
 
-  app.get<{ Params: { id: string; "*": string } }>(
-    "/servers/:id/map/dynmap/*",
-    async (req, reply) => {
-      const { id } = req.params;
-      const subpath = (req.params["*"] as string) ?? "";
-      await assertServerPermission(req, id, "server.view");
-      return forwardToProvider(
-        app,
-        req,
-        reply,
-        id,
-        PORT_DYNMAP,
-        subpath,
-        "Dynmap is not running on this server."
-      );
-    }
-  );
+  // NOTE: register both the bare and wildcard form for each provider.
+  // Fastify's wildcard `*` does not reliably match the empty path, so
+  // GET /servers/:id/map/bluemap/ (the iframe root) needs its own
+  // bare handler — without it the iframe's index.html request fell
+  // through to the legacy /map/* route and 404'd.
+  const dynmapHandler = async (
+    req: import("fastify").FastifyRequest,
+    reply: import("fastify").FastifyReply
+  ) => {
+    const params = req.params as { id: string; "*"?: string };
+    const subpath = (params["*"] as string) ?? "";
+    await assertServerPermission(req, params.id, "server.view");
+    return forwardToProvider(
+      app,
+      req,
+      reply,
+      params.id,
+      PORT_DYNMAP,
+      subpath,
+      "Dynmap is not running on this server."
+    );
+  };
+  app.get("/servers/:id/map/dynmap", dynmapHandler);
+  app.get("/servers/:id/map/dynmap/*", dynmapHandler);
 
-  app.get<{ Params: { id: string; "*": string } }>(
-    "/servers/:id/map/bluemap/*",
-    async (req, reply) => {
-      const { id } = req.params;
-      const subpath = (req.params["*"] as string) ?? "";
-      await assertServerPermission(req, id, "server.view");
-      return forwardToProvider(
-        app,
-        req,
-        reply,
-        id,
-        PORT_BLUEMAP,
-        subpath,
-        "BlueMap is not running on this server."
-      );
-    }
-  );
+  const bluemapHandler = async (
+    req: import("fastify").FastifyRequest,
+    reply: import("fastify").FastifyReply
+  ) => {
+    const params = req.params as { id: string; "*"?: string };
+    const subpath = (params["*"] as string) ?? "";
+    await assertServerPermission(req, params.id, "server.view");
+    return forwardToProvider(
+      app,
+      req,
+      reply,
+      params.id,
+      PORT_BLUEMAP,
+      subpath,
+      "BlueMap is not running on this server."
+    );
+  };
+  app.get("/servers/:id/map/bluemap", bluemapHandler);
+  app.get("/servers/:id/map/bluemap/*", bluemapHandler);
 
   // Backwards-compatible: anything not under /dynmap or /bluemap is
   // probably a stale URL (old client that hit the panel before the

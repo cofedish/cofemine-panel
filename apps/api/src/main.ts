@@ -30,6 +30,12 @@ async function bootstrap(): Promise<void> {
       level: config.NODE_ENV === "production" ? "info" : "debug",
     },
     trustProxy: true,
+    // Map iframe + relative-asset routing depends on the trailing
+    // slash form of /servers/:id/map/bluemap/ matching the same route
+    // as /servers/:id/map/bluemap/*. Without this, the slash variant
+    // fell through to the legacy /map/* handler and 404'd because
+    // BlueMap's container doesn't serve /bluemap as a path.
+    ignoreTrailingSlash: true,
   });
 
   // BigInt serialization for JSON responses.
