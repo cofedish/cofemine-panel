@@ -92,6 +92,32 @@ async function forwardToProvider(
       const v = upstream.headers[h];
       if (v) reply.header(h, Array.isArray(v) ? v[0]! : v);
     }
+    // If the agent itself returned a 502 (its upstream — the map
+    // service inside the container — was unreachable), forward its
+    // structured `{ error, reason, target }` body instead of masking
+    // it with our generic hint. Without this the user sees only
+    // "BlueMap is not running" and can't tell apart "config wrong"
+    // / "service crashed" / "wrong docker network".
+    if (upstream.statusCode === 502) {
+      const ct = String(upstream.headers["content-type"] ?? "");
+      if (ct.startsWith("application/json")) {
+        try {
+          const body = (await upstream.body.json()) as {
+            error?: string;
+            reason?: string;
+            target?: string;
+          };
+          return reply.code(502).send({
+            error: errorHint,
+            reason: body.reason,
+            target: body.target,
+            agentMessage: body.error,
+          });
+        } catch {
+          // fall through to the generic path below
+        }
+      }
+    }
     reply.code(upstream.statusCode);
     return reply.send(upstream.body);
   } catch (err) {

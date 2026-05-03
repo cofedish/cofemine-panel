@@ -47,6 +47,29 @@ function pickContainerIp(
   return null;
 }
 
+/**
+ * Translate a failed upstream `request()` call into a short, human-
+ * readable failure mode. Walks the `cause` chain because undici wraps
+ * the underlying socket error one or two levels deep.
+ */
+function describeUpstreamFailure(err: unknown): string {
+  let e: any = err;
+  for (let i = 0; i < 4 && e; i++) {
+    const code = e.code;
+    if (code === "ECONNREFUSED") return "connection refused — service not listening";
+    if (code === "EHOSTUNREACH") return "host unreachable — wrong network?";
+    if (code === "ENETUNREACH") return "network unreachable";
+    if (code === "ETIMEDOUT" || code === "UND_ERR_CONNECT_TIMEOUT")
+      return "connect timeout";
+    if (code === "UND_ERR_HEADERS_TIMEOUT") return "headers timeout";
+    if (code === "UND_ERR_BODY_TIMEOUT") return "body timeout";
+    if (code === "ENOTFOUND") return "DNS lookup failed";
+    if (code) return code;
+    e = e.cause;
+  }
+  return err instanceof Error ? err.message : "unknown";
+}
+
 export async function proxyAgentRoutes(app: FastifyInstance): Promise<void> {
   app.get<{
     Params: { id: string; port: string; "*": string };
@@ -123,7 +146,18 @@ export async function proxyAgentRoutes(app: FastifyInstance): Promise<void> {
       return reply.send(upstream.body);
     } catch (err) {
       req.log.warn({ err, targetUrl }, "proxy upstream failed");
-      return reply.code(502).send({ error: "Upstream unavailable" });
+      // Surface the actual failure mode so the panel UI / logs can
+      // tell apart "the map service isn't listening" (ECONNREFUSED)
+      // vs "the container is unreachable on this network" (timeout /
+      // EHOSTUNREACH) vs "DNS broke" (ENOTFOUND). The previous
+      // generic "Upstream unavailable" hid all of these and made
+      // BlueMap/dynmap debugging guesswork.
+      const reason = describeUpstreamFailure(err);
+      return reply.code(502).send({
+        error: `Upstream unavailable (${reason})`,
+        target: `${ip}:${portNum}`,
+        reason,
+      });
     }
   });
 }
