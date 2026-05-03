@@ -207,6 +207,170 @@ export async function serversAgentRoutes(app: FastifyInstance): Promise<void> {
     return { ok: true, output };
   });
 
+  /**
+   * Reinstall a Minecraft modloader directly via its official
+   * installer jar, bypassing itzg / mc-image-helper completely.
+   *
+   * Why this exists as its own endpoint: the panel needs a way to
+   * change a CURSEFORGE-pack server's loader version (e.g. NeoForge
+   * 21.1.218 → 21.1.228) WITHOUT setting CF_FORCE_SYNCHRONIZE, which
+   * would re-download the entire pack and wipe out any mods the user
+   * added on top of the pack baseline. This endpoint runs the
+   * NeoForge / Forge / Fabric / Quilt installer in a one-shot Java
+   * container that bind-mounts /data:/data, so it regenerates run.sh
+   * and libraries/net/<loader>/ but never touches /data/mods,
+   * /data/world, /data/config, or anything else.
+   *
+   * Pre-requirement: the server must be stopped. We don't auto-stop
+   * because writing to libraries/ while the JVM is mapping those
+   * jars would corrupt the running server's classloader. Caller is
+   * expected to have stopped the server first.
+   */
+  app.post("/servers/:id/install-modloader", async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const body = z
+      .object({
+        loader: z.enum(["neoforge", "forge", "fabric", "quilt"]),
+        version: z.string().min(1).max(64),
+        // mcVersion is required for Forge / Fabric / Quilt URL shapes;
+        // for NeoForge the version itself encodes MC compatibility.
+        mcVersion: z.string().min(1).max(32).nullable().optional(),
+      })
+      .parse(req.body);
+
+    const dataDir = dataDirFor(id);
+    await ensureDir(dataDir);
+
+    // Refuse if container is currently running. itzg locks libraries/
+    // jars open while the JVM is up, and the installer would either
+    // fail to overwrite them or — worse — leave a half-rewritten tree.
+    const container = await findContainer(id);
+    if (container) {
+      const info = await container.inspect().catch(() => null);
+      if (info?.State?.Running) {
+        return reply
+          .code(409)
+          .send({ error: "Stop the server before changing the loader version" });
+      }
+    }
+
+    // Wipe stale loader artifacts the installer would regenerate.
+    // run.sh in particular hardcodes the old version on the JVM
+    // command line — without removing it, even a fresh installer run
+    // can be ignored by itzg's start path.
+    const stalePaths = staleLoaderPaths(body.loader);
+    for (const p of stalePaths) {
+      await fs
+        .rm(path.join(dataDir, p), { recursive: true, force: true })
+        .catch(() => {});
+    }
+
+    // Download the installer jar into a hidden file at /data root so
+    // the bind-mounted temp container can see it via /data/.
+    const installerName = `.cofemine-${body.loader}-installer-${body.version}.jar`;
+    const installerPath = path.join(dataDir, installerName);
+    const url = installerUrl(
+      body.loader,
+      body.version,
+      body.mcVersion ?? null
+    );
+    try {
+      await downloadInstallerJar(url, installerPath);
+    } catch (err) {
+      return reply.code(502).send({
+        error: `Failed to download installer: ${(err as Error).message}`,
+        url,
+      });
+    }
+
+    // Pull a small Java image once (cached locally after first use).
+    // We don't reuse the itzg image because its entrypoint runs the
+    // server bootstrap; overriding entrypoint works but keeping the
+    // installer-runner image dedicated is cleaner.
+    const tempImage = "eclipse-temurin:21-jre-alpine";
+    await ensureImagePulled(docker, tempImage, (m) =>
+      req.log.info({ image: tempImage }, m)
+    );
+
+    const cmd = installerCmd(
+      body.loader,
+      body.version,
+      body.mcVersion ?? null,
+      installerName
+    );
+    const temp = await docker.createContainer({
+      Image: tempImage,
+      Cmd: cmd,
+      WorkingDir: "/data",
+      Env: ["TERM=dumb"],
+      HostConfig: {
+        Binds: [`${dataDir}:/data`],
+        AutoRemove: false,
+        NetworkMode: config.AGENT_DOCKER_NETWORK,
+      },
+      Tty: false,
+    });
+
+    let logsStr = "";
+    let exitCode = -1;
+    try {
+      await temp.start();
+      const result = await temp.wait();
+      exitCode = result.StatusCode ?? -1;
+      const logs = await temp.logs({
+        stdout: true,
+        stderr: true,
+        follow: false,
+      });
+      logsStr = logs
+        .toString("utf8")
+        // Docker emits framed bytes (8-byte header per stdout/stderr
+        // chunk). Strip non-printable control chars except tab / LF /
+        // CR so the tail we surface to the UI is readable.
+        // eslint-disable-next-line no-control-regex
+        .replace(/[ --]/g, "");
+    } catch (err) {
+      req.log.warn({ err }, "modloader installer container failed");
+      await temp.remove({ force: true }).catch(() => {});
+      await fs.unlink(installerPath).catch(() => {});
+      return reply.code(500).send({
+        error: `Installer container failed: ${(err as Error).message}`,
+      });
+    }
+
+    await temp.remove({ force: true }).catch(() => {});
+    await fs.unlink(installerPath).catch(() => {});
+
+    if (exitCode !== 0) {
+      req.log.warn({ exitCode, tail: logsStr.slice(-1500) }, "installer non-zero exit");
+      return reply.code(500).send({
+        error: `Installer exited ${exitCode}`,
+        logs: logsStr.slice(-2000),
+      });
+    }
+
+    // Sanity: confirm the installer wrote run.sh (NeoForge / Forge)
+    // or the launcher jar (Fabric / Quilt). If not, something silently
+    // went sideways and starting the server would fail anyway.
+    const expectMarker = installerOutputMarker(body.loader);
+    const markerExists = await fs
+      .access(path.join(dataDir, expectMarker))
+      .then(() => true)
+      .catch(() => false);
+    if (!markerExists) {
+      return reply.code(500).send({
+        error: `Installer claimed success but didn't produce ${expectMarker}`,
+        logs: logsStr.slice(-2000),
+      });
+    }
+    return {
+      ok: true,
+      loader: body.loader,
+      version: body.version,
+      tail: logsStr.slice(-500),
+    };
+  });
+
   app.post("/servers/:id/restore-from", async (req) => {
     const { id } = req.params as { id: string };
     const body = restoreFromSchema.parse(req.body);
@@ -1968,4 +2132,147 @@ function isBoringPackage(top: string): boolean {
     if (lower === p.slice(0, -1) || lower.startsWith(p)) return true;
   }
   return false;
+}
+
+// ====================== MODLOADER INSTALLER HELPERS ======================
+
+/**
+ * Files inside /data that hold the OLD loader version's identity.
+ * Wiped before running the installer so the new run.sh / launch jars
+ * land on a clean slate. Mod jars and world data are NOT in this list.
+ */
+function staleLoaderPaths(loader: "neoforge" | "forge" | "fabric" | "quilt"): string[] {
+  const common = ["run.sh", "run.bat", "user_jvm_args.txt"];
+  switch (loader) {
+    case "neoforge":
+      return [...common, "libraries/net/neoforged"];
+    case "forge":
+      return [...common, "libraries/net/minecraftforge"];
+    case "fabric":
+      return [
+        ...common,
+        "fabric-server-launcher.jar",
+        "fabric-server-launch.jar",
+        ".fabric-installer-version",
+      ];
+    case "quilt":
+      return [
+        ...common,
+        "quilt-server-launcher.jar",
+        ".quilt-installer-version",
+      ];
+  }
+}
+
+/** Canonical installer-jar URL per loader. */
+function installerUrl(
+  loader: "neoforge" | "forge" | "fabric" | "quilt",
+  version: string,
+  mcVersion: string | null
+): string {
+  switch (loader) {
+    case "neoforge":
+      return `https://maven.neoforged.net/releases/net/neoforged/neoforge/${version}/neoforge-${version}-installer.jar`;
+    case "forge": {
+      if (!mcVersion) {
+        throw new Error("Forge installer URL requires mcVersion");
+      }
+      const fv = `${mcVersion}-${version}`;
+      return `https://maven.minecraftforge.net/net/minecraftforge/forge/${fv}/forge-${fv}-installer.jar`;
+    }
+    case "fabric": {
+      // Fabric ships a single "universal" installer jar that we point
+      // at a specific MC + loader version via CLI args. Pinning the
+      // installer to 1.0.1 (released early 2024, stable) avoids drift
+      // when fabricmc cuts new installer builds.
+      const installerVer = "1.0.1";
+      return `https://maven.fabricmc.net/net/fabricmc/fabric-installer/${installerVer}/fabric-installer-${installerVer}.jar`;
+    }
+    case "quilt": {
+      const installerVer = "0.9.2";
+      return `https://maven.quiltmc.org/repository/release/org/quiltmc/quilt-installer/${installerVer}/quilt-installer-${installerVer}.jar`;
+    }
+  }
+}
+
+/** Java args the temp container runs to invoke the installer. */
+function installerCmd(
+  loader: "neoforge" | "forge" | "fabric" | "quilt",
+  version: string,
+  mcVersion: string | null,
+  installerName: string
+): string[] {
+  const installerInContainer = `/data/${installerName}`;
+  switch (loader) {
+    case "neoforge":
+    case "forge":
+      // Both loaders' installers accept --installServer with the
+      // target dir; pointing at /data lands run.sh + libraries there.
+      return ["java", "-jar", installerInContainer, "--installServer", "/data"];
+    case "fabric":
+      if (!mcVersion) throw new Error("fabric installer needs mcVersion");
+      return [
+        "java",
+        "-jar",
+        installerInContainer,
+        "server",
+        "-mcversion",
+        mcVersion,
+        "-loader",
+        version,
+        "-downloadMinecraft",
+      ];
+    case "quilt":
+      if (!mcVersion) throw new Error("quilt installer needs mcVersion");
+      return [
+        "java",
+        "-jar",
+        installerInContainer,
+        "install",
+        "server",
+        mcVersion,
+        version,
+        "--download-server",
+      ];
+  }
+}
+
+/** Filename the installer is expected to produce on success. Used as
+ *  a sanity check after the installer container exits. */
+function installerOutputMarker(loader: "neoforge" | "forge" | "fabric" | "quilt"): string {
+  switch (loader) {
+    case "neoforge":
+    case "forge":
+      return "run.sh";
+    case "fabric":
+      return "fabric-server-launch.jar";
+    case "quilt":
+      return "quilt-server-launcher.jar";
+  }
+}
+
+/** Stream-download a jar to disk via undici. */
+async function downloadInstallerJar(
+  url: string,
+  destPath: string
+): Promise<void> {
+  const res = await request(url, {
+    method: "GET",
+    maxRedirections: 5,
+    headersTimeout: 15_000,
+    bodyTimeout: 5 * 60_000,
+  });
+  if (res.statusCode >= 400) {
+    await res.body.dump().catch(() => {});
+    throw new Error(`HTTP ${res.statusCode}`);
+  }
+  // Stream to disk so a 200MB Forge installer doesn't spike RSS.
+  const fh = await fs.open(destPath, "w");
+  try {
+    for await (const chunk of res.body) {
+      await fh.write(chunk);
+    }
+  } finally {
+    await fh.close();
+  }
 }

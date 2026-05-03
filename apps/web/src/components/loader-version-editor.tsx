@@ -193,6 +193,7 @@ function LoaderVersionDialog({
       await api.post(`/servers/${server.id}/loader-version`, {
         loader,
         version,
+        mcVersion,
       });
       mutate(`/servers/${server.id}/loader-version`);
       mutate(`/servers/${server.id}`);
