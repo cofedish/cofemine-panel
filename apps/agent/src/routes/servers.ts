@@ -2772,8 +2772,12 @@ async function downloadInstallerJar(
   const res = await request(url, {
     method: "GET",
     maxRedirections: 5,
-    headersTimeout: 30_000,
-    bodyTimeout: 5 * 60_000,
+    // Generous: maven.neoforged.net + maven.minecraftforge.net can be
+    // slow especially without a proxy. 50MB installer at 100KB/s is
+    // ~8 min; allow 15 min so a slow but progressing connection
+    // doesn't get killed.
+    headersTimeout: 60_000,
+    bodyTimeout: 15 * 60_000,
     dispatcher,
   });
   if (res.statusCode >= 400) {

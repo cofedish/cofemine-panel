@@ -794,12 +794,22 @@ export async function serversRoutes(app: FastifyInstance): Promise<void> {
           const proxy = await readDownloadProxy();
           const proxyUrl = proxy ? makeProxyUrl(proxy) : null;
           const client = await NodeClient.forId(server.nodeId);
-          await client.call("POST", `/servers/${id}/install-modloader`, {
-            loader: body.loader,
-            version: body.version,
-            mcVersion: body.mcVersion ?? null,
-            proxyUrl,
-          });
+          // Loader installer can run for several minutes (download
+          // installer jar + pull eclipse-temurin image + run
+          // installer + chown). Bump both timeouts to 20 min so a
+          // slow maven mirror doesn't fail the panel-side call.
+          await client.call(
+            "POST",
+            `/servers/${id}/install-modloader`,
+            {
+              loader: body.loader,
+              version: body.version,
+              mcVersion: body.mcVersion ?? null,
+              proxyUrl,
+            },
+            undefined,
+            { headersTimeout: 20 * 60_000, bodyTimeout: 20 * 60_000 }
+          );
           await reconcileAndReprovision(id);
           job.state = "done";
           job.message = `Modloader ${body.loader} ${body.version} installed.`;

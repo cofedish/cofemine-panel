@@ -33,7 +33,8 @@ export class NodeClient {
     method: "GET" | "POST" | "PUT" | "DELETE" | "PATCH",
     path: string,
     body?: unknown,
-    extraHeaders?: Record<string, string>
+    extraHeaders?: Record<string, string>,
+    opts?: { headersTimeout?: number; bodyTimeout?: number }
   ): Promise<T> {
     const url = `${this.host.replace(/\/$/, "")}${path}`;
     // Only set content-type when we actually have a body. Fastify rejects
@@ -49,6 +50,12 @@ export class NodeClient {
       method,
       headers,
       body: body === undefined ? undefined : JSON.stringify(body),
+      // Longer-than-default for endpoints that legitimately take
+      // minutes (loader installer, modpack repair). undici's defaults
+      // are 5min headers / 5min body, which the loader installer
+      // can exceed on a slow connection to maven.neoforged.net.
+      headersTimeout: opts?.headersTimeout,
+      bodyTimeout: opts?.bodyTimeout,
     });
     const text = await res.body.text();
     if (res.statusCode >= 400) {
