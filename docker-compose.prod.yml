@@ -74,6 +74,12 @@ services:
       BOOTSTRAP_OWNER_EMAIL: ${BOOTSTRAP_OWNER_EMAIL:-}
       BOOTSTRAP_OWNER_USERNAME: ${BOOTSTRAP_OWNER_USERNAME:-}
       BOOTSTRAP_OWNER_PASSWORD: ${BOOTSTRAP_OWNER_PASSWORD:-}
+    # api makes outbound calls to maven.neoforged.net /
+    # maven.minecraftforge.net via the host-side download proxy
+    # (xray on host:2080), so it needs host.docker.internal mapped
+    # to the host gateway. Same reasoning as the agent service.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       db: { condition: service_healthy }
       agent: { condition: service_started }
@@ -109,6 +115,12 @@ services:
       AGENT_TOKEN: ${AGENT_TOKEN}
       AGENT_PUBLIC_URL: http://agent:4100
       MAP_PROXY_PORT: 4500
+    # Map-proxy doesn't currently make outbound calls through the
+    # download proxy, but adding the alias is a no-op cost and means
+    # any future code path that does (e.g. hitting Modrinth for tile
+    # metadata) won't ENOTFOUND.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       db: { condition: service_healthy }
       agent: { condition: service_started }

@@ -78,6 +78,12 @@ services:
       BOOTSTRAP_OWNER_EMAIL: ${BOOTSTRAP_OWNER_EMAIL:-}
       BOOTSTRAP_OWNER_USERNAME: ${BOOTSTRAP_OWNER_USERNAME:-}
       BOOTSTRAP_OWNER_PASSWORD: ${BOOTSTRAP_OWNER_PASSWORD:-}
+    # api makes outbound calls through the host-side download-proxy
+    # (xray on host:2080) for maven.neoforged.net etc. Linux Docker
+    # doesn't auto-resolve host.docker.internal — the alias has to
+    # be opted in here explicitly.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       db:
         condition: service_healthy
@@ -108,6 +114,11 @@ services:
       SECRETS_KEY: ${SECRETS_KEY:?SECRETS_KEY required}
       AGENT_TOKEN: ${AGENT_TOKEN}
       AGENT_PUBLIC_URL: http://agent:4100
+    # Defensive — same as api. Currently map-proxy doesn't egress
+    # via the download-proxy, but adding the alias is free and covers
+    # any future code path that might.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       db:
         condition: service_healthy
