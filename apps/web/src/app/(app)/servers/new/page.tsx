@@ -259,10 +259,46 @@ export default function CreateServerPage(): JSX.Element {
           console.warn("Failed to upload icon after create:", e);
         }
       }
-      // (Dynmap / BlueMap auto-install was already wired into the
-      // create body above via MODS / PLUGINS env — nothing else to
-      // do here. itzg downloads the jar from the URL we baked in,
-      // alongside / on top of the modpack's own mods.)
+      // Pre-place the map jar on disk RIGHT NOW so it shows up in
+      // /data/mods before the user clicks Start. The MODS env we
+      // baked into create body above is the safety net — itzg
+      // downloads the URL on every start, which means the jar
+      // survives an AUTO_CURSEFORGE first-boot mods/ wipe (the pack
+      // installer cleans /data/mods to its own manifest). With both
+      // mechanisms wired up the user sees the file in the Files tab
+      // immediately after create, and it stays there across pack
+      // reinstalls.
+      if (installDynmap && dynmapTarget) {
+        const { gameVersion, loader } = resolveRuntimeFilters(
+          source,
+          effectiveType,
+          version,
+          packVersion
+        );
+        try {
+          await api.post(
+            `/integrations/servers/${res.id}/install/modrinth`,
+            {
+              projectId: dynmapTarget.slug,
+              kind: dynmapTarget.kind,
+              ...(gameVersion ? { gameVersion } : {}),
+              ...(loader ? { loader } : {}),
+            }
+          );
+        } catch (e) {
+          // Non-fatal — the MODS / PLUGINS env entry that we baked
+          // into create body still kicks in at first start and pulls
+          // the jar then. Just surface the error so the user knows
+          // why the file isn't there yet.
+          const msg =
+            e instanceof ApiError
+              ? e.message
+              : e instanceof Error
+                ? e.message
+                : String(e);
+          console.warn("Pre-install of live-map jar failed:", msg);
+        }
+      }
       router.push(`/servers/${res.id}`);
     } catch (e) {
       setErr(e instanceof ApiError ? e.message : String(e));
