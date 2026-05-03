@@ -20,6 +20,7 @@ import {
 import { ModrinthMark, CurseForgeMark } from "./brand-icons";
 import { useDialog } from "./dialog-provider";
 import { ContentDetailDrawer } from "./content-detail-drawer";
+import { ChangeVersionButton } from "./mod-version-picker";
 import { useT } from "@/lib/i18n";
 
 /* ================================ TYPES ================================ */
@@ -437,18 +438,54 @@ function InstalledPanel({
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-          {filtered.map((f) => (
-            <InstalledCard
-              key={f.name}
-              file={f}
-              onDelete={() => remove(f)}
-              onOpen={() => {
-                const det = installedDetailKey(f);
-                if (det) setDetail(det);
-              }}
-              isExcluded={false}
-            />
-          ))}
+          {filtered.map((f) => {
+            // Loader for filtering version lists. typeToLoader returns
+            // "" for modpack types — we look at the saved override env
+            // (NEOFORGE_VERSION etc.) to resolve, and fall back to "".
+            // Not perfect but matches what the install flow already does.
+            const envLoader = server?.env
+              ? server.env.NEOFORGE_VERSION
+                ? "neoforge"
+                : server.env.FORGE_VERSION
+                  ? "forge"
+                  : server.env.FABRIC_LOADER_VERSION
+                    ? "fabric"
+                    : server.env.QUILT_LOADER_VERSION
+                      ? "quilt"
+                      : ""
+              : "";
+            const loader = envLoader || typeToLoader(server?.type ?? "");
+            const mc = server?.version ?? "";
+            // sub === "exclusions" never reaches this branch — that
+            // tab renders <ExclusionsTab/> earlier.
+            const kind: "mod" | "plugin" | "datapack" =
+              sub === "plugins"
+                ? "plugin"
+                : sub === "datapacks"
+                  ? "datapack"
+                  : "mod";
+            return (
+              <InstalledCard
+                key={f.name}
+                file={f}
+                onDelete={() => remove(f)}
+                onOpen={() => {
+                  const det = installedDetailKey(f);
+                  if (det) setDetail(det);
+                }}
+                isExcluded={false}
+                changeVersionSlot={
+                  <ChangeVersionButton
+                    serverId={serverId}
+                    file={f}
+                    type={kind}
+                    serverMcVersion={mc}
+                    serverLoader={loader}
+                  />
+                }
+              />
+            );
+          })}
         </div>
       )}
 
@@ -509,6 +546,7 @@ function InstalledCard({
   onOpen,
   onToggleExclude,
   isExcluded,
+  changeVersionSlot,
 }: {
   file: InstalledFile;
   onDelete: () => void;
@@ -520,6 +558,10 @@ function InstalledCard({
    *  toggle several mods in one go. */
   onToggleExclude?: () => void;
   isExcluded: boolean;
+  /** Optional render-prop slot for the per-mod version-picker button.
+   *  We push it in via parent so the dialog hook owns the SWR cache
+   *  scope, and so we can keep the card itself dialog-agnostic. */
+  changeVersionSlot?: React.ReactNode;
 }): JSX.Element {
   const title =
     file.modrinth?.title ?? file.curseforge?.title ?? prettifyFilename(file.name);
@@ -598,6 +640,7 @@ function InstalledCard({
         </div>
       </div>
       <div className="flex items-center gap-1 shrink-0">
+        {changeVersionSlot}
         {onToggleExclude && (
           <button
             type="button"

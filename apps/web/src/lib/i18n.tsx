@@ -133,6 +133,20 @@ const en: Dict = {
   "server.overview.memoryLimit": "Memory limit",
   "server.overview.cpuLimit": "CPU limit",
   "server.overview.loaderVersion": "Loader version",
+  "modVersion.button": "Change version",
+  "modVersion.title": "Pick version — {name}",
+  "modVersion.subtitle": "Filtered to MC {mc} / {loader}.",
+  "modVersion.currentlyInstalled": "Installed: {v}.",
+  "modVersion.installed": "installed",
+  "modVersion.noCompatible":
+    "No published versions match MC {mc} / {loader}. Toggle below to see every version (compatibility is YOUR problem from there).",
+  "modVersion.showAll": "Show all versions, ignore MC / loader filters",
+  "modVersion.distributionBlocked":
+    "third-party download disabled by author",
+  "modVersion.swapNote":
+    "We delete the old jar first, then download the new one. The next server start picks it up — no rebuild needed.",
+  "modVersion.apply": "Apply swap",
+  "modVersion.swapped": "Swapped {name}. Restart the server to load the new version.",
   "loaderVersion.usingPackDefault": "(using pack default)",
   "loaderVersion.change": "Change",
   "loaderVersion.dialogTitle": "Override loader version",
@@ -752,6 +766,20 @@ const ru: Dict = {
   "server.overview.memoryLimit": "Лимит памяти",
   "server.overview.cpuLimit": "Лимит CPU",
   "server.overview.loaderVersion": "Версия лоадера",
+  "modVersion.button": "Сменить версию",
+  "modVersion.title": "Выбор версии — {name}",
+  "modVersion.subtitle": "Фильтр: MC {mc} / {loader}.",
+  "modVersion.currentlyInstalled": "Установлено: {v}.",
+  "modVersion.installed": "установлено",
+  "modVersion.noCompatible":
+    "Нет совместимых версий для MC {mc} / {loader}. Можно показать все версии — но за совместимость дальше отвечаешь сам.",
+  "modVersion.showAll": "Показать все версии, без фильтра MC / лоадера",
+  "modVersion.distributionBlocked":
+    "автор отключил сторонние загрузки",
+  "modVersion.swapNote":
+    "Сначала удаляем старый jar, потом качаем новый. На следующем старте сервер подхватит новую версию — пересборка не нужна.",
+  "modVersion.apply": "Заменить",
+  "modVersion.swapped": "Версия {name} обновлена. Перезапусти сервер чтобы применить.",
   "loaderVersion.usingPackDefault": "(как в сборке)",
   "loaderVersion.change": "Изменить",
   "loaderVersion.dialogTitle": "Переопределить версию лоадера",
