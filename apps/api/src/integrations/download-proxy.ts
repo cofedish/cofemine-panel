@@ -243,10 +243,28 @@ export function makeProxyEnv(
   proxy: DownloadProxyConfig
 ): Record<string, string> {
   const url = makeProxyUrl(proxy);
+  // For SOCKS5: ALL_PROXY is the documented env for shell tools
+  // (curl, wget) and Java 17+ to use SOCKS for everything. We do
+  // NOT set HTTP_PROXY / HTTPS_PROXY to a socks5:// URL, because
+  // some HTTP clients (reactor-netty, used by mc-image-helper)
+  // interpret HTTP_PROXY as "this is an HTTP-CONNECT proxy" — they
+  // then send HTTP CONNECT to a SOCKS-only inbound, which the
+  // proxy rejects with 400 or 404. The user reported exactly this:
+  //   "HTTP request of https://maven.neoforged.net/.../maven-
+  //    metadata.xml failed with 404"
+  // even though direct curl to the same URL returns 200, because
+  // reactor-netty was trying HTTP CONNECT against xray's SOCKS5-
+  // only port 10808.
+  if (proxy.protocol === "socks") {
+    return {
+      ALL_PROXY: url,
+      all_proxy: url,
+      NO_PROXY: NO_PROXY_HOSTS,
+      no_proxy: NO_PROXY_HOSTS,
+    };
+  }
+  // HTTP-CONNECT proxy: HTTP_PROXY / HTTPS_PROXY are the right vars.
   return {
-    // Both upper- and lowercase forms — different libraries pick
-    // different variants. curl prefers lowercase, Java 11 HttpClient
-    // checks both. Set both to avoid surprises.
     HTTP_PROXY: url,
     HTTPS_PROXY: url,
     http_proxy: url,
