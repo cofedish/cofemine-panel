@@ -291,14 +291,32 @@ export async function serversRoutes(app: FastifyInstance): Promise<void> {
       // guarantees container.env == materializeEnv(DB.env). Native
       // loader server types (FORGE/NEOFORGE/etc.) don't have these
       // one-shot flags so they keep the lighter just-start path.
+      const startEnv = (server.env as Record<string, string> | null) ?? {};
+      const needsReprov = startEnv.__COFEMINE_NEEDS_REPROV === "1";
       if (
         action === "start" &&
-        (server.type === "CURSEFORGE" || server.type === "MODRINTH")
+        (needsReprov ||
+          server.type === "CURSEFORGE" ||
+          server.type === "MODRINTH")
       ) {
         req.log.info(
-          { id, type: server.type },
+          { id, type: server.type, needsReprov },
           "auto-reprovisioning before start to flush stale one-shot env"
         );
+        // Clear the one-shot flag BEFORE reprov so the new container
+        // doesn't carry it forward.
+        if (needsReprov) {
+          const next = { ...startEnv };
+          delete next.__COFEMINE_NEEDS_REPROV;
+          await prisma.server
+            .update({
+              where: { id },
+              data: { env: next as unknown as object },
+            })
+            .catch(() => {
+              /* non-fatal */
+            });
+        }
         await reconcileAndReprovision(id).catch((err) =>
           req.log.warn(
             { err },
@@ -1198,6 +1216,14 @@ export async function serversRoutes(app: FastifyInstance): Promise<void> {
     const next: Record<string, string> = { ...env };
     for (const k of dropKeys) delete next[k];
     if (nativeVer) next[nativeVerKey] = nativeVer;
+    // Mark the server for a forced reprovision on its next start.
+    // The container is currently set up with the OLD CURSEFORGE /
+    // MODRINTH spec; without this flag a user-initiated start
+    // would just call `docker start` on the stale container and
+    // mc-image-helper would still run with all the CF_* env it
+    // remembers from creation time. The reprov-before-start hook
+    // strips this flag once it fires.
+    next.__COFEMINE_NEEDS_REPROV = "1";
     await prisma.server.update({
       where: { id },
       data: { type: newType, env: next as unknown as object },
