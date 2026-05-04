@@ -1273,6 +1273,13 @@ export async function serversAgentRoutes(app: FastifyInstance): Promise<void> {
             description: p.description as string | undefined,
             icon: p.icon_url as string | null,
             versionNumber: v?.version_number as string | undefined,
+            // Used by the panel UI's "effective MC version" majority
+            // vote when a server stored version="LATEST" — we filter
+            // to "1.X[.Y]" entries so the helper finds the pack's
+            // actual MC instead of falling back to Mojang's latest.
+            gameVersions: Array.isArray(v?.game_versions)
+              ? (v?.game_versions as string[])
+              : [],
             pageUrl: `https://modrinth.com/${p.project_type ?? "mod"}/${p.slug}`,
           },
           ...(cf ? { curseforge: cf } : {}),
@@ -1489,6 +1496,7 @@ type EnrichedFile = {
     description?: string;
     icon?: string | null;
     versionNumber?: string;
+    gameVersions?: string[];
     pageUrl: string;
   };
   curseforge?: CfProjectMeta;
