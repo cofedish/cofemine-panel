@@ -408,7 +408,9 @@ function Overview({
       <div className="tile p-6 lg:col-span-2 space-y-5">
         <h3 className="heading-md">{t("server.overview.runtime")}</h3>
         <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-4 text-sm">
-          <Row label={t("server.hero.serverType")}>{data.type}</Row>
+          <Row label={t("server.hero.serverType")}>
+            <DetachableType server={data} />
+          </Row>
           <Row label={t("server.hero.version")}>{data.version}</Row>
           <Row label={t("server.overview.loaderVersion")}>
             <LoaderVersionRow server={data} />
@@ -577,6 +579,65 @@ function ServerIconEditor({ serverId }: { serverId: string }): JSX.Element {
         )}
       </div>
     </section>
+  );
+}
+
+/**
+ * Renders the server type as plain text + a "Detach from source"
+ * action when the server is still bound to a CF / Modrinth pack.
+ * After detach, the server is a regular native-loader install and
+ * mc-image-helper stops fighting the user's mod customisations.
+ */
+function DetachableType({ server }: { server: ServerDetail }): JSX.Element {
+  const { t } = useT();
+  const dialog = useDialog();
+  const [busy, setBusy] = useState(false);
+  const isPack = server.type === "CURSEFORGE" || server.type === "MODRINTH";
+  async function detach(): Promise<void> {
+    const ok = await dialog.confirm({
+      tone: "warning",
+      title: t("server.detach.confirmTitle"),
+      message: t("server.detach.confirmBody"),
+      okLabel: t("server.detach.ok"),
+    });
+    if (!ok) return;
+    setBusy(true);
+    try {
+      const res = await api.post<{ type: string; loader: string | null }>(
+        `/servers/${server.id}/detach-source`
+      );
+      mutate(`/servers/${server.id}`);
+      dialog.toast({
+        tone: "success",
+        message: t("server.detach.done", {
+          type: res.type,
+          loader: res.loader ?? "?",
+        }),
+      });
+    } catch (e) {
+      dialog.alert({
+        tone: "danger",
+        title: t("common.error"),
+        message: e instanceof ApiError ? e.message : String(e),
+      });
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <div className="flex items-center gap-2 flex-wrap">
+      <span>{server.type}</span>
+      {isPack && (
+        <button
+          className="btn btn-ghost text-xs"
+          onClick={() => void detach()}
+          disabled={busy}
+          title={t("server.detach.hint")}
+        >
+          {busy ? "…" : t("server.detach.button")}
+        </button>
+      )}
+    </div>
   );
 }
 

@@ -115,8 +115,139 @@ export async function reconcileServerStatus(
     // loader, clear the flag so the NEXT restart isn't a full pack
     // re-download. Fire-and-forget — the boot already succeeded.
     void clearForceSynchronizeIfSet(serverId);
+    // Decouple-from-source one-shot: if the user picked "Detach
+    // from CF/Modrinth after first boot" in the wizard, the pack
+    // has now been fully installed — convert the server to its
+    // native loader type so future starts don't go through any
+    // pack-reinstall machinery and the user can edit /data/mods
+    // freely without itzg fighting back.
+    void detachFromSourceIfFlagged(serverId);
   }
   return live;
+}
+
+/**
+ * Convert a CF/MR modpack server into a "plain" native-loader server
+ * once the pack has been successfully installed for the first time.
+ *
+ * Why: every restart of an AUTO_CURSEFORGE / Modrinth-pack server runs
+ * mc-image-helper, which fights any local /data/mods modification by
+ * the user (deletes added jars, downgrades upgraded ones, re-runs the
+ * loader installer, etc.). After the initial install we have all the
+ * mods we need on disk; running mc-image-helper on every subsequent
+ * boot is pure overhead and makes user customisation impossible.
+ *
+ * Trigger: env flag __COFEMINE_DECOUPLE_AFTER_BOOT="1" set at create
+ * time by the wizard's "detach after boot" checkbox.
+ *
+ * What we do:
+ *   1. Flip server.type to the loader's native type (NEOFORGE / FORGE /
+ *      FABRIC / QUILT) — derived from CF_MOD_LOADER_VERSION's prefix
+ *      or from MODRINTH manifest data we stored at create.
+ *   2. Strip CF_*-flavoured env: CF_SLUG, CF_PAGE_URL, CF_FILE_ID,
+ *      CF_API_KEY, CF_MOD_LOADER_VERSION, CF_FORCE_*, CF_OVERRIDE_*,
+ *      MODRINTH_PROJECT, MODRINTH_VERSION, MODRINTH_PROJECTS, MODS,
+ *      and the decouple sentinel itself.
+ *   3. Set the loader's native version env (NEOFORGE_VERSION etc.) so
+ *      itzg's plain TYPE=NEOFORGE flow installs the same loader version
+ *      on subsequent starts (idempotent; libraries already present).
+ *   4. Reprovision the container so the next start runs the new spec.
+ *
+ * /data/mods, /data/world, /data/config — all left untouched.
+ */
+async function detachFromSourceIfFlagged(serverId: string): Promise<void> {
+  try {
+    const server = await prisma.server.findUnique({ where: { id: serverId } });
+    if (!server) return;
+    const env = ((server.env as Record<string, string> | null) ?? {}) as Record<
+      string,
+      string
+    >;
+    if (env.__COFEMINE_DECOUPLE_AFTER_BOOT !== "1") return;
+    if (server.type !== "CURSEFORGE" && server.type !== "MODRINTH") return;
+
+    // Derive the native loader from whichever loader-version env var
+    // the modpack flow populated. CF_MOD_LOADER_VERSION isn't typed
+    // (just a string), but practical values look like "21.1.218" for
+    // NeoForge or "47.2.0-1.20.1" for Forge — we infer from the
+    // pack's known loader if we stored it, otherwise fall back to
+    // NEOFORGE which covers the most common 1.21.x case.
+    const cfModLoaderVer = env.CF_MOD_LOADER_VERSION;
+    const neoVer = env.NEOFORGE_VERSION ?? cfModLoaderVer;
+    const forgeVer = env.FORGE_VERSION;
+    const fabricVer = env.FABRIC_LOADER_VERSION;
+    const quiltVer = env.QUILT_LOADER_VERSION;
+    let newType: string = "NEOFORGE";
+    let nativeVerKey = "NEOFORGE_VERSION";
+    let nativeVer: string | undefined = neoVer;
+    if (forgeVer) {
+      newType = "FORGE";
+      nativeVerKey = "FORGE_VERSION";
+      nativeVer = forgeVer;
+    } else if (fabricVer) {
+      newType = "FABRIC";
+      nativeVerKey = "FABRIC_LOADER_VERSION";
+      nativeVer = fabricVer;
+    } else if (quiltVer) {
+      newType = "QUILT";
+      nativeVerKey = "QUILT_LOADER_VERSION";
+      nativeVer = quiltVer;
+    }
+
+    // Strip every modpack-specific env var. After this, the server
+    // looks like a plain native-loader install for itzg's purposes.
+    const dropKeys = [
+      // CF
+      "CF_SLUG",
+      "CF_PAGE_URL",
+      "CF_FILE_ID",
+      "CF_API_KEY",
+      "CF_MOD_LOADER_VERSION",
+      "CF_FORCE_REINSTALL_MODLOADER",
+      "CF_FORCE_SYNCHRONIZE",
+      "CF_FORCE_INCLUDE_MODS",
+      "CF_OVERRIDE_LOADER_VERSION",
+      "CF_EXCLUDE_MODS",
+      "CF_EXCLUDE_INCLUDE_FILE",
+      // Modrinth
+      "MODRINTH_PROJECT",
+      "MODRINTH_VERSION",
+      "MODRINTH_PROJECTS",
+      "MODRINTH_LOADER",
+      // Pack-managed mod list (we keep the jars on disk; the env is
+      // for itzg's reinstall flow which we're now opting out of).
+      "MODS",
+      "PLUGINS",
+      // Sentinel itself
+      "__COFEMINE_DECOUPLE_AFTER_BOOT",
+    ];
+    const next: Record<string, string> = { ...env };
+    for (const k of dropKeys) delete next[k];
+    if (nativeVer) next[nativeVerKey] = nativeVer;
+
+    await prisma.server.update({
+      where: { id: serverId },
+      data: {
+        type: newType,
+        env: next as unknown as object,
+      },
+    });
+    // eslint-disable-next-line no-console
+    console.info(
+      `[decouple] server ${serverId} detached from ${server.type}; new type=${newType}, loader=${nativeVer ?? "unknown"}`
+    );
+    // Don't reprovision now — it'd kill the freshly-booted MC. The
+    // change takes effect on the next user-initiated restart, where
+    // the pre-start auto-reprovision picks up the new spec.
+  } catch (err) {
+    // Non-fatal — server keeps running on its current spec; user can
+    // re-trigger by toggling the flag and restarting.
+    // eslint-disable-next-line no-console
+    console.warn(
+      `[decouple] failed for ${serverId}:`,
+      err instanceof Error ? err.message : err
+    );
+  }
 }
 
 async function clearForceSynchronizeIfSet(serverId: string): Promise<void> {

@@ -142,6 +142,13 @@ export default function CreateServerPage(): JSX.Element {
    *  Off by default — Vanilla can't load it, and not everyone wants
    *  the live map. */
   const [installDynmap, setInstallDynmap] = useState(false);
+  /** Detach the server from its CF/Modrinth pack source after the
+   *  first successful boot. Applies only to modpack sources. Once
+   *  detached, every subsequent restart goes through itzg's plain
+   *  native-loader path — no mc-image-helper, no pack reinstalls,
+   *  no fight against user mod customisation. The mods initially
+   *  installed by the pack stay on disk untouched. */
+  const [decoupleAfterBoot, setDecoupleAfterBoot] = useState(true);
   const [eula, setEula] = useState(false);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -217,6 +224,16 @@ export default function CreateServerPage(): JSX.Element {
         }
       }
 
+      const finalEnv = { ...mergedEnv };
+      // Modpack-only: opt-in to detaching from the source after the
+      // first boot. Status reconciler picks this up once the server
+      // transitions to running and rewrites server.type to the
+      // native loader, strips CF_*/MODRINTH_* env, and lets the user
+      // edit /data/mods freely afterwards.
+      if (source !== "plain" && decoupleAfterBoot) {
+        finalEnv.__COFEMINE_DECOUPLE_AFTER_BOOT = "1";
+      }
+
       const body: any = {
         name,
         description: description || undefined,
@@ -224,7 +241,7 @@ export default function CreateServerPage(): JSX.Element {
         type: effectiveType,
         memoryMb: Number(memoryMb),
         ports: [{ host: Number(hostPort), container: 25565, protocol: "tcp" }],
-        env: mergedEnv,
+        env: finalEnv,
         eulaAccepted: eula,
       };
       if (source === "plain") {
@@ -446,6 +463,8 @@ export default function CreateServerPage(): JSX.Element {
               onEula={setEula}
               installDynmap={installDynmap}
               onInstallDynmap={setInstallDynmap}
+              decoupleAfterBoot={decoupleAfterBoot}
+              onDecoupleAfterBoot={setDecoupleAfterBoot}
               err={err}
             />
           )}
@@ -1294,6 +1313,8 @@ function ReviewStep({
   onEula,
   installDynmap,
   onInstallDynmap,
+  decoupleAfterBoot,
+  onDecoupleAfterBoot,
   err,
 }: {
   type: ServerTypeKey;
@@ -1313,6 +1334,8 @@ function ReviewStep({
   onEula: (v: boolean) => void;
   installDynmap: boolean;
   onInstallDynmap: (v: boolean) => void;
+  decoupleAfterBoot: boolean;
+  onDecoupleAfterBoot: (v: boolean) => void;
   err: string | null;
 }): JSX.Element {
   const { t } = useT();
@@ -1392,6 +1415,29 @@ function ReviewStep({
             <br />
             <span className="text-xs text-ink-muted leading-relaxed">
               {t("wizard.dynmap.hint")}
+            </span>
+          </span>
+        </label>
+      )}
+
+      {/* Detach-after-boot. Only meaningful for modpack sources —
+          a plain native-loader server has nothing to detach from.
+          Defaults to ON because the alternative (every restart
+          re-running mc-image-helper, fighting user mod customisation)
+          is the more surprising default. */}
+      {(type === "MODRINTH" || type === "CURSEFORGE") && (
+        <label className="flex items-start gap-3 text-sm">
+          <input
+            type="checkbox"
+            checked={decoupleAfterBoot}
+            onChange={(e) => onDecoupleAfterBoot(e.target.checked)}
+            className="mt-1"
+          />
+          <span>
+            <span className="font-medium">{t("wizard.decouple.label")}</span>
+            <br />
+            <span className="text-xs text-ink-muted leading-relaxed">
+              {t("wizard.decouple.hint")}
             </span>
           </span>
         </label>

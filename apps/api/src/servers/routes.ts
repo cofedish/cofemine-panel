@@ -1133,6 +1133,83 @@ export async function serversRoutes(app: FastifyInstance): Promise<void> {
     return reply.send(upstream.body);
   });
 
+  /**
+   * Manually detach a CURSEFORGE / MODRINTH server from its pack
+   * source RIGHT NOW (no need to wait for the next boot transition).
+   * Same effect as the wizard's "detach after first boot" checkbox,
+   * but invokable any time on an already-running pack server.
+   *
+   * Strips the CF_* and MODRINTH_* env, switches server.type to the
+   * native loader. /data/mods + worlds untouched. The next user-initiated
+   * restart picks up the new spec via the auto-reprovision pre-start
+   * hook.
+   */
+  app.post("/:id/detach-source", async (req) => {
+    const { id } = req.params as { id: string };
+    await assertServerPermission(req, id, "server.edit");
+    const server = await prisma.server.findUniqueOrThrow({ where: { id } });
+    if (server.type !== "CURSEFORGE" && server.type !== "MODRINTH") {
+      const err = new Error(
+        "Server is not a modpack-sourced install — there's nothing to detach from."
+      );
+      (err as any).statusCode = 409;
+      throw err;
+    }
+    const env = ((server.env as Record<string, string> | null) ?? {}) as Record<
+      string,
+      string
+    >;
+    let newType: string = "NEOFORGE";
+    let nativeVerKey = "NEOFORGE_VERSION";
+    let nativeVer: string | undefined =
+      env.NEOFORGE_VERSION ?? env.CF_MOD_LOADER_VERSION;
+    if (env.FORGE_VERSION) {
+      newType = "FORGE";
+      nativeVerKey = "FORGE_VERSION";
+      nativeVer = env.FORGE_VERSION;
+    } else if (env.FABRIC_LOADER_VERSION) {
+      newType = "FABRIC";
+      nativeVerKey = "FABRIC_LOADER_VERSION";
+      nativeVer = env.FABRIC_LOADER_VERSION;
+    } else if (env.QUILT_LOADER_VERSION) {
+      newType = "QUILT";
+      nativeVerKey = "QUILT_LOADER_VERSION";
+      nativeVer = env.QUILT_LOADER_VERSION;
+    }
+    const dropKeys = [
+      "CF_SLUG",
+      "CF_PAGE_URL",
+      "CF_FILE_ID",
+      "CF_API_KEY",
+      "CF_MOD_LOADER_VERSION",
+      "CF_FORCE_REINSTALL_MODLOADER",
+      "CF_FORCE_SYNCHRONIZE",
+      "CF_FORCE_INCLUDE_MODS",
+      "CF_OVERRIDE_LOADER_VERSION",
+      "CF_EXCLUDE_INCLUDE_FILE",
+      "MODRINTH_PROJECT",
+      "MODRINTH_VERSION",
+      "MODRINTH_PROJECTS",
+      "MODRINTH_LOADER",
+      "MODS",
+      "PLUGINS",
+      "__COFEMINE_DECOUPLE_AFTER_BOOT",
+    ];
+    const next: Record<string, string> = { ...env };
+    for (const k of dropKeys) delete next[k];
+    if (nativeVer) next[nativeVerKey] = nativeVer;
+    await prisma.server.update({
+      where: { id },
+      data: { type: newType, env: next as unknown as object },
+    });
+    await writeAudit(req, {
+      action: "server.detach-source",
+      resource: id,
+      metadata: { previousType: server.type, newType, loader: nativeVer },
+    });
+    return { ok: true, type: newType, loader: nativeVer ?? null };
+  });
+
   app.get("/:id/crash-reports", async (req) => {
     const { id } = req.params as { id: string };
     await assertServerPermission(req, id, "server.view");

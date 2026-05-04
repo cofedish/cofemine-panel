@@ -133,6 +133,14 @@ const en: Dict = {
   "server.overview.memoryLimit": "Memory limit",
   "server.overview.cpuLimit": "CPU limit",
   "server.overview.loaderVersion": "Loader version",
+  "server.detach.button": "Detach from source",
+  "server.detach.hint":
+    "Convert this modpack server into a plain native-loader install. mc-image-helper stops running on every restart, the pack is no longer enforced. Mods + worlds untouched.",
+  "server.detach.confirmTitle": "Detach from modpack source?",
+  "server.detach.confirmBody":
+    "Strips the CF / Modrinth env so subsequent restarts skip the pack installer entirely. You can edit /data/mods freely after this. Pack version updates from the original author won't apply anymore — that's the point. /data/world is untouched.",
+  "server.detach.ok": "Detach",
+  "server.detach.done": "Detached. Server is now {type} {loader}.",
   "modVersion.button": "Change version",
   "modVersion.title": "Pick version — {name}",
   "modVersion.subtitle": "Filtered to MC {mc} / {loader}.",
@@ -516,6 +524,10 @@ const en: Dict = {
   "wizard.dynmap.label": "Install live web map (Dynmap or BlueMap)",
   "wizard.dynmap.hint":
     "Resolves the right map jar (Dynmap on Paper-family, BlueMap on Forge / NeoForge / Fabric) before the server's first boot and bakes its download URL into the server's env. itzg downloads it on every start, alongside the modpack's own mods, so the file is always there. Server creation takes a moment longer while we look up the compatible version.",
+  "wizard.decouple.label":
+    "Detach from the modpack source after first boot",
+  "wizard.decouple.hint":
+    "Recommended. After the pack installs successfully on first boot, the server flips to a plain native-loader install (NeoForge / Forge / Fabric / Quilt). Subsequent restarts skip mc-image-helper entirely — no more pack reinstalls fighting your custom mod additions, version overrides, or deletions. The mods initially installed stay on disk untouched. You lose pack-version updates from the source (intentional — that's what you wanted).",
   "wizard.eulaDesc":
     "By checking this you agree to the Minecraft EULA. Required to boot the server.",
   "wizard.env": "Extra environment variables",
@@ -798,6 +810,14 @@ const ru: Dict = {
   "server.overview.memoryLimit": "Лимит памяти",
   "server.overview.cpuLimit": "Лимит CPU",
   "server.overview.loaderVersion": "Версия лоадера",
+  "server.detach.button": "Отвязать от источника",
+  "server.detach.hint":
+    "Превратить modpack-сервер в обычную нативную установку лоадера. mc-image-helper больше не запускается, сборка не навязывается. Моды и мир не трогаются.",
+  "server.detach.confirmTitle": "Отвязать от источника?",
+  "server.detach.confirmBody":
+    "Убираем CF/Modrinth env, на следующих запусках установщик пакета не вызывается. Сможешь свободно редактировать /data/mods. Обновлений сборки от автора больше не будет (это и есть смысл отвязки). Мир не трогается.",
+  "server.detach.ok": "Отвязать",
+  "server.detach.done": "Отвязано. Сервер теперь {type} {loader}.",
   "modVersion.button": "Сменить версию",
   "modVersion.title": "Выбор версии — {name}",
   "modVersion.subtitle": "Фильтр: MC {mc} / {loader}.",
@@ -1181,6 +1201,10 @@ const ru: Dict = {
   "wizard.resources.cpuHint": "ядер (пусто = без лимита)",
   "wizard.resources.port": "Порт хоста",
   "wizard.eula": "Принять Minecraft EULA",
+  "wizard.decouple.label":
+    "Отвязать сервер от источника после первого запуска",
+  "wizard.decouple.hint":
+    "Рекомендуется. После того как сборка успешно установится при первом старте, сервер превратится в обычную нативную установку лоадера (NeoForge / Forge / Fabric / Quilt). На следующих запусках mc-image-helper не запускается вообще — никаких переустановок пакета, борьбы с твоими модами, или конфликтов версий. Установленные сборкой моды остаются на диске нетронутыми. Минус: ты теряешь автообновления пакета от автора (но именно это и нужно когда хочешь свободу).",
   "wizard.dynmap.label": "Установить живую web-карту (Dynmap или BlueMap)",
   "wizard.dynmap.hint":
     "Резолвит совместимую версию jar'а (Dynmap для Paper-семьи, BlueMap для Forge / NeoForge / Fabric) ДО первого запуска сервера и зашивает URL в env. itzg сам качает файл на каждом старте, рядом с модами модпака, файл всегда на месте. Создание сервера займёт чуть дольше — резолв версии через Modrinth API.",

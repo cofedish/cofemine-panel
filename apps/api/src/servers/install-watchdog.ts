@@ -133,42 +133,14 @@ async function handle(s: ServerRow): Promise<void> {
     return;
   }
 
-  // Case A — server booted successfully. Reset attempt counter; if it
-  // was using the proxy, just clear the DB flag (no restart) so the
-  // NEXT user-initiated start picks up the cleared env. We used to
-  // reprovision+restart here to take MC's runtime traffic off the
-  // proxy immediately, but that killed the JVM mid-worldgen on a
-  // freshly-booted server — the user reported losing world progress
-  // because the watchdog yanked the container out from under them.
-  // Trade-off: MC's runtime auth/skins keep going through the proxy
-  // until the next manual restart. With a working proxy that's fine;
-  // worst case is slightly slower skin loads.
+  // Case A — server booted successfully. Reset attempt counter; if
+  // it was using the proxy, flip it off and kick a clean restart so
+  // MC's own HTTP traffic goes direct.
   if (installState.booted) {
     proxyAttempts.delete(s.id);
     if (dbWantsProxy) {
-      try {
-        const server = await prisma.server.findUnique({
-          where: { id: s.id },
-        });
-        if (server) {
-          const env = ((server.env as Record<string, string> | null) ??
-            {}) as Record<string, string>;
-          if (env.__COFEMINE_INSTALL_PROXY === "1") {
-            const next = { ...env };
-            delete next.__COFEMINE_INSTALL_PROXY;
-            await prisma.server.update({
-              where: { id: s.id },
-              data: { env: next as unknown as object },
-            });
-          }
-        }
-      } catch (err) {
-        // eslint-disable-next-line no-console
-        console.warn(
-          `[watchdog] couldn't clear install-proxy flag for ${s.id}:`,
-          err instanceof Error ? err.message : err
-        );
-      }
+      lastActionAt.set(s.id, Date.now());
+      await toggleProxyAndRestart(s.id, false);
     }
     return;
   }
