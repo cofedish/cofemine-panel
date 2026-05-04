@@ -1251,6 +1251,30 @@ export async function serversRoutes(app: FastifyInstance): Promise<void> {
     return { ok: true, type: newType, loader: nativeVer ?? null };
   });
 
+  /**
+   * Repair file ownership across /data/libraries + run scripts.
+   * Useful after the agent's loader installer ran in a previous
+   * version that didn't chown its outputs to itzg's uid 1000 —
+   * existing root-owned files cause AccessDenied on subsequent
+   * starts. Idempotent.
+   */
+  app.post("/:id/fix-permissions", async (req) => {
+    const { id } = req.params as { id: string };
+    await assertServerPermission(req, id, "server.edit");
+    const server = await prisma.server.findUniqueOrThrow({ where: { id } });
+    const client = await NodeClient.forId(server.nodeId);
+    const res = await client.call<{ ok: boolean; fixed: number }>(
+      "POST",
+      `/servers/${id}/fix-permissions`
+    );
+    await writeAudit(req, {
+      action: "server.fix-permissions",
+      resource: id,
+      metadata: { fixed: res.fixed },
+    });
+    return res;
+  });
+
   app.get("/:id/crash-reports", async (req) => {
     const { id } = req.params as { id: string };
     await assertServerPermission(req, id, "server.view");

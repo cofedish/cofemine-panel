@@ -141,6 +141,10 @@ const en: Dict = {
     "Strips the CF / Modrinth env so subsequent restarts skip the pack installer entirely. You can edit /data/mods freely after this. Pack version updates from the original author won't apply anymore — that's the point. /data/world is untouched.",
   "server.detach.ok": "Detach",
   "server.detach.done": "Detached. Server is now {type} {loader}.",
+  "server.fixPerms.button": "Fix permissions",
+  "server.fixPerms.hint":
+    "chown -R 1000:1000 on /data/libraries + run scripts. Useful when an earlier loader install left root-owned files that itzg can't overwrite.",
+  "server.fixPerms.done": "Permissions repaired ({n} paths chowned).",
   "modVersion.button": "Change version",
   "modVersion.title": "Pick version — {name}",
   "modVersion.subtitle": "Filtered to MC {mc} / {loader}.",
@@ -818,6 +822,10 @@ const ru: Dict = {
     "Убираем CF/Modrinth env, на следующих запусках установщик пакета не вызывается. Сможешь свободно редактировать /data/mods. Обновлений сборки от автора больше не будет (это и есть смысл отвязки). Мир не трогается.",
   "server.detach.ok": "Отвязать",
   "server.detach.done": "Отвязано. Сервер теперь {type} {loader}.",
+  "server.fixPerms.button": "Починить права",
+  "server.fixPerms.hint":
+    "chown -R 1000:1000 на /data/libraries + run-скрипты. Полезно когда предыдущий запуск установщика оставил root-owned файлы, которые itzg не может перезаписать.",
+  "server.fixPerms.done": "Права починены ({n} путей перевыделены).",
   "modVersion.button": "Сменить версию",
   "modVersion.title": "Выбор версии — {name}",
   "modVersion.subtitle": "Фильтр: MC {mc} / {loader}.",

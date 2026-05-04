@@ -624,6 +624,26 @@ function DetachableType({ server }: { server: ServerDetail }): JSX.Element {
       setBusy(false);
     }
   }
+  async function fixPerms(): Promise<void> {
+    setBusy(true);
+    try {
+      const res = await api.post<{ fixed: number }>(
+        `/servers/${server.id}/fix-permissions`
+      );
+      dialog.toast({
+        tone: "success",
+        message: t("server.fixPerms.done", { n: res.fixed }),
+      });
+    } catch (e) {
+      dialog.alert({
+        tone: "danger",
+        title: t("common.error"),
+        message: e instanceof ApiError ? e.message : String(e),
+      });
+    } finally {
+      setBusy(false);
+    }
+  }
   return (
     <div className="flex items-center gap-2 flex-wrap">
       <span>{server.type}</span>
@@ -637,6 +657,14 @@ function DetachableType({ server }: { server: ServerDetail }): JSX.Element {
           {busy ? "…" : t("server.detach.button")}
         </button>
       )}
+      <button
+        className="btn btn-ghost text-xs"
+        onClick={() => void fixPerms()}
+        disabled={busy}
+        title={t("server.fixPerms.hint")}
+      >
+        {busy ? "…" : t("server.fixPerms.button")}
+      </button>
     </div>
   );
 }
