@@ -1228,6 +1228,21 @@ export async function serversRoutes(app: FastifyInstance): Promise<void> {
       where: { id },
       data: { type: newType, env: next as unknown as object },
     });
+    // Earlier install-modloader runs created /data/libraries/net/
+    // minecraft/* and friends as root (the temp container runs as
+    // root). itzg's install-neoforge on the freshly-detached server
+    // chokes on AccessDeniedException when it tries to overwrite
+    // those — even though the file content is identical. Pre-empt
+    // that by chowning the install tree to itzg's uid 1000.
+    try {
+      const client = await NodeClient.forId(server.nodeId);
+      await client.call("POST", `/servers/${id}/fix-permissions`);
+    } catch (err) {
+      req.log.warn(
+        { err },
+        "detach-source: fix-permissions call failed (non-fatal)"
+      );
+    }
     await writeAudit(req, {
       action: "server.detach-source",
       resource: id,

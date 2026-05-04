@@ -748,6 +748,40 @@ export async function serversAgentRoutes(app: FastifyInstance): Promise<void> {
     }
   });
 
+  /**
+   * Fix root-owned files in /data left over from earlier root-running
+   * installer phases. uid 1000 (itzg's runtime user) needs to be able
+   * to overwrite libraries/net/minecraft/.../*.jar etc. on subsequent
+   * boots; without this AccessDeniedException stops install-neoforge.
+   *
+   * Called by panel-API after detach-source so existing prod servers
+   * with the wrong ownership can be repaired without a fresh install.
+   */
+  app.post("/servers/:id/fix-permissions", async (req) => {
+    const { id } = req.params as { id: string };
+    const dataDir = dataDirFor(id);
+    const targets = [
+      "libraries",
+      "run.sh",
+      "run.bat",
+      "user_jvm_args.txt",
+      "fabric-server-launcher.jar",
+      "fabric-server-launch.jar",
+      "quilt-server-launcher.jar",
+    ];
+    let fixed = 0;
+    for (const rel of targets) {
+      const full = path.join(dataDir, rel);
+      try {
+        await chownRecursive(full, 1000, 1000);
+        fixed++;
+      } catch {
+        // Path may not exist — fine.
+      }
+    }
+    return { ok: true, fixed };
+  });
+
   app.put("/servers/:id/sides", async (req) => {
     const { id } = req.params as { id: string };
     const body = z
@@ -3015,22 +3049,37 @@ async function chownInstallerOutput(
   loader: "neoforge" | "forge" | "fabric" | "quilt",
   log: Logger
 ): Promise<void> {
-  const targets: string[] = ["run.sh", "run.bat", "user_jvm_args.txt"];
+  // The NeoForge / Forge installer doesn't just write libraries/net/
+  // <loader>/ — it also lays down libraries/net/minecraft/server/...,
+  // libraries/cpw/..., libraries/org/..., the actual mc server jar
+  // itself, and a bunch of others. ALL of those land as root-owned
+  // because the temp container runs as root, and on the next itzg
+  // boot install-neoforge tries to overwrite them with the same
+  // version + fails on AccessDeniedException.
+  //
+  // Cheapest correct fix: chown -R the entire /data/libraries tree
+  // plus the run scripts. /data/libraries on a fresh CF pack install
+  // is small (~50–100MB, mostly Minecraft + loader common deps) so
+  // walking it is fast. Anything outside libraries (mods, world,
+  // configs) stays as it was.
+  const topLevelTargets: string[] = [
+    "run.sh",
+    "run.bat",
+    "user_jvm_args.txt",
+    "libraries",
+  ];
   switch (loader) {
-    case "neoforge":
-      targets.push("libraries/net/neoforged");
-      break;
-    case "forge":
-      targets.push("libraries/net/minecraftforge");
-      break;
     case "fabric":
-      targets.push("fabric-server-launcher.jar", "fabric-server-launch.jar");
+      topLevelTargets.push(
+        "fabric-server-launcher.jar",
+        "fabric-server-launch.jar"
+      );
       break;
     case "quilt":
-      targets.push("quilt-server-launcher.jar");
+      topLevelTargets.push("quilt-server-launcher.jar");
       break;
   }
-  for (const rel of targets) {
+  for (const rel of topLevelTargets) {
     const full = path.join(dataDir, rel);
     try {
       await chownRecursive(full, 1000, 1000);
