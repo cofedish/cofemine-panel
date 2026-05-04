@@ -313,6 +313,19 @@ export async function serversAgentRoutes(app: FastifyInstance): Promise<void> {
     );
     try {
       await downloadInstallerJar(url, installerPath, body.proxyUrl ?? null);
+      // Patch version.json so mc-image-helper 1.56+ doesn't choke on
+      // the new "neoforge-X.Y.Z" id format. Safe no-op if already 3-
+      // segment or if the file's missing the inheritsFrom hint.
+      if (body.loader === "neoforge" || body.loader === "forge") {
+        await patchInstallerVersionJson(installerPath, body.loader).catch(
+          (err) => {
+            req.log.warn(
+              { err },
+              "version.json patch failed — itzg may complain on parse"
+            );
+          }
+        );
+      }
       const stat = await fs.stat(installerPath);
       req.log.info(
         { installerPath, size: stat.size },
@@ -826,6 +839,13 @@ export async function serversAgentRoutes(app: FastifyInstance): Promise<void> {
       body.mcVersion ?? null
     );
     await downloadInstallerJar(url, installerPath, body.proxyUrl ?? null);
+    if (body.loader === "neoforge" || body.loader === "forge") {
+      await patchInstallerVersionJson(installerPath, body.loader).catch(
+        () => {
+          /* logged by caller if itzg later complains */
+        }
+      );
+    }
     await fs.chown(installerPath, 1000, 1000).catch(() => {});
     const stat = await fs.stat(installerPath);
     return {
@@ -3221,6 +3241,50 @@ async function chownRecursive(
  * Both stream the response straight to disk so a 50MB installer
  * doesn't spike RSS.
  */
+/**
+ * mc-image-helper 1.56–1.57's ProvidedInstallerResolver expects the
+ * installer's `version.json` `id` field to look like
+ *   "neoforge-<mcVer>-<loaderVer>"   (3 segments)
+ *   "forge-<mcVer>-<loaderVer>"      (3 segments)
+ * Newer NeoForge installers (since ~21.1.x) ship as
+ *   "neoforge-21.1.228"              (2 segments)
+ * which trips the parser with
+ *   "Unexpected format of id from Forge installer's version.json".
+ *
+ * Patch the jar in place: insert the MC version (read from
+ * `inheritsFrom`) into the id so mc-image-helper accepts it. Loader
+ * itself doesn't care about the id field — it reads loader version
+ * from elsewhere — so the rewrite is cosmetic and safe.
+ */
+async function patchInstallerVersionJson(
+  installerPath: string,
+  loader: "neoforge" | "forge"
+): Promise<void> {
+  const { default: AdmZip } = await import("adm-zip");
+  const zip = new AdmZip(installerPath);
+  const entry = zip.getEntries().find((e) => e.entryName === "version.json");
+  if (!entry) return; // shouldn't happen for valid installer; let mc-image-helper complain
+  const raw = zip.readAsText(entry);
+  let parsed: any;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return;
+  }
+  const id = String(parsed.id ?? "");
+  // Already 3+ segments → mc-image-helper happy, leave alone.
+  if (id.split("-").length >= 3) return;
+  const mc = String(parsed.inheritsFrom ?? "").trim();
+  if (!mc) return;
+  const prefix = loader; // "neoforge" / "forge"
+  const loaderVer = id.startsWith(`${prefix}-`)
+    ? id.slice(prefix.length + 1)
+    : id;
+  parsed.id = `${prefix}-${mc}-${loaderVer}`;
+  zip.updateFile(entry, Buffer.from(JSON.stringify(parsed, null, 2), "utf8"));
+  zip.writeZip(installerPath);
+}
+
 async function downloadInstallerJar(
   url: string,
   destPath: string,
