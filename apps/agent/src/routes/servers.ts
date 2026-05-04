@@ -1150,8 +1150,13 @@ export async function serversAgentRoutes(app: FastifyInstance): Promise<void> {
     for (const f of [...mods, ...plugins, ...datapacks]) {
       const resolvedByHash = f.sha1 ? versions[f.sha1] : undefined;
       if (resolvedByHash) continue;
-      const slug = slugFromFilename(f.name);
-      if (slug) unresolvedSlugs.add(slug);
+      // Try every candidate (camelCase-split + plain). Modrinth's
+      // slug for "ArmorPoser-...jar" is "armor-poser"; the plain
+      // "armorposer" returns 404. Without splitting we miss every
+      // PascalCase mod name's icon / metadata.
+      for (const c of slugCandidatesFromFilename(f.name)) {
+        unresolvedSlugs.add(c);
+      }
     }
     const projectsBySlug = await modrinthLookupBySlug(
       [...unresolvedSlugs],
@@ -1231,23 +1236,51 @@ export async function serversAgentRoutes(app: FastifyInstance): Promise<void> {
           ({ file }) => !cfByName[file.name]
         );
         if (stillMissing.length > 0) {
-          const fileBySlug = new Map<string, string>();
+          // Map each filename to the FIRST candidate slug; collect
+          // the union of all candidates to query CF in one pass,
+          // then walk back to which file each hit belongs to.
+          const candidatesByFile = new Map<string, string[]>();
+          const allSlugs = new Set<string>();
           for (const { file } of stillMissing) {
-            const slug = slugFromFilename(file.name);
-            if (slug && !fileBySlug.has(slug)) {
-              fileBySlug.set(slug, file.name);
-            }
+            const cands = slugCandidatesFromFilename(file.name);
+            if (cands.length === 0) continue;
+            candidatesByFile.set(file.name, cands);
+            for (const c of cands) allSlugs.add(c);
           }
-          if (fileBySlug.size > 0) {
+          if (allSlugs.size > 0) {
             const slugHits = await curseforgeSlugLookup(
-              [...fileBySlug.keys()],
+              [...allSlugs],
               cfApiKey,
               req.log
             );
-            for (const [slug, filename] of fileBySlug) {
-              const hit = slugHits[slug];
-              if (hit) cfByName[filename] = hit;
+            for (const [filename, cands] of candidatesByFile) {
+              for (const c of cands) {
+                if (slugHits[c]) {
+                  cfByName[filename] = slugHits[c];
+                  break;
+                }
+              }
             }
+          }
+          // Search-by-name fallback for compound words that the
+          // camelCase splitter can't decompose (kotlinforforge →
+          // kotlin-for-forge, voicechat → simple-voice-chat). CF's
+          // search endpoint takes a free-text query and returns
+          // top matches by relevance; we use the first candidate
+          // (lowercase) as the query and accept the top result.
+          // One CF search call per still-unresolved mod, which is
+          // fine — typical pack has < 10 such jars.
+          for (const { file } of stillMissing) {
+            if (cfByName[file.name]) continue;
+            const cands = slugCandidatesFromFilename(file.name);
+            if (cands.length === 0) continue;
+            const query = cands[cands.length - 1]!; // bare lowercase
+            const hit = await curseforgeSearchByName(
+              query,
+              cfApiKey,
+              req.log
+            );
+            if (hit) cfByName[file.name] = hit;
           }
         }
       }
@@ -1285,8 +1318,14 @@ export async function serversAgentRoutes(app: FastifyInstance): Promise<void> {
           ...(cf ? { curseforge: cf } : {}),
         };
       }
-      const slugGuess = slugFromFilename(f.name);
-      const sp = slugGuess ? projectsBySlug[slugGuess] : undefined;
+      // Walk every candidate, take the first one Modrinth knew about.
+      let sp: any = undefined;
+      for (const c of slugCandidatesFromFilename(f.name)) {
+        if (projectsBySlug[c]) {
+          sp = projectsBySlug[c];
+          break;
+        }
+      }
       if (sp) {
         return {
           name: f.name,
@@ -1693,13 +1732,57 @@ async function modrinthLookupBySlug(
  * Purely best-effort — returns "" when the filename is too mangled.
  */
 function slugFromFilename(name: string): string {
-  let s = name.toLowerCase();
-  s = s.replace(/\.(jar|zip)$/, "");
-  s = s.replace(/[_\s]+/g, "-");
-  const m = s.match(
-    /^([a-z][a-z-]*?)(?=-\d|-v\d|-mc\d|-neo|-forge|-fabric|-quilt|$)/
-  );
-  return (m?.[1] ?? s).replace(/-+$/, "");
+  // Backwards-compat: keep returning a single string. Most callers
+  // only care about the primary candidate; the broader lookup paths
+  // (Modrinth + CF slug fallback) use slugCandidatesFromFilename
+  // below to try all variants.
+  return slugCandidatesFromFilename(name)[0] ?? "";
+}
+
+/**
+ * Generate every plausible slug candidate from a mod jar filename.
+ * Returned in priority order — caller looks up each in turn until
+ * one matches a project. Examples:
+ *   "ArmorPoser-neoforge-1.21.1-6.2.2.jar"
+ *     → ["armor-poser", "armorposer"]
+ *   "create-1.21.1-6.0.6.jar"
+ *     → ["create"]
+ *   "iron-spells-n-spellbooks-neoforge-1.21.1-2.0.0.jar"
+ *     → ["iron-spells-n-spellbooks", "ironspellsnspellbooks"]
+ *
+ * The camelCase split matters because Modrinth / CF slugs are
+ * canonical "armor-poser" while modpack jar filenames often use
+ * the PascalCase "ArmorPoser" — the unsplit form misses both
+ * registries and the mod card has no icon / metadata at all.
+ */
+function slugCandidatesFromFilename(name: string): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  function push(s: string): void {
+    const trimmed = s.replace(/-+$/, "").replace(/^-+/, "");
+    if (trimmed && !seen.has(trimmed)) {
+      seen.add(trimmed);
+      out.push(trimmed);
+    }
+  }
+  const stripped = name.replace(/\.(jar|zip)$/i, "");
+  // Split point: where a version / loader marker starts. Capture the
+  // raw original-case prefix so we can split camelCase boundaries
+  // before lowercasing.
+  const splitRe = /(?:-_)?(?:\d|v\d|mc\d|neo[a-z]*|forge|fabric|quilt)/i;
+  const m = stripped.split(splitRe)[0] ?? stripped;
+  const baseRaw = m.replace(/[_\s]+/g, "-").replace(/-+$/, "");
+  // Candidate 1: split at camelCase / PascalCase boundaries.
+  const split = baseRaw
+    .replace(/([a-z0-9])([A-Z])/g, "$1-$2")
+    .replace(/([A-Z]+)([A-Z][a-z])/g, "$1-$2")
+    .toLowerCase();
+  push(split);
+  // Candidate 2: bare lowercase, no extra hyphens. This is what the
+  // old behaviour returned and still works for already-hyphenated
+  // names like "iron-spells-n-spellbooks".
+  push(baseRaw.toLowerCase());
+  return out;
 }
 
 // CurseForge fingerprint cache — keyed by Murmur2 hash. CF doesn't
@@ -1712,6 +1795,64 @@ const CF_FP_TTL_MS = 60 * 60 * 1000; // 1 hour
 // Slug → CF metadata cache. Slugs (canonical) are immutable once a CF
 // project is published, so 1h TTL is fine — same reasoning as fingerprints.
 const cfSlugCache = new Map<string, { at: number; meta: CfProjectMeta | null }>();
+
+/**
+ * Last-resort: CF search by free-text query. Used when neither the
+ * Murmur2 fingerprint nor any of the slug candidates matched. The
+ * search endpoint ranks by relevance, so for compound names like
+ * "kotlinforforge" the top hit is usually the canonical project
+ * even though the slug doesn't match character-for-character.
+ *
+ * Cached per-query alongside the slug cache.
+ */
+async function curseforgeSearchByName(
+  query: string,
+  apiKey: string,
+  log?: { warn: (obj: unknown, msg?: string) => void }
+): Promise<CfProjectMeta | null> {
+  if (!query || query.length < 3) return null;
+  const cacheKey = `search:${query}`;
+  const now = Date.now();
+  const cached = cfSlugCache.get(cacheKey);
+  if (cached && now - cached.at < CF_FP_TTL_MS) return cached.meta;
+  try {
+    const url = `https://api.curseforge.com/v1/mods/search?gameId=432&searchFilter=${encodeURIComponent(
+      query
+    )}&pageSize=1`;
+    const res = await request(url, {
+      method: "GET",
+      headers: { "x-api-key": apiKey, accept: "application/json" },
+    });
+    if (res.statusCode >= 400) {
+      await res.body.dump().catch(() => {});
+      cfSlugCache.set(cacheKey, { at: now, meta: null });
+      return null;
+    }
+    const body = (await res.body.json()) as any;
+    const m = (body?.data ?? [])[0];
+    if (!m || typeof m.id !== "number") {
+      cfSlugCache.set(cacheKey, { at: now, meta: null });
+      return null;
+    }
+    const meta: CfProjectMeta = {
+      modId: m.id,
+      slug: m.slug,
+      title: (m.name as string) ?? `CurseForge mod ${m.id}`,
+      summary: m.summary as string | undefined,
+      icon: (m.logo?.url as string | undefined) ?? null,
+      pageUrl:
+        (m.links?.websiteUrl as string | undefined) ??
+        (m.slug
+          ? `https://www.curseforge.com/minecraft/mc-mods/${m.slug}`
+          : undefined),
+    };
+    cfSlugCache.set(cacheKey, { at: now, meta });
+    return meta;
+  } catch (err) {
+    log?.warn({ err, query }, "curseforge search-by-name failed");
+    return null;
+  }
+}
 
 /**
  * Resolve a CF project by slug via /v1/mods/search?slug=X. Used as a
