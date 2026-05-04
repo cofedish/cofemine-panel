@@ -272,26 +272,39 @@ export async function serversRoutes(app: FastifyInstance): Promise<void> {
       await assertServerPermission(req, id, "server.control");
       const server = await prisma.server.findUniqueOrThrow({ where: { id } });
       // Auto-heal: for modpack-source servers, make sure the container
-      // has the current CF_API_KEY / MODRINTH config baked in. If the
-      // user added the CF key *after* creating the server, or we
-      // extended the injected env in a panel upgrade, reprovision
-      // transparently here so Start actually boots.
+      // has the current CF_API_KEY / MODRINTH config baked in.
+      //
+      // Also: on CF/MR servers, the status reconciler / watchdog
+      // clears one-shot flags (CF_FORCE_REINSTALL_MODLOADER,
+      // __COFEMINE_INSTALL_PROXY) from DB after a successful boot
+      // without bouncing the container — so the LIVE container env
+      // still has those flags. On the next user-initiated start
+      // mc-image-helper would re-trigger a loader reinstall (because
+      // the container's env says CF_FORCE_REINSTALL=true) and try
+      // to download from neoforged maven without the proxy that DB
+      // already cleared from the materialised set. Net effect:
+      // ReadTimeout, server fails to start.
+      //
+      // Cheapest correct fix: reprovision unconditionally on start
+      // for modpack servers. It's ~1-2s when the container is
+      // stopped, so the user-visible delay is negligible, and it
+      // guarantees container.env == materializeEnv(DB.env). Native
+      // loader server types (FORGE/NEOFORGE/etc.) don't have these
+      // one-shot flags so they keep the lighter just-start path.
       if (
         action === "start" &&
         (server.type === "CURSEFORGE" || server.type === "MODRINTH")
       ) {
-        const env = (server.env as Record<string, string> | null) ?? {};
-        const needsCfKey =
-          server.type === "CURSEFORGE" && !env.CF_API_KEY;
-        if (needsCfKey) {
-          req.log.info(
-            { id },
-            "auto-reprovisioning before start (missing CF_API_KEY)"
-          );
-          await reconcileAndReprovision(id).catch((err) =>
-            req.log.warn({ err }, "auto-reprovision failed; attempting start anyway")
-          );
-        }
+        req.log.info(
+          { id, type: server.type },
+          "auto-reprovisioning before start to flush stale one-shot env"
+        );
+        await reconcileAndReprovision(id).catch((err) =>
+          req.log.warn(
+            { err },
+            "auto-reprovision failed; attempting start anyway"
+          )
+        );
       }
       const client = await NodeClient.forId(server.nodeId);
       await client.call("POST", `/servers/${id}/${action}`);
