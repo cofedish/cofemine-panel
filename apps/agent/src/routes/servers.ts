@@ -906,6 +906,8 @@ export async function serversAgentRoutes(app: FastifyInstance): Promise<void> {
       mcVersion?: string;
       loader?: string;
       loaderVersion?: string;
+      proxyUrl?: string;
+      includeAutoDetected?: string;
     };
     const base = dataDirFor(id);
     const sideFile = path.join(base, ".cofemine-client", "sides.json");
@@ -993,7 +995,8 @@ export async function serversAgentRoutes(app: FastifyInstance): Promise<void> {
     // Pipe archive bytes straight into the HTTP response.
     archive.pipe(reply.raw);
 
-    // Bundle every jar under the right overrides path.
+    // Bundle every local jar under the right overrides path.
+    const bundledFilenames = new Set<string>();
     for (const e of entries) {
       const overridePrefix =
         e.side === "both"
@@ -1004,6 +1007,81 @@ export async function serversAgentRoutes(app: FastifyInstance): Promise<void> {
       archive.file(e.sourcePath, {
         name: `${overridePrefix}/mods/${e.filename}`,
       });
+      bundledFilenames.add(e.filename);
+    }
+
+    // Auto-detect: scan CF cache for mods marked client-only that
+    // weren't installed on the server. Stream-fetch each through
+    // the configured proxy and inline them in the ZIP under
+    // client-overrides/. Default ON unless explicitly disabled —
+    // this is what the user wants when clicking "Download .mrpack":
+    // a single complete pack, not a jigsaw they have to assemble.
+    const includeAutoDetected =
+      (q.includeAutoDetected ?? "1") !== "0";
+    if (includeAutoDetected) {
+      const cacheDir = path.join(
+        base,
+        ".cache",
+        "curseforge",
+        "getModInfo"
+      );
+      let cacheEntries: string[] = [];
+      try {
+        cacheEntries = await fs.readdir(cacheDir);
+      } catch {
+        /* no cache → no auto-detect */
+      }
+      const fetchTasks: Array<{
+        filename: string;
+        downloadUrl: string;
+      }> = [];
+      for (const ce of cacheEntries) {
+        if (!ce.endsWith(".json")) continue;
+        let mod: any;
+        try {
+          mod = JSON.parse(
+            await fs.readFile(path.join(cacheDir, ce), "utf8")
+          );
+        } catch {
+          continue;
+        }
+        const files = (mod.latestFiles ?? []) as any[];
+        const clientFile = files.find((f) => {
+          const gvs = (f.gameVersions ?? []) as string[];
+          return gvs.includes("Client");
+        });
+        if (!clientFile?.downloadUrl) continue;
+        if (bundledFilenames.has(clientFile.fileName)) continue;
+        fetchTasks.push({
+          filename: clientFile.fileName,
+          downloadUrl: clientFile.downloadUrl,
+        });
+      }
+      if (fetchTasks.length > 0) {
+        req.log.info(
+          { count: fetchTasks.length },
+          "mrpack export: streaming auto-detected client mods"
+        );
+        // Sequentially stream each through proxy → archive. archiver
+        // accepts a Readable stream via append(); it consumes the
+        // whole stream before moving on so back-pressure works.
+        for (const t of fetchTasks) {
+          try {
+            const stream = await openHttpStream(
+              t.downloadUrl,
+              q.proxyUrl ?? null
+            );
+            archive.append(stream as any, {
+              name: `client-overrides/mods/${t.filename}`,
+            });
+          } catch (err) {
+            req.log.warn(
+              { err, filename: t.filename },
+              "mrpack export: skipping mod, fetch failed"
+            );
+          }
+        }
+      }
     }
 
     // Manifest at the root.
@@ -3241,6 +3319,83 @@ async function chownRecursive(
  * Both stream the response straight to disk so a 50MB installer
  * doesn't spike RSS.
  */
+/**
+ * Open an HTTPS stream to `url`, optionally tunnelled through a
+ * SOCKS5 proxy (xray etc.). Returns a Readable that emits the
+ * response body chunks. Used by the .mrpack exporter to inline
+ * CDN-hosted client mods into the ZIP without a temp-disk hop.
+ */
+async function openHttpStream(
+  url: string,
+  proxyUrl: string | null
+): Promise<NodeJS.ReadableStream> {
+  if (proxyUrl?.startsWith("socks")) {
+    const [{ SocksProxyAgent }, https] = await Promise.all([
+      import("socks-proxy-agent"),
+      import("node:https"),
+    ]);
+    const agent = new SocksProxyAgent(proxyUrl);
+    return new Promise((resolve, reject) => {
+      const doFetch = (target: string, redirects: number): void => {
+        if (redirects > 5) {
+          reject(new Error("too many redirects"));
+          return;
+        }
+        https
+          .get(
+            target,
+            { agent: agent as any, timeout: 60_000 },
+            (res) => {
+              const status = res.statusCode ?? 0;
+              if (status === 301 || status === 302 || status === 307) {
+                res.resume();
+                const loc = res.headers.location;
+                if (!loc) {
+                  reject(new Error(`HTTP ${status} no Location`));
+                  return;
+                }
+                doFetch(loc, redirects + 1);
+                return;
+              }
+              if (status >= 400) {
+                res.resume();
+                reject(new Error(`HTTP ${status}`));
+                return;
+              }
+              resolve(res);
+            }
+          )
+          .on("error", reject)
+          .on("timeout", function (this: any) {
+            this.destroy(new Error("connect timeout"));
+          });
+      };
+      doFetch(url, 0);
+    });
+  }
+  // Plain or HTTP-CONNECT proxy → undici with optional ProxyAgent.
+  let dispatcher: import("undici").Dispatcher | undefined;
+  if (proxyUrl) {
+    const { ProxyAgent } = await import("undici");
+    dispatcher = new ProxyAgent(proxyUrl);
+  }
+  const res = await request(url, {
+    method: "GET",
+    maxRedirections: 5,
+    headersTimeout: 30_000,
+    bodyTimeout: 5 * 60_000,
+    dispatcher,
+  });
+  if (res.statusCode >= 400) {
+    await res.body.dump().catch(() => {});
+    throw new Error(`HTTP ${res.statusCode}`);
+  }
+  // undici returns a web ReadableStream; convert to Node Readable
+  // so archiver / node:fs APIs accept it.
+  const { Readable } = await import("node:stream");
+  return Readable.fromWeb(res.body as any);
+}
+
 /**
  * mc-image-helper 1.56–1.57's ProvidedInstallerResolver expects the
  * installer's `version.json` `id` field to look like

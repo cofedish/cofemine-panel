@@ -1120,6 +1120,21 @@ export async function serversRoutes(app: FastifyInstance): Promise<void> {
     params.set("mcVersion", server.version);
     if (loader) params.set("loader", loader);
     if (loaderVersion) params.set("loaderVersion", loaderVersion);
+    // Forward the configured download-proxy so the agent's mrpack
+    // exporter can stream auto-detected client mods through it
+    // (CF CDN sometimes blocks direct from RU IPs; same proxy that
+    // worked for forgecdn during install is what works for the
+    // mod download URLs CF returns in its mod-info JSON).
+    const proxy = await readDownloadProxy().catch(() => null);
+    if (proxy) {
+      params.set("proxyUrl", makeProxyUrl(proxy));
+    }
+    // Disable auto-detected inline-streaming when the caller passes
+    // ?include_auto_detected=0 (only the local mods get bundled,
+    // no CDN streams). Useful for users who want a slim pack.
+    const includeAuto = (req.query as { include_auto_detected?: string })
+      .include_auto_detected;
+    if (includeAuto === "0") params.set("includeAutoDetected", "0");
 
     const { Agent: UndiciAgent, request: undiciRequest } = await import("undici");
     const dispatcher = new UndiciAgent({
