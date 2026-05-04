@@ -462,8 +462,12 @@ export async function serversAgentRoutes(app: FastifyInstance): Promise<void> {
     }
 
     await temp.remove({ force: true }).catch(() => {});
-    await fs.unlink(installerPath).catch(() => {});
-
+    // KEEP the installer jar on disk. itzg's start-deployNeoForge
+    // honours NEOFORGE_INSTALLER pointing at a local file —
+    // bypassing the maven-metadata.xml fetch which is what fails
+    // for users whose proxy can't reach maven.neoforged.net (the
+    // user's prod xray hits 404 / ReadTimeout there). On the next
+    // boot itzg uses our local jar, no external network call.
     if (exitCode !== 0) {
       req.log.warn({ exitCode, tail: logsStr.slice(-1500) }, "installer non-zero exit");
       return reply.code(500).send({
@@ -780,6 +784,56 @@ export async function serversAgentRoutes(app: FastifyInstance): Promise<void> {
       }
     }
     return { ok: true, fixed };
+  });
+
+  /**
+   * Download a loader installer.jar to <dataDir>/.cofemine-<loader>-
+   * installer-<version>.jar so itzg's NEOFORGE_INSTALLER / FORGE_
+   * INSTALLER env can point at a local file. This bypasses the
+   * maven-metadata.xml fetch that mc-image-helper does when no
+   * local installer is provided — that fetch is what hits
+   * ReadTimeout / 404 on user proxies that can't reach the loader's
+   * maven directly.
+   *
+   * Idempotent: if a jar of the right size already exists, no-op.
+   */
+  app.post("/servers/:id/download-loader-installer", async (req) => {
+    const { id } = req.params as { id: string };
+    const body = z
+      .object({
+        loader: z.enum(["neoforge", "forge", "fabric", "quilt"]),
+        version: z.string().min(1).max(64),
+        mcVersion: z.string().min(1).max(32).nullable().optional(),
+        proxyUrl: z.string().url().nullable().optional(),
+      })
+      .parse(req.body);
+    const dataDir = dataDirFor(id);
+    await ensureDir(dataDir);
+    const installerName = `.cofemine-${body.loader}-installer-${body.version}.jar`;
+    const installerPath = path.join(dataDir, installerName);
+    // Already there → don't redownload.
+    try {
+      const stat = await fs.stat(installerPath);
+      if (stat.size > 0) {
+        return { ok: true, path: installerPath, cached: true, size: stat.size };
+      }
+    } catch {
+      // File doesn't exist — proceed to download.
+    }
+    const url = installerUrl(
+      body.loader,
+      body.version,
+      body.mcVersion ?? null
+    );
+    await downloadInstallerJar(url, installerPath, body.proxyUrl ?? null);
+    await fs.chown(installerPath, 1000, 1000).catch(() => {});
+    const stat = await fs.stat(installerPath);
+    return {
+      ok: true,
+      path: installerPath,
+      cached: false,
+      size: stat.size,
+    };
   });
 
   app.put("/servers/:id/sides", async (req) => {

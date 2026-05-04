@@ -1216,6 +1216,46 @@ export async function serversRoutes(app: FastifyInstance): Promise<void> {
     const next: Record<string, string> = { ...env };
     for (const k of dropKeys) delete next[k];
     if (nativeVer) next[nativeVerKey] = nativeVer;
+    // For NeoForge / Forge: point itzg at a LOCAL installer jar so
+    // it doesn't need maven.neoforged.net at boot. Many users'
+    // proxies handle forgecdn.net (CF mod downloads) but timeout on
+    // neoforged.net — exact symptom on the user's prod. Download
+    // the jar via the agent (uses our SOCKS-aware code path) and
+    // wire NEOFORGE_INSTALLER / FORGE_INSTALLER env to the file
+    // path inside the container.
+    if ((newType === "NEOFORGE" || newType === "FORGE") && nativeVer) {
+      try {
+        const proxy = await readDownloadProxy();
+        const proxyUrl = proxy ? makeProxyUrl(proxy) : null;
+        const client = await NodeClient.forId(server.nodeId);
+        const dl = await client.call<{ path: string; size: number }>(
+          "POST",
+          `/servers/${id}/download-loader-installer`,
+          {
+            loader: newType.toLowerCase() as "neoforge" | "forge",
+            version: nativeVer,
+            mcVersion: server.version,
+            proxyUrl,
+          }
+        );
+        // The agent writes to /var/lib/cofemine/servers/<id>/<name>;
+        // inside the MC container that path is /data/<name> via the
+        // bind mount. Strip the host prefix.
+        const filename = dl.path.split("/").pop();
+        if (filename) {
+          const envKey =
+            newType === "NEOFORGE"
+              ? "NEOFORGE_INSTALLER"
+              : "FORGE_INSTALLER";
+          next[envKey] = `/data/${filename}`;
+        }
+      } catch (err) {
+        req.log.warn(
+          { err },
+          "detach-source: download-loader-installer failed (will fall back to maven fetch)"
+        );
+      }
+    }
     // Mark the server for a forced reprovision on its next start.
     // The container is currently set up with the OLD CURSEFORGE /
     // MODRINTH spec; without this flag a user-initiated start
