@@ -782,6 +782,18 @@ export async function serversRoutes(app: FastifyInstance): Promise<void> {
         // because "the pack is already installed". Auto-cleared by
         // the status reconciler once the server boots cleanly.
         next.CF_FORCE_REINSTALL_MODLOADER = "true";
+        // Re-enable the install-time download proxy. After the first
+        // pack install the watchdog flipped this off so MC's runtime
+        // traffic (Mojang auth, skins) goes direct, but the loader
+        // reinstall we're about to trigger needs maven.neoforged.net
+        // and forgecdn — both of which the proxy was originally for.
+        // Without this the next start ReadTimeoutEexceptions on the
+        // neoforge installer download. The watchdog's success-path
+        // flip-off on next boot will turn it off again automatically
+        // once the loader install completes.
+        if (await readDownloadProxy()) {
+          next.__COFEMINE_INSTALL_PROXY = "1";
+        }
       }
     }
     await prisma.server.update({
