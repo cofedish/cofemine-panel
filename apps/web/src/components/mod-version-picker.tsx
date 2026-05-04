@@ -271,7 +271,7 @@ function ModVersionDialog({
           <h3 className="heading-md">{t("modVersion.title", { name: title })}</h3>
           <p className="text-xs text-ink-muted mt-1">
             {t("modVersion.subtitle", {
-              mc: serverMcVersion,
+              mc: effectiveMcVersion,
               loader: serverLoader || "any",
             })}
             {currentVersionLabel && (
@@ -293,7 +293,7 @@ function ModVersionDialog({
         ) : filtered.length === 0 ? (
           <div className="text-xs text-ink-muted py-4 leading-relaxed">
             {t("modVersion.noCompatible", {
-              mc: serverMcVersion,
+              mc: effectiveMcVersion,
               loader: serverLoader || "any",
             })}
             <label className="inline-flex items-center gap-2 mt-2 block">
