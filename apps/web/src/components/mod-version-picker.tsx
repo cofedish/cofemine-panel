@@ -227,11 +227,11 @@ function ModVersionDialog({
           type === "mod" ? "mods" : type === "plugin" ? "plugins" : "datapacks"
         }&name=${encodeURIComponent(file.name)}`
       );
-      // Step 2: install the chosen version. The provider/install path
-      // resolves the file URL and tells the agent to download into
-      // the right subdir. `kind` matches what the integrations
-      // endpoint expects ("mod" / "plugin" / "datapack").
-      const installPath = `/servers/${serverId}/install/${provider}`;
+      // Step 2: install the chosen version. The install handlers are
+      // mounted under /integrations (panel-api wires integrationsRoutes
+      // with that prefix), NOT under /servers — getting that wrong is
+      // exactly the 404 "Not Found" the user hit on swap.
+      const installPath = `/integrations/servers/${serverId}/install/${provider}`;
       const body: Record<string, unknown> = {
         projectId,
         kind: type,
