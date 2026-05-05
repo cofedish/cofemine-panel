@@ -137,6 +137,12 @@ model Server {
   /// container is still attached. Stays null for non-CF sources.
   cfPackProjectId Int?
   cfPackFileId    Int?
+  /// Filenames of client-side mods to skip when generating the .mrpack
+  /// export. Matched literally against /data/mods/* and against CF
+  /// manifest fileNames. Lets owners drop e.g. sodium-dynamic-lights
+  /// from the client pack when it conflicts with another mod, without
+  /// touching the running server.
+  clientPackExclusions String[] @default([])
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 

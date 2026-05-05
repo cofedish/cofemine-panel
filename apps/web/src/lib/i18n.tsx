@@ -268,6 +268,13 @@ const en: Dict = {
     "Delete every uploaded shaderpack (.zip). Friends downloading the .mrpack after this won't get any shaders.",
   "clientMods.confirmWipe.body.resourcepacks":
     "Delete every uploaded resource pack (.zip). Friends downloading the .mrpack after this won't get any of these texture/sound packs.",
+  "clientMods.exclude.title": "Exclude from client pack",
+  "clientMods.exclude.intro":
+    "List of mod / shader / resourcepack filenames that should NOT be shipped in the .mrpack — typical use case: a client mod that conflicts with another in the pack (e.g. sodium-dynamic-lights vs Ars Nouveau). Match is literal against the filename.",
+  "clientMods.exclude.placeholder": "filename.jar",
+  "clientMods.exclude.add": "Add",
+  "clientMods.exclude.remove": "Remove from exclusions",
+  "clientMods.exclude.empty": "No exclusions — every mod ships in the client pack.",
   "clientMods.uploading": "Uploading {i}/{n}: {name}",
   "clientMods.skipNotJar": "Skipped {name} — not a .jar / .zip",
   "clientMods.skipTooBig": "Skipped {name} — over 100 MB",
@@ -980,6 +987,13 @@ const ru: Dict = {
     "Удалить ВСЕ загруженные шейдеры (.zip). Друзья после этого не получат шейдеров в .mrpack.",
   "clientMods.confirmWipe.body.resourcepacks":
     "Удалить ВСЕ загруженные ресурспаки (.zip). Друзья после этого не получат этих текстур/звуков в .mrpack.",
+  "clientMods.exclude.title": "Исключения из клиентской сборки",
+  "clientMods.exclude.intro":
+    "Список имён файлов (моды/шейдеры/ресурспаки), которые НЕ попадут в .mrpack. Типичный кейс: клиентский мод конфликтует с другим в сборке (например, sodium-dynamic-lights vs Ars Nouveau). Сравнение точное по имени файла.",
+  "clientMods.exclude.placeholder": "имя_файла.jar",
+  "clientMods.exclude.add": "Добавить",
+  "clientMods.exclude.remove": "Убрать из исключений",
+  "clientMods.exclude.empty": "Исключений нет — все моды попадают в клиентскую сборку.",
   "clientMods.uploading": "Загрузка {i}/{n}: {name}",
   "clientMods.skipNotJar": "Пропущен {name} — не .jar / .zip",
   "clientMods.skipTooBig": "Пропущен {name} — больше 100 МБ",

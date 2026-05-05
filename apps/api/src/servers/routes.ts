@@ -1101,6 +1101,57 @@ export async function serversRoutes(app: FastifyInstance): Promise<void> {
    * old links stop working).
    */
   /**
+   * Per-server filename exclusion list for the .mrpack export.
+   * Filenames are matched literally against CF manifest fileNames and
+   * /data/mods/* entries. Use case: a client mod that conflicts with
+   * another in the pack (e.g. sodium-dynamic-lights vs Ars Nouveau)
+   * gets dropped from the friend's client install without touching
+   * the running server.
+   */
+  app.get("/:id/client-pack-exclusions", async (req) => {
+    const { id } = req.params as { id: string };
+    await assertServerPermission(req, id, "server.view");
+    const server = await prisma.server.findUniqueOrThrow({
+      where: { id },
+      select: { clientPackExclusions: true },
+    });
+    return { exclusions: server.clientPackExclusions };
+  });
+
+  app.post("/:id/client-pack-exclusions", async (req) => {
+    const { id } = req.params as { id: string };
+    await assertServerPermission(req, id, "server.edit");
+    const body = z
+      .object({
+        add: z.string().min(1).max(256).optional(),
+        remove: z.string().min(1).max(256).optional(),
+      })
+      .refine((b) => b.add || b.remove, {
+        message: "Either 'add' or 'remove' must be provided",
+      })
+      .parse(req.body);
+    const server = await prisma.server.findUniqueOrThrow({
+      where: { id },
+      select: { clientPackExclusions: true },
+    });
+    let next = [...server.clientPackExclusions];
+    if (body.add && !next.includes(body.add)) next.push(body.add);
+    if (body.remove) next = next.filter((n) => n !== body.remove);
+    await prisma.server.update({
+      where: { id },
+      data: { clientPackExclusions: next },
+    });
+    await writeAudit(req, {
+      action: body.add
+        ? "server.client-pack-exclusions.add"
+        : "server.client-pack-exclusions.remove",
+      resource: id,
+      metadata: { name: body.add ?? body.remove },
+    });
+    return { exclusions: next };
+  });
+
+  /**
    * Persist (or update) the CurseForge pack reference on the server.
    * Used when the user has detached the server from its CF source —
    * mc-image-helper-driven CF_SLUG/CF_FILE_ID env got dropped, but

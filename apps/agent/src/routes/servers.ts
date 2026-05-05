@@ -3666,11 +3666,33 @@ async function exportMrpackFromCfPack(
     inlinedFromPack++;
   }
 
+  // Per-server exclusion list — filenames the owner explicitly wants
+  // dropped from the client pack (for conflicts: e.g., sodium-dynamic
+  // -lights breaks Ars Nouveau on some setups). Sent by the API as a
+  // JSON array in `x-cofemine-exclude-filenames`. Matched literally
+  // against fileNames from CF and against /data/mods/* entries.
+  const excludeRaw = req.headers["x-cofemine-exclude-filenames"];
+  const exclusions = new Set<string>();
+  if (typeof excludeRaw === "string" && excludeRaw.trim()) {
+    try {
+      const arr = JSON.parse(excludeRaw);
+      if (Array.isArray(arr)) for (const n of arr) if (typeof n === "string") exclusions.add(n);
+    } catch {
+      /* malformed — ignore the header rather than failing the whole export */
+    }
+  }
+
   // 9. Stream every manifest file from CF CDN into the right subdir
   const expectedFilenames = new Set<string>();
   const failed: string[] = [];
   let streamedOk = 0;
+  let skippedExcluded = 0;
   for (const f of filesRes.data) {
+    if (exclusions.has(f.fileName)) {
+      expectedFilenames.add(f.fileName); // also skip in user-additions pass
+      skippedExcluded++;
+      continue;
+    }
     if (!f.downloadUrl) {
       failed.push(`${f.fileName} (no downloadUrl)`);
       continue;
@@ -3698,6 +3720,10 @@ async function exportMrpackFromCfPack(
     for (const name of items) {
       if (!/\.(jar|zip)$/i.test(name)) continue;
       if (expectedFilenames.has(name)) continue;
+      if (exclusions.has(name)) {
+        skippedExcluded++;
+        continue;
+      }
       archive.file(path.join(serverModsDir, name), {
         name: `overrides/mods/${name}`,
       });
@@ -3720,6 +3746,7 @@ async function exportMrpackFromCfPack(
       cfManifestFiles: cfManifest.files.length,
       streamedOk,
       failed: failed.length,
+      skippedExcluded,
       inlinedFromPack,
       userExtras,
     },

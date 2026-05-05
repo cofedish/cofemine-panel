@@ -71,8 +71,47 @@ export function ClientModsTab({ serverId }: { serverId: string }): JSX.Element {
     `/servers/${serverId}`,
     fetcher
   );
+  const { data: exclusionsData } = useSWR<{ exclusions: string[] }>(
+    `/servers/${serverId}/client-pack-exclusions`,
+    fetcher
+  );
+  const exclusions = exclusionsData?.exclusions ?? [];
   const [linkBusy, setLinkBusy] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [excludeInput, setExcludeInput] = useState("");
+
+  async function addExclusion(name: string): Promise<void> {
+    const trimmed = name.trim();
+    if (!trimmed) return;
+    try {
+      await api.post(`/servers/${serverId}/client-pack-exclusions`, {
+        add: trimmed,
+      });
+      mutate(`/servers/${serverId}/client-pack-exclusions`);
+      setExcludeInput("");
+    } catch (e) {
+      dialog.alert({
+        tone: "danger",
+        title: t("common.error"),
+        message: e instanceof ApiError ? e.message : String(e),
+      });
+    }
+  }
+
+  async function removeExclusion(name: string): Promise<void> {
+    try {
+      await api.post(`/servers/${serverId}/client-pack-exclusions`, {
+        remove: name,
+      });
+      mutate(`/servers/${serverId}/client-pack-exclusions`);
+    } catch (e) {
+      dialog.alert({
+        tone: "danger",
+        title: t("common.error"),
+        message: e instanceof ApiError ? e.message : String(e),
+      });
+    }
+  }
   const items = data?.mods ?? [];
   const detectedItems = detected?.detected ?? [];
   const publicToken = server?.publicPackToken ?? null;
@@ -455,6 +494,66 @@ export function ClientModsTab({ serverId }: { serverId: string }): JSX.Element {
               {t("clientMods.publicLink.enable")}
             </button>
           </div>
+        )}
+      </div>
+
+      <div className="tile p-4 space-y-3">
+        <header className="flex items-start gap-3">
+          <Trash size={16} className="text-ink-muted shrink-0 mt-0.5" />
+          <div className="flex-1 min-w-0">
+            <h3 className="text-sm font-medium">
+              {t("clientMods.exclude.title")}
+            </h3>
+            <p className="text-[11px] text-ink-muted leading-relaxed mt-0.5">
+              {t("clientMods.exclude.intro")}
+            </p>
+          </div>
+        </header>
+        <form
+          className="flex items-center gap-2"
+          onSubmit={(e) => {
+            e.preventDefault();
+            void addExclusion(excludeInput);
+          }}
+        >
+          <input
+            type="text"
+            value={excludeInput}
+            onChange={(e) => setExcludeInput(e.target.value)}
+            placeholder={t("clientMods.exclude.placeholder")}
+            className="flex-1 min-w-0 bg-surface-2 px-2 py-1.5 rounded text-xs font-mono outline-none focus:ring-1 focus:ring-[rgb(var(--accent))]"
+          />
+          <button
+            type="submit"
+            className="btn btn-ghost"
+            disabled={!excludeInput.trim()}
+          >
+            {t("clientMods.exclude.add")}
+          </button>
+        </form>
+        {exclusions.length === 0 ? (
+          <p className="text-[11px] text-ink-muted italic">
+            {t("clientMods.exclude.empty")}
+          </p>
+        ) : (
+          <ul className="space-y-1">
+            {exclusions.map((name) => (
+              <li
+                key={name}
+                className="flex items-center gap-2 px-2 py-1 rounded bg-surface-2 text-xs font-mono"
+              >
+                <span className="flex-1 truncate">{name}</span>
+                <button
+                  className="btn-icon btn-ghost !h-6 !w-6 shrink-0"
+                  onClick={() => void removeExclusion(name)}
+                  aria-label={t("clientMods.exclude.remove")}
+                  title={t("clientMods.exclude.remove")}
+                >
+                  <Trash2 size={12} />
+                </button>
+              </li>
+            ))}
+          </ul>
         )}
       </div>
 

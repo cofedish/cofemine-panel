@@ -156,6 +156,15 @@ export async function streamMrpack(
     params.set("cfPackFileId", String(cfFileId));
     cfHeaders["x-cf-api-key"] = cfApiKey;
   }
+  // Per-server filename exclusions — owner-managed list of mods to drop
+  // from the .mrpack (typical use case: a client mod that conflicts
+  // with another in the pack). Forwarded to the agent as a JSON array
+  // in a header; agent skips matching filenames in BOTH the CF rebuild
+  // and the user-additions passes.
+  const exclusions = (server.clientPackExclusions ?? []) as string[];
+  if (exclusions.length > 0) {
+    cfHeaders["x-cofemine-exclude-filenames"] = JSON.stringify(exclusions);
+  }
 
   const dispatcher = new UndiciAgent({
     connections: 4,
