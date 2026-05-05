@@ -3740,6 +3740,47 @@ async function exportMrpackFromCfPack(
     /* no /data/mods/ — pack just hasn't installed yet */
   }
 
+  // 10b. Client-staging area uploaded via the panel UI. CF pack manifests
+  // rarely include shaderpacks / resourcepacks (Create Chronicles being a
+  // typical example — zero shaders in the pack zip), so the owner uploads
+  // those through Client Pack tab. They land in
+  // /data/.cofemine-client/<sub>/ and MUST be bundled here, otherwise the
+  // CF rebuild quietly drops everything the user staged. Also pull in
+  // .cofemine-client/mods/ — manually-added client-only jars (rare, but
+  // valid use case).
+  async function dirExistsCheck(p: string): Promise<boolean> {
+    try {
+      const st = await fs.stat(p);
+      return st.isDirectory();
+    } catch {
+      return false;
+    }
+  }
+  let stagingFiles = 0;
+  for (const sub of ["resourcepacks", "shaderpacks", "mods"]) {
+    const stagingDir = path.join(base, ".cofemine-client", sub);
+    if (!(await dirExistsCheck(stagingDir))) continue;
+    try {
+      const items = await fs.readdir(stagingDir);
+      for (const name of items) {
+        if (!/\.(jar|zip)$/i.test(name)) continue;
+        if (exclusions.has(name)) {
+          skippedExcluded++;
+          continue;
+        }
+        // For mods, dedupe against CF-manifest list so a user's manual
+        // upload of a CF-included mod doesn't ZIP twice.
+        if (sub === "mods" && expectedFilenames.has(name)) continue;
+        archive.file(path.join(stagingDir, name), {
+          name: `overrides/${sub}/${name}`,
+        });
+        stagingFiles++;
+      }
+    } catch {
+      /* read failed — skip silently */
+    }
+  }
+
   // 11. Manifests at root
   archive.append(JSON.stringify(modrinthIndex, null, 2), {
     name: "modrinth.index.json",
@@ -3756,6 +3797,7 @@ async function exportMrpackFromCfPack(
       skippedExcluded,
       inlinedFromPack,
       userExtras,
+      stagingFiles,
     },
     "cf-rebuild: assembled"
   );
