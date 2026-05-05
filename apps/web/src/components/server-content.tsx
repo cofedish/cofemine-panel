@@ -51,6 +51,8 @@ type ServerContext = {
   type: string;
   version: string;
   env: Record<string, string>;
+  cfPackProjectId?: number | null;
+  cfPackFileId?: number | null;
 };
 
 type ModrinthMeta = {
@@ -253,14 +255,19 @@ function InstalledPanel({
   const dialog = useDialog();
   const { t } = useT();
   const isCFModpack = server?.type === "CURSEFORGE";
+  // Exclusions tab is meaningful for any server with a CF pack source
+  // — currently-attached CURSEFORGE OR a detached server whose
+  // cfPackProjectId is still set (it then drives the .mrpack rebuild).
+  const showExclusions =
+    isCFModpack ||
+    (!!server?.cfPackProjectId && !!server?.cfPackFileId);
   type Sub = "mods" | "plugins" | "datapacks" | "exclusions" | "client";
   const [sub, setSub] = useState<Sub>("mods");
-  // If user lands on the Exclusions tab and then switches the server
-  // type away from CURSEFORGE (rare but possible), drop them back to
-  // the default tab — the exclusions tab is meaningless otherwise.
+  // If user is on the Exclusions tab and the server loses its CF
+  // pack source, drop them back to the default tab.
   useEffect(() => {
-    if (!isCFModpack && sub === "exclusions") setSub("mods");
-  }, [isCFModpack, sub]);
+    if (!showExclusions && sub === "exclusions") setSub("mods");
+  }, [showExclusions, sub]);
   // The Client tab makes sense on any modded server (modpack or
   // native loader), so keep it visible whenever the server runs mods
   // at all — not just on CF.
@@ -401,7 +408,7 @@ function InstalledPanel({
               </button>
             );
           })}
-          {isCFModpack && (
+          {showExclusions && (
             <button
               onClick={() => setSub("exclusions")}
               className={cn(
@@ -1183,20 +1190,24 @@ function BrowsePanel({
   // agent's runtime detection (jar-filename heuristic) instead.
   useEffect(() => {
     if (!server) return;
-    const isModpackSource =
-      server.type === "CURSEFORGE" || server.type === "MODRINTH";
     const detected = installed?.runtime;
 
+    // MC version: prefer the explicit server.version if it looks like
+    // a real version (X.Y / X.Y.Z), otherwise fall back to the agent's
+    // runtime detection. Old `isModpackSource` guard was wrong: after
+    // detach-from-source, server.type becomes NEOFORGE and detected
+    // version was being ignored, so the search dropdown went blank
+    // and only the loader filter was applied.
     let nextVersion = "";
-    if (server.version && server.version !== "LATEST") {
+    if (server.version && /^\d+\.\d+(\.\d+)?$/.test(server.version)) {
       nextVersion = server.version;
     }
-    if (!nextVersion && isModpackSource && detected?.mcVersion) {
+    if (!nextVersion && detected?.mcVersion) {
       nextVersion = detected.mcVersion;
     }
 
     let nextLoader = typeToLoader(server.type);
-    if (!nextLoader && isModpackSource && detected?.loader) {
+    if (!nextLoader && detected?.loader) {
       nextLoader = detected.loader;
     }
 
