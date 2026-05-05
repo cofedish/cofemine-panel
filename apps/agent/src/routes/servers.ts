@@ -947,6 +947,19 @@ export async function serversAgentRoutes(app: FastifyInstance): Promise<void> {
 
     const packName = q.packName ?? `cofemine-${id.slice(0, 8)}`;
     const versionId = new Date().toISOString().slice(0, 10);
+    // Modrinth spec keys for `dependencies`:
+    //   minecraft, forge, neoforge, fabric-loader, quilt-loader
+    // The API sends the short loader name; translate to the spec key
+    // here so launchers parsing modrinth.index.json find what they
+    // expect.
+    const SPEC_LOADER_KEY: Record<string, string> = {
+      forge: "forge",
+      neoforge: "neoforge",
+      fabric: "fabric-loader",
+      quilt: "quilt-loader",
+    };
+    const specLoaderKey =
+      q.loader && SPEC_LOADER_KEY[q.loader] ? SPEC_LOADER_KEY[q.loader] : null;
     const manifest = {
       formatVersion: 1,
       game: "minecraft",
@@ -956,7 +969,9 @@ export async function serversAgentRoutes(app: FastifyInstance): Promise<void> {
       files: [] as Array<unknown>,
       dependencies: {
         minecraft: q.mcVersion ?? "1.21.1",
-        ...(q.loader && q.loaderVersion ? { [q.loader]: q.loaderVersion } : {}),
+        ...(specLoaderKey && q.loaderVersion
+          ? { [specLoaderKey]: q.loaderVersion }
+          : {}),
       },
     };
     /**
