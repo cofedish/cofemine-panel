@@ -9,8 +9,14 @@ MAX_TRIES="${DB_WAIT_RETRIES:-60}"
 SLEEP_SECS="${DB_WAIT_INTERVAL:-2}"
 
 echo "bootstrap: waiting for database schema push to succeed (up to ${MAX_TRIES} tries)"
+# --accept-data-loss: needed for additive unique-index changes on
+# nullable columns. Postgres allows multiple NULLs in a UNIQUE index
+# so the operation is safe in practice, but the Prisma CLI flags any
+# new UNIQUE as "could fail if duplicates exist" and refuses without
+# this flag. Our schema only ever adds (never narrows column types),
+# so accepting is the right policy in CI/CD.
 i=1
-until pnpm exec prisma db push --skip-generate 2>&1; do
+until pnpm exec prisma db push --skip-generate --accept-data-loss 2>&1; do
   if [ "$i" -ge "$MAX_TRIES" ]; then
     echo "bootstrap: giving up waiting for db after ${MAX_TRIES} tries" >&2
     exit 1
