@@ -47,7 +47,7 @@ async function bootstrap(): Promise<void> {
 
   await app.register(helmet, { contentSecurityPolicy: false });
   await app.register(cors, {
-    origin: [config.WEB_ORIGIN],
+    origin: [config.WEB_ORIGIN, "https://cofemine.ru"],
     credentials: true,
   });
   await app.register(cookie);
