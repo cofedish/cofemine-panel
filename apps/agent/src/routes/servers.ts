@@ -1012,17 +1012,24 @@ export async function serversAgentRoutes(app: FastifyInstance): Promise<void> {
     // Pipe archive bytes straight into the HTTP response.
     archive.pipe(reply.raw);
 
-    // Bundle every local jar under the right overrides path.
+    // Bundle every local jar into overrides/mods/ (NOT split into
+    // client-overrides/ and server-overrides/). Reasoning: HMCL — one
+    // of the most popular launchers in the RU/CN segment — only
+    // extracts the canonical `overrides/` directory and silently drops
+    // `client-overrides/` and `server-overrides/`. Modrinth App + Prism
+    // honour the side-split; HMCL doesn't. Splitting saves a few MB on
+    // a Modrinth-App install but breaks the entire pack on HMCL, so
+    // pragmatically we collapse to `overrides/` for everyone.
+    //
+    // Server-only mods (sides.json says "server") are SKIPPED entirely:
+    // the client doesn't need them, and shipping a server-only jar to
+    // the client at best wastes bandwidth, at worst crashes Forge if
+    // the mod has a side-strict @Mod registration.
     const bundledFilenames = new Set<string>();
     for (const e of entries) {
-      const overridePrefix =
-        e.side === "both"
-          ? "overrides"
-          : e.side === "client"
-            ? "client-overrides"
-            : "server-overrides";
+      if (e.side === "server") continue; // skip server-only on client pack
       archive.file(e.sourcePath, {
-        name: `${overridePrefix}/mods/${e.filename}`,
+        name: `overrides/mods/${e.filename}`,
       });
       bundledFilenames.add(e.filename);
     }
@@ -1089,7 +1096,7 @@ export async function serversAgentRoutes(app: FastifyInstance): Promise<void> {
               q.proxyUrl ?? null
             );
             archive.append(stream as any, {
-              name: `client-overrides/mods/${t.filename}`,
+              name: `overrides/mods/${t.filename}`,
             });
           } catch (err) {
             req.log.warn(
@@ -1114,12 +1121,24 @@ export async function serversAgentRoutes(app: FastifyInstance): Promise<void> {
         return false;
       }
     }
+    const includedDirs: string[] = [];
     for (const sub of ["config", "resourcepacks", "kubejs", "defaultconfigs"]) {
       const src = path.join(base, sub);
       if (await dirExists(src)) {
         archive.directory(src, `overrides/${sub}`);
+        includedDirs.push(sub);
       }
     }
+    req.log.info(
+      {
+        serverMods: entries.filter((e) => e.origin === "server").length,
+        clientMods: entries.filter((e) => e.origin === "client").length,
+        skippedServerOnly: entries.filter((e) => e.side === "server").length,
+        bundledTotal: bundledFilenames.size,
+        includedDirs,
+      },
+      "mrpack export: assembled"
+    );
 
     // Modrinth's spec manifest (launchers parse this).
     archive.append(JSON.stringify(manifest, null, 2), {
