@@ -3574,21 +3574,7 @@ async function exportMrpackFromCfPack(
       gameVersions: string[];
     }>;
   };
-
-  // Snapshot of /data/mods/ — the live server state. Used to honour
-  // user-side deletions: if a CF-manifest mod was removed from the
-  // server's /data/mods/, drop it from the client pack too. Without
-  // this we'd happily re-pull the deleted mod from CF and ship it,
-  // ignoring the user's explicit "I removed this".
   const serverModsDir = path.join(base, "mods");
-  const serverModsOnDisk = new Set<string>();
-  try {
-    for (const name of await fs.readdir(serverModsDir)) {
-      if (/\.(jar|zip)$/i.test(name)) serverModsOnDisk.add(name);
-    }
-  } catch {
-    /* dir doesn't exist yet — pack hasn't installed */
-  }
 
   // 5. Bulk resolve projects → classId for routing
   const modIds = [...new Set(filesRes.data.map((f) => f.modId))];
@@ -3699,41 +3685,27 @@ async function exportMrpackFromCfPack(
   }
 
   // 9. Stream every manifest file from CF CDN into the right subdir.
-  //
-  // Honour user-side deletions: if a CF-manifest mod is no longer in
-  // /data/mods/, that means the owner removed it. Drop it from the
-  // client pack too — UNLESS it's a client-only mod (CF gameVersions
-  // contains "Client" without "Server"), because those never live in
-  // /data/mods/ in the first place (mc-image-helper skips them on the
-  // server install).
+  // The only way a CF-manifest mod is dropped is if it's in the
+  // owner's clientPackExclusions list (header above). We do NOT use
+  // "missing from /data/mods/" as a signal — many client-only mods
+  // (Iris, Sodium, Iceberg, etc.) are intentionally absent from
+  // /data/mods/ via CF_EXCLUDE_MODS, and treating that as a deletion
+  // would silently strip them from the client pack.
   const expectedFilenames = new Set<string>();
   const failed: string[] = [];
   let streamedOk = 0;
   let skippedExcluded = 0;
-  let skippedRemovedFromServer = 0;
   for (const f of filesRes.data) {
     if (exclusions.has(f.fileName)) {
       expectedFilenames.add(f.fileName); // also skip in user-additions pass
       skippedExcluded++;
       continue;
     }
-    const sub = targetSubdir(f.modId);
-    if (sub === "mods") {
-      const gvs = f.gameVersions ?? [];
-      const isClientOnly = gvs.includes("Client") && !gvs.includes("Server");
-      const expectedOnServer = !isClientOnly;
-      if (expectedOnServer && serverModsOnDisk.size > 0 && !serverModsOnDisk.has(f.fileName)) {
-        // Pack expected this on the server, but the owner removed it.
-        // Honour the deletion — don't let CF rebuild silently put it back.
-        expectedFilenames.add(f.fileName);
-        skippedRemovedFromServer++;
-        continue;
-      }
-    }
     if (!f.downloadUrl) {
       failed.push(`${f.fileName} (no downloadUrl)`);
       continue;
     }
+    const sub = targetSubdir(f.modId);
     try {
       const s = await openHttpStream(f.downloadUrl, proxyUrl);
       archive.append(s as any, { name: `overrides/${sub}/${f.fileName}` });
@@ -3782,7 +3754,6 @@ async function exportMrpackFromCfPack(
       streamedOk,
       failed: failed.length,
       skippedExcluded,
-      skippedRemovedFromServer,
       inlinedFromPack,
       userExtras,
     },

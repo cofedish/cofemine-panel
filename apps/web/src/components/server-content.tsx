@@ -335,8 +335,21 @@ function InstalledPanel({
           filename: file.name,
           modId: cfModId,
         });
+        // Also drop from the client pack export. Without this, the
+        // mod the user just removed from the server keeps reappearing
+        // in the .mrpack (CF rebuild re-pulls everything in the pack
+        // manifest unconditionally — that's correct for client-only
+        // mods like Iris/Iceberg, but wrong for the user-removed case).
+        await api
+          .post(`/servers/${serverId}/client-pack-exclusions`, {
+            add: file.name,
+          })
+          .catch(() => {
+            /* non-fatal — server-side delete already succeeded */
+          });
         mutate(`/servers/${serverId}/installed-content`);
         mutate(`/servers/${serverId}/cf-exclusions`);
+        mutate(`/servers/${serverId}/client-pack-exclusions`);
         mutate(`/servers/${serverId}`);
       } catch (e) {
         dialog.alert({
@@ -362,7 +375,18 @@ function InstalledPanel({
       await api.del(
         `/servers/${serverId}/installed-content?type=${fileType}&name=${encodeURIComponent(file.name)}`
       );
+      // Mirror the deletion into the client-pack exclusion list too.
+      // Same rationale as the CF modpack branch above — without this
+      // the .mrpack rebuild keeps re-pulling the file from CF.
+      await api
+        .post(`/servers/${serverId}/client-pack-exclusions`, {
+          add: file.name,
+        })
+        .catch(() => {
+          /* non-fatal */
+        });
       mutate(`/servers/${serverId}/installed-content`);
+      mutate(`/servers/${serverId}/client-pack-exclusions`);
     } catch (e) {
       dialog.alert({
         tone: "danger",
