@@ -609,7 +609,6 @@ export async function serversAgentRoutes(app: FastifyInstance): Promise<void> {
    */
   app.get("/servers/:id/client-mods/auto-detect", async (req) => {
     const { id } = req.params as { id: string };
-    const q = req.query as { mcVersion?: string; loader?: string };
     const cacheDir = path.join(
       dataDirFor(id),
       ".cache",
@@ -640,29 +639,6 @@ export async function serversAgentRoutes(app: FastifyInstance): Promise<void> {
     } catch {
       /* dir doesn't exist yet — that's fine */
     }
-    // Build a loader/MC matcher. CF stores loader compatibility as
-    // string entries in gameVersions: "Forge", "NeoForge", "Fabric",
-    // "Quilt" alongside the MC version "1.21.1". A file qualifies for
-    // a NeoForge 1.21.1 server if gameVersions contains BOTH "NeoForge"
-    // and "1.21.1". Without this filter we previously took the first
-    // file tagged "Client" — which on a NeoForge pack would happily
-    // grab the Fabric build of Iris and ship it.
-    const wantLoaderRe =
-      q.loader === "neoforge"
-        ? /^neoforge$/i
-        : q.loader === "forge"
-          ? /^forge$/i
-          : q.loader === "fabric"
-            ? /^fabric$/i
-            : q.loader === "quilt"
-              ? /^quilt$/i
-              : null;
-    function matchesServer(file: any): boolean {
-      const gvs = (file.gameVersions ?? []) as string[];
-      if (q.mcVersion && !gvs.includes(q.mcVersion)) return false;
-      if (wantLoaderRe && !gvs.some((g) => wantLoaderRe.test(g))) return false;
-      return true;
-    }
     for (const e of entries) {
       if (!e.endsWith(".json")) continue;
       let mod: any;
@@ -672,13 +648,13 @@ export async function serversAgentRoutes(app: FastifyInstance): Promise<void> {
       } catch {
         continue;
       }
-      // Find a "Client"-tagged file in this mod's latest releases that
-      // ALSO matches the server's loader and MC version.
+      // Find a "Client"-tagged file in this mod's latest releases.
+      // CF marks client-only releases by including the literal string
+      // "Client" in the file's gameVersions array.
       const files = (mod.latestFiles ?? []) as any[];
       const clientFile = files.find((f) => {
         const gvs = (f.gameVersions ?? []) as string[];
-        if (!gvs.includes("Client")) return false;
-        return matchesServer(f);
+        return gvs.includes("Client");
       });
       if (!clientFile) continue;
       if (!clientFile.downloadUrl) continue;
@@ -1025,96 +1001,51 @@ export async function serversAgentRoutes(app: FastifyInstance): Promise<void> {
     // Pipe archive bytes straight into the HTTP response.
     archive.pipe(reply.raw);
 
-    // Bundle every jar into overrides/mods/. No side-splitting — HMCL
-    // doesn't extract client-overrides/ / server-overrides/, so the
-    // canonical `overrides/` is the only safe target across launchers.
-    //
-    // Dedupe by filename: server entries are added first and "win".
-    // If the user has stale jars in .cofemine-client/mods/ from a
-    // different pack version (different MC, different loader), they'll
-    // collide on filename with the server's authoritative copy and get
-    // dropped here. Without this, archiver would write duplicate ZIP
-    // entries and launchers would pick whichever they saw last —
-    // typically the wrong-version client one, which then fails to load
-    // with "requires NeoForge X" errors.
-    const bundledFilenames = new Set<string>();
-    const droppedDupes: string[] = [];
+    // Bundle every jar into overrides/mods/. No deduping, no filtering,
+    // no side-skipping — what's on disk in /data/mods/ and in the
+    // user's client-staging area is what ends up in the pack. The
+    // panel is a transparent shipper, not a curator.
     for (const e of entries) {
-      if (bundledFilenames.has(e.filename)) {
-        droppedDupes.push(`${e.origin}:${e.filename}`);
-        continue;
-      }
       archive.file(e.sourcePath, {
         name: `overrides/mods/${e.filename}`,
       });
-      bundledFilenames.add(e.filename);
-    }
-    if (droppedDupes.length > 0) {
-      req.log.warn(
-        { droppedDupes: droppedDupes.slice(0, 20), totalDropped: droppedDupes.length },
-        "mrpack export: dropped duplicate filenames"
-      );
     }
 
-    // Auto-detect: scan CF cache for mods marked client-only that
-    // weren't installed on the server. Stream-fetch each through
-    // the configured proxy and inline them in the ZIP under
-    // client-overrides/. Default ON unless explicitly disabled —
-    // this is what the user wants when clicking "Download .mrpack":
-    // a single complete pack, not a jigsaw they have to assemble.
+    // Auto-detect: pull every client-only mod from mc-image-helper's
+    // CF cache and stream it straight into overrides/mods/. This is
+    // how Iris / Sodium / Xaero / Mouse Tweaks etc. — mods the pack
+    // ships but that itzg deliberately skips on server install — get
+    // back into the client pack.
+    //
+    // No loader / MC filter: if the file is tagged "Client" in CF's
+    // gameVersions it goes in. Fabric mods on a NeoForge server are
+    // valid via Sinytra Connector; "fixing" them would silently strip
+    // legitimate parts of the pack. The agent is a dumb shipper.
     const includeAutoDetected =
       (q.includeAutoDetected ?? "1") !== "0";
     if (includeAutoDetected) {
-      const cacheDir = path.join(
-        base,
-        ".cache",
-        "curseforge",
-        "getModInfo"
-      );
+      const cacheDir = path.join(base, ".cache", "curseforge", "getModInfo");
       let cacheEntries: string[] = [];
       try {
         cacheEntries = await fs.readdir(cacheDir);
       } catch {
-        /* no cache → no auto-detect */
+        /* no cache → nothing to add */
       }
-      const fetchTasks: Array<{
-        filename: string;
-        downloadUrl: string;
-      }> = [];
-      // Same matcher as /client-mods/auto-detect: the client-only file
-      // must match the server's loader + MC version, otherwise we'd
-      // happily ship a Fabric build of Iris into a NeoForge pack.
-      const wantLoaderRe =
-        q.loader === "neoforge"
-          ? /^neoforge$/i
-          : q.loader === "forge"
-            ? /^forge$/i
-            : q.loader === "fabric"
-              ? /^fabric$/i
-              : q.loader === "quilt"
-                ? /^quilt$/i
-                : null;
-      const wantMc = q.mcVersion;
+      const fetchTasks: Array<{ filename: string; downloadUrl: string }> = [];
       for (const ce of cacheEntries) {
         if (!ce.endsWith(".json")) continue;
         let mod: any;
         try {
-          mod = JSON.parse(
-            await fs.readFile(path.join(cacheDir, ce), "utf8")
-          );
+          mod = JSON.parse(await fs.readFile(path.join(cacheDir, ce), "utf8"));
         } catch {
           continue;
         }
         const files = (mod.latestFiles ?? []) as any[];
         const clientFile = files.find((f) => {
           const gvs = (f.gameVersions ?? []) as string[];
-          if (!gvs.includes("Client")) return false;
-          if (wantMc && !gvs.includes(wantMc)) return false;
-          if (wantLoaderRe && !gvs.some((g) => wantLoaderRe.test(g))) return false;
-          return true;
+          return gvs.includes("Client");
         });
         if (!clientFile?.downloadUrl) continue;
-        if (bundledFilenames.has(clientFile.fileName)) continue;
         fetchTasks.push({
           filename: clientFile.fileName,
           downloadUrl: clientFile.downloadUrl,
@@ -1125,9 +1056,6 @@ export async function serversAgentRoutes(app: FastifyInstance): Promise<void> {
           { count: fetchTasks.length },
           "mrpack export: streaming auto-detected client mods"
         );
-        // Sequentially stream each through proxy → archive. archiver
-        // accepts a Readable stream via append(); it consumes the
-        // whole stream before moving on so back-pressure works.
         for (const t of fetchTasks) {
           try {
             const stream = await openHttpStream(
@@ -1199,7 +1127,7 @@ export async function serversAgentRoutes(app: FastifyInstance): Promise<void> {
       {
         serverMods: entries.filter((e) => e.origin === "server").length,
         clientMods: entries.filter((e) => e.origin === "client").length,
-        bundledTotal: bundledFilenames.size,
+        bundledTotal: entries.length,
         includedDirs,
       },
       "mrpack export: assembled"
