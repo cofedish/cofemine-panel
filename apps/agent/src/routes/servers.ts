@@ -770,6 +770,35 @@ export async function serversAgentRoutes(app: FastifyInstance): Promise<void> {
   });
 
   /**
+   * Wipe an entire client-staging kind (mods / shaderpacks /
+   * resourcepacks). Used from the panel UI's "Clear all" button when
+   * the user wants to drop a stale collection in one shot — typically
+   * when the staging dir filled up with cross-pack/cross-version jars
+   * that now conflict with the current server install.
+   *
+   * Only deletes top-level files (.jar/.zip); won't touch
+   * subdirectories or the staging dir itself.
+   */
+  app.delete("/servers/:id/client-mods/all", async (req) => {
+    const { id } = req.params as { id: string };
+    const kind = parseClientKind((req.query as { kind?: string }).kind);
+    const dir = clientStagingDir(id, kind);
+    let removed = 0;
+    try {
+      const items = await fs.readdir(dir, { withFileTypes: true });
+      for (const it of items) {
+        if (!it.isFile()) continue;
+        if (!/\.(jar|zip)$/i.test(it.name)) continue;
+        await fs.rm(path.join(dir, it.name), { force: true });
+        removed++;
+      }
+    } catch {
+      /* dir doesn't exist — nothing to clear */
+    }
+    return { ok: true, removed };
+  });
+
+  /**
    * Fix root-owned files in /data left over from earlier root-running
    * installer phases. uid 1000 (itzg's runtime user) needs to be able
    * to overwrite libraries/net/minecraft/.../*.jar etc. on subsequent
@@ -975,12 +1004,32 @@ export async function serversAgentRoutes(app: FastifyInstance): Promise<void> {
     // Bundle every jar into overrides/mods/. No side-splitting — HMCL
     // doesn't extract client-overrides/ / server-overrides/, so the
     // canonical `overrides/` is the only safe target across launchers.
+    //
+    // Dedupe by filename: server entries are added first and "win".
+    // If the user has stale jars in .cofemine-client/mods/ from a
+    // different pack version (different MC, different loader), they'll
+    // collide on filename with the server's authoritative copy and get
+    // dropped here. Without this, archiver would write duplicate ZIP
+    // entries and launchers would pick whichever they saw last —
+    // typically the wrong-version client one, which then fails to load
+    // with "requires NeoForge X" errors.
     const bundledFilenames = new Set<string>();
+    const droppedDupes: string[] = [];
     for (const e of entries) {
+      if (bundledFilenames.has(e.filename)) {
+        droppedDupes.push(`${e.origin}:${e.filename}`);
+        continue;
+      }
       archive.file(e.sourcePath, {
         name: `overrides/mods/${e.filename}`,
       });
       bundledFilenames.add(e.filename);
+    }
+    if (droppedDupes.length > 0) {
+      req.log.warn(
+        { droppedDupes: droppedDupes.slice(0, 20), totalDropped: droppedDupes.length },
+        "mrpack export: dropped duplicate filenames"
+      );
     }
 
     // Auto-detect: scan CF cache for mods marked client-only that

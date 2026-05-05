@@ -5,6 +5,7 @@ import {
   Upload,
   Loader2,
   Trash2,
+  Trash,
   Download,
   PackageOpen,
   Link2,
@@ -241,6 +242,34 @@ export function ClientModsTab({ serverId }: { serverId: string }): JSX.Element {
     }
   }
 
+  async function wipeAll(): Promise<void> {
+    const kind = activeKind;
+    const ok = await dialog.confirm({
+      tone: "danger",
+      danger: true,
+      title: t("clientMods.confirmWipe.title"),
+      message: t(`clientMods.confirmWipe.body.${kind}` as never),
+      okLabel: t("common.delete"),
+    });
+    if (!ok) return;
+    try {
+      const res = await api.del<{ ok: boolean; removed: number }>(
+        `/servers/${serverId}/client-mods/all?kind=${kind}`
+      );
+      mutate(`/servers/${serverId}/client-mods?kind=${kind}`);
+      dialog.toast({
+        tone: "success",
+        message: t("clientMods.wipeOk", { n: res.removed }),
+      });
+    } catch (e) {
+      dialog.alert({
+        tone: "danger",
+        title: t("common.error"),
+        message: e instanceof ApiError ? e.message : String(e),
+      });
+    }
+  }
+
   async function removeOne(name: string): Promise<void> {
     const kind = activeKind;
     const ok = await dialog.confirm({
@@ -334,6 +363,17 @@ export function ClientModsTab({ serverId }: { serverId: string }): JSX.Element {
             <Download size={14} />
             {t("clientMods.exportMrpack")}
           </button>
+          {items.length > 0 && (
+            <button
+              className="btn btn-ghost text-[rgb(var(--danger))]"
+              onClick={() => void wipeAll()}
+              disabled={uploading}
+              title={t("clientMods.wipeTooltip")}
+            >
+              <Trash size={14} />
+              {t("clientMods.wipeAll", { n: items.length })}
+            </button>
+          )}
           {progress && (
             <span className="text-[11px] text-ink-muted">{progress}</span>
           )}

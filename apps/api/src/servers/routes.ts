@@ -1030,6 +1030,26 @@ export async function serversRoutes(app: FastifyInstance): Promise<void> {
     return { ok: true };
   });
 
+  app.delete("/:id/client-mods/all", async (req) => {
+    const { id } = req.params as { id: string };
+    await assertServerPermission(req, id, "server.edit");
+    const kind = clientKindSchema.parse(
+      (req.query as { kind?: string }).kind ?? "mods"
+    );
+    const server = await prisma.server.findUniqueOrThrow({ where: { id } });
+    const client = await NodeClient.forId(server.nodeId);
+    const res = await client.call<{ ok: boolean; removed: number }>(
+      "DELETE",
+      `/servers/${id}/client-mods/all?kind=${kind}`
+    );
+    await writeAudit(req, {
+      action: "server.client-mods.wipe",
+      resource: id,
+      metadata: { kind, removed: res.removed },
+    });
+    return res;
+  });
+
   app.get("/:id/client-mods/auto-detect", async (req) => {
     const { id } = req.params as { id: string };
     await assertServerPermission(req, id, "server.view");

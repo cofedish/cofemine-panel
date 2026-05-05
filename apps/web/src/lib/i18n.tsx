@@ -257,6 +257,17 @@ const en: Dict = {
   "clientMods.uploadKind.mods": "Upload mod jars",
   "clientMods.uploadKind.shaderpacks": "Upload shaderpacks",
   "clientMods.uploadKind.resourcepacks": "Upload resource packs",
+  "clientMods.wipeAll": "Wipe all ({n})",
+  "clientMods.wipeTooltip":
+    "Delete every file in this client-staging area. Useful when stale uploads from a different pack are colliding with the current server's mods.",
+  "clientMods.wipeOk": "Removed {n} files.",
+  "clientMods.confirmWipe.title": "Wipe the staging area?",
+  "clientMods.confirmWipe.body.mods":
+    "Delete every uploaded client mod (.jar/.zip). Server's /data/mods is untouched. Friends downloading the .mrpack after this won't get any of these client-only jars.",
+  "clientMods.confirmWipe.body.shaderpacks":
+    "Delete every uploaded shaderpack (.zip). Friends downloading the .mrpack after this won't get any shaders.",
+  "clientMods.confirmWipe.body.resourcepacks":
+    "Delete every uploaded resource pack (.zip). Friends downloading the .mrpack after this won't get any of these texture/sound packs.",
   "clientMods.uploading": "Uploading {i}/{n}: {name}",
   "clientMods.skipNotJar": "Skipped {name} — not a .jar / .zip",
   "clientMods.skipTooBig": "Skipped {name} — over 100 MB",
@@ -958,6 +969,17 @@ const ru: Dict = {
   "clientMods.uploadKind.mods": "Загрузить моды (.jar)",
   "clientMods.uploadKind.shaderpacks": "Загрузить шейдеры (.zip)",
   "clientMods.uploadKind.resourcepacks": "Загрузить ресурспаки (.zip)",
+  "clientMods.wipeAll": "Очистить всё ({n})",
+  "clientMods.wipeTooltip":
+    "Удалить ВСЕ файлы из этой клиентской папки. Удобно, когда залежи с другой сборки конфликтуют с текущим сервером.",
+  "clientMods.wipeOk": "Удалено {n} файлов.",
+  "clientMods.confirmWipe.title": "Очистить клиентскую папку?",
+  "clientMods.confirmWipe.body.mods":
+    "Удалить ВСЕ загруженные клиентские jar/zip файлы модов. Серверный /data/mods не трогается. Друзья после этого не получат ни одного из этих модов в .mrpack.",
+  "clientMods.confirmWipe.body.shaderpacks":
+    "Удалить ВСЕ загруженные шейдеры (.zip). Друзья после этого не получат шейдеров в .mrpack.",
+  "clientMods.confirmWipe.body.resourcepacks":
+    "Удалить ВСЕ загруженные ресурспаки (.zip). Друзья после этого не получат этих текстур/звуков в .mrpack.",
   "clientMods.uploading": "Загрузка {i}/{n}: {name}",
   "clientMods.skipNotJar": "Пропущен {name} — не .jar / .zip",
   "clientMods.skipTooBig": "Пропущен {name} — больше 100 МБ",
