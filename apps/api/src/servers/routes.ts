@@ -23,7 +23,7 @@ import {
 import { readDownloadProxy, makeProxyUrl } from "../integrations/download-proxy.js";
 import { resetWatchdogState } from "./install-watchdog.js";
 import { reconcileMany } from "./status.js";
-import { streamMrpack } from "./export-mrpack.js";
+import { streamMrpack, resolveMcVersion } from "./export-mrpack.js";
 
 /** Parse the CSV-of-numeric-modIds form that itzg expects in
  *  CF_EXCLUDE_MODS. Permissive on whitespace and stray empty
@@ -1055,7 +1055,28 @@ export async function serversRoutes(app: FastifyInstance): Promise<void> {
     await assertServerPermission(req, id, "server.view");
     const server = await prisma.server.findUniqueOrThrow({ where: { id } });
     const client = await NodeClient.forId(server.nodeId);
-    return client.call("GET", `/servers/${id}/client-mods/auto-detect`);
+    // Pass the server's resolved MC version + loader so the agent can
+    // filter CF-cached client mods to ones built for THIS server. Without
+    // this filter the agent happily picks the first file tagged "Client",
+    // which on a NeoForge pack often turns out to be the Fabric build.
+    const env = ((server.env as Record<string, string> | null) ?? {}) as Record<
+      string,
+      string
+    >;
+    let loader = "";
+    if (env.NEOFORGE_VERSION || env.CF_MOD_LOADER_VERSION) loader = "neoforge";
+    else if (env.FORGE_VERSION) loader = "forge";
+    else if (env.FABRIC_LOADER_VERSION) loader = "fabric";
+    else if (env.QUILT_LOADER_VERSION) loader = "quilt";
+    const mcVersion = resolveMcVersion(server);
+    const params = new URLSearchParams();
+    if (mcVersion) params.set("mcVersion", mcVersion);
+    if (loader) params.set("loader", loader);
+    const qs = params.toString();
+    return client.call(
+      "GET",
+      `/servers/${id}/client-mods/auto-detect${qs ? `?${qs}` : ""}`
+    );
   });
 
   app.post("/:id/client-mods/download", async (req) => {

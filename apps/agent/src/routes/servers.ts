@@ -609,6 +609,7 @@ export async function serversAgentRoutes(app: FastifyInstance): Promise<void> {
    */
   app.get("/servers/:id/client-mods/auto-detect", async (req) => {
     const { id } = req.params as { id: string };
+    const q = req.query as { mcVersion?: string; loader?: string };
     const cacheDir = path.join(
       dataDirFor(id),
       ".cache",
@@ -639,6 +640,29 @@ export async function serversAgentRoutes(app: FastifyInstance): Promise<void> {
     } catch {
       /* dir doesn't exist yet — that's fine */
     }
+    // Build a loader/MC matcher. CF stores loader compatibility as
+    // string entries in gameVersions: "Forge", "NeoForge", "Fabric",
+    // "Quilt" alongside the MC version "1.21.1". A file qualifies for
+    // a NeoForge 1.21.1 server if gameVersions contains BOTH "NeoForge"
+    // and "1.21.1". Without this filter we previously took the first
+    // file tagged "Client" — which on a NeoForge pack would happily
+    // grab the Fabric build of Iris and ship it.
+    const wantLoaderRe =
+      q.loader === "neoforge"
+        ? /^neoforge$/i
+        : q.loader === "forge"
+          ? /^forge$/i
+          : q.loader === "fabric"
+            ? /^fabric$/i
+            : q.loader === "quilt"
+              ? /^quilt$/i
+              : null;
+    function matchesServer(file: any): boolean {
+      const gvs = (file.gameVersions ?? []) as string[];
+      if (q.mcVersion && !gvs.includes(q.mcVersion)) return false;
+      if (wantLoaderRe && !gvs.some((g) => wantLoaderRe.test(g))) return false;
+      return true;
+    }
     for (const e of entries) {
       if (!e.endsWith(".json")) continue;
       let mod: any;
@@ -648,13 +672,13 @@ export async function serversAgentRoutes(app: FastifyInstance): Promise<void> {
       } catch {
         continue;
       }
-      // Find a "Client"-tagged file in this mod's latest releases.
-      // CF marks client-only releases by including the literal string
-      // "Client" in the file's gameVersions array.
+      // Find a "Client"-tagged file in this mod's latest releases that
+      // ALSO matches the server's loader and MC version.
       const files = (mod.latestFiles ?? []) as any[];
       const clientFile = files.find((f) => {
         const gvs = (f.gameVersions ?? []) as string[];
-        return gvs.includes("Client");
+        if (!gvs.includes("Client")) return false;
+        return matchesServer(f);
       });
       if (!clientFile) continue;
       if (!clientFile.downloadUrl) continue;
@@ -1057,6 +1081,20 @@ export async function serversAgentRoutes(app: FastifyInstance): Promise<void> {
         filename: string;
         downloadUrl: string;
       }> = [];
+      // Same matcher as /client-mods/auto-detect: the client-only file
+      // must match the server's loader + MC version, otherwise we'd
+      // happily ship a Fabric build of Iris into a NeoForge pack.
+      const wantLoaderRe =
+        q.loader === "neoforge"
+          ? /^neoforge$/i
+          : q.loader === "forge"
+            ? /^forge$/i
+            : q.loader === "fabric"
+              ? /^fabric$/i
+              : q.loader === "quilt"
+                ? /^quilt$/i
+                : null;
+      const wantMc = q.mcVersion;
       for (const ce of cacheEntries) {
         if (!ce.endsWith(".json")) continue;
         let mod: any;
@@ -1070,7 +1108,10 @@ export async function serversAgentRoutes(app: FastifyInstance): Promise<void> {
         const files = (mod.latestFiles ?? []) as any[];
         const clientFile = files.find((f) => {
           const gvs = (f.gameVersions ?? []) as string[];
-          return gvs.includes("Client");
+          if (!gvs.includes("Client")) return false;
+          if (wantMc && !gvs.includes(wantMc)) return false;
+          if (wantLoaderRe && !gvs.some((g) => wantLoaderRe.test(g))) return false;
+          return true;
         });
         if (!clientFile?.downloadUrl) continue;
         if (bundledFilenames.has(clientFile.fileName)) continue;
