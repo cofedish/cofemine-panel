@@ -3445,6 +3445,15 @@ async function exportMrpackFromCfPack(
     proxyUrl?: string;
     cfPackProjectId?: string;
     cfPackFileId?: string;
+    /** Server's actual loader version, possibly overridden by the user.
+     *  If set, takes precedence over the CF manifest's loader version
+     *  so the .mrpack reflects what's really running, not what the
+     *  pack author originally shipped. */
+    loader?: string;
+    loaderVersion?: string;
+    /** Same idea for MC version (rare but possible — the user could be
+     *  running 1.21.1 on a pack that originally targeted 1.21). */
+    mcVersion?: string;
   },
   base: string
 ): Promise<FastifyReply> {
@@ -3579,19 +3588,31 @@ async function exportMrpackFromCfPack(
     return "mods"; // classId 6 (Mods) and any unknown
   }
 
-  // 6. Build modrinth manifest
+  // 6. Build modrinth manifest. Prefer the server's actual loader/MC
+  // versions over what the CF manifest specifies — the user may have
+  // bumped the loader (loader-version override) past the original pack's
+  // version, and shipping the original would mislead the launcher into
+  // installing the wrong loader. CF manifest is just the fallback.
   const primaryLoader = cfManifest.minecraft.modLoaders.find((m) => m.primary);
-  let modrinthLoaderKey: string | null = null;
-  let modrinthLoaderVer: string | null = null;
+  let cfLoaderShort: string | null = null;
+  let cfLoaderVer: string | null = null;
   if (primaryLoader) {
     const m = /^(neoforge|forge|fabric|quilt)-(.+)$/i.exec(primaryLoader.id);
     if (m) {
-      const k = m[1]!.toLowerCase();
-      modrinthLoaderKey =
-        k === "fabric" ? "fabric-loader" : k === "quilt" ? "quilt-loader" : k;
-      modrinthLoaderVer = m[2]!;
+      cfLoaderShort = m[1]!.toLowerCase();
+      cfLoaderVer = m[2]!;
     }
   }
+  const effectiveLoaderShort = (q.loader ?? cfLoaderShort)?.toLowerCase() ?? null;
+  const effectiveLoaderVer = q.loaderVersion ?? cfLoaderVer;
+  const effectiveMc = q.mcVersion ?? cfManifest.minecraft.version;
+  const modrinthLoaderKey =
+    effectiveLoaderShort === "fabric"
+      ? "fabric-loader"
+      : effectiveLoaderShort === "quilt"
+        ? "quilt-loader"
+        : effectiveLoaderShort;
+
   const packDisplayName = q.packName || cfManifest.name;
   const modrinthIndex = {
     formatVersion: 1,
@@ -3601,18 +3622,20 @@ async function exportMrpackFromCfPack(
     summary: `Cofemine rebuild of ${cfManifest.name} v${cfManifest.version}`,
     files: [] as Array<unknown>,
     dependencies: {
-      minecraft: cfManifest.minecraft.version,
-      ...(modrinthLoaderKey && modrinthLoaderVer
-        ? { [modrinthLoaderKey]: modrinthLoaderVer }
+      minecraft: effectiveMc,
+      ...(modrinthLoaderKey && effectiveLoaderVer
+        ? { [modrinthLoaderKey]: effectiveLoaderVer }
         : {}),
     },
   };
   const friendlyManifest = {
     versionName: `${cfManifest.name} v${cfManifest.version}`,
-    minecraft: cfManifest.minecraft.version,
-    loader: primaryLoader?.id.split("-")[0] ?? null,
-    loaderVersion: modrinthLoaderVer,
+    minecraft: effectiveMc,
+    loader: effectiveLoaderShort,
+    loaderVersion: effectiveLoaderVer,
     cfSource: { projectId, fileId, fileName: packFileName },
+    cfOriginalLoaderVersion: cfLoaderVer,
+    cfOriginalMinecraft: cfManifest.minecraft.version,
     builtAt: new Date().toISOString(),
     builtBy: "Cofemine Panel (CF rebuild)",
   };
