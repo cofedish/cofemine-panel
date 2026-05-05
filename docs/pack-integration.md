@@ -78,9 +78,73 @@
 немного отличаться между запросами (timestamp в `manifest.builtAt`,
 `modrinth.index.json.versionId`).
 
-### 2.2 (нет других публичных endpoints)
+### 2.2 GET `/api/p/<token>.json`
 
-Метаданных без скачивания binary — нет. См. §6 «Recommended additions».
+Метаданные одной сборки без скачивания binary. Дёшево, без обращения к
+агенту.
+
+```json
+{
+  "id": "cmopj53e7000599ihe0bgqk3r",
+  "displayName": "Main pack",
+  "versionName": "Main pack",
+  "minecraft": "1.21.1",
+  "loader": "neoforge",
+  "loaderVersion": "21.1.228",
+  "mrpackUrl": "https://panel.cofemine.ru/api/p/abcd...mrpack",
+  "metadataUrl": "https://panel.cofemine.ru/api/p/abcd...json",
+  "updatedAt": "2026-05-05T12:00:00.000Z"
+}
+```
+
+| Header                | Value                                             |
+|-----------------------|---------------------------------------------------|
+| `Content-Type`        | `application/json`                                |
+| `Cache-Control`       | `no-store`                                        |
+
+`404` с `{"error":"Not found"}` если токен невалиден или отозван.
+
+### 2.3 GET `/api/p/index.json`
+
+Листинг всех сборок с включённым публичным токеном на этой панели.
+
+```json
+{
+  "packs": [
+    {
+      "id": "cmopj53e7000599ihe0bgqk3r",
+      "displayName": "Main pack",
+      "versionName": "Main pack",
+      "minecraft": "1.21.1",
+      "loader": "neoforge",
+      "loaderVersion": "21.1.228",
+      "mrpackUrl": "https://panel.cofemine.ru/api/p/abcd...mrpack",
+      "metadataUrl": "https://panel.cofemine.ru/api/p/abcd...json",
+      "updatedAt": "2026-05-05T12:00:00.000Z"
+    },
+    {
+      "id": "...",
+      "displayName": "Tech-only pack",
+      "minecraft": "1.20.1",
+      "loader": "fabric",
+      "loaderVersion": "0.16.5",
+      "mrpackUrl": "https://panel.cofemine.ru/api/p/efgh...mrpack",
+      "metadataUrl": "https://panel.cofemine.ru/api/p/efgh...json",
+      "updatedAt": "2026-04-30T18:42:11.000Z"
+    }
+  ],
+  "generatedAt": "2026-05-05T12:00:00.000Z"
+}
+```
+
+Auth — нет. Кто знает URL панели — может перечислить публичные сборки.
+Если сервер не должен фигурировать в листинге — у него не должен быть
+включён публичный токен (или его нужно отозвать через Client Pack →
+«Disable»).
+
+`displayName` берётся из `server.name`. URL'ы (mrpackUrl / metadataUrl)
+строятся от `Host` запроса с учётом `X-Forwarded-*`, так что лаунчер
+получает сразу готовые ссылки на тот же домен, через который пришёл.
 
 ---
 
@@ -294,61 +358,32 @@ return PACKS.map((p) => (
 
 ---
 
-## 6. Recommended additions (panel side)
+## 6. Possible future additions (panel side)
 
-Чтобы интеграция была удобнее, на панель стоит добавить эндпоинты ниже.
-Если AI-агент видит, что без них клиентский UX страдает — пусть
-запросит / реализует:
+В текущей версии для интеграции достаточно §2.1–2.3. Но если потребуется,
+есть смысл добавить:
 
-### 6.1 `GET /api/p/<token>.json`
+### 6.1 Расширить `/api/p/<token>.json` полями
+- `modCount: number` — посчитать файлы в `/data/mods` + `/data/.cofemine-client/mods`.
+- `approxSizeBytes: number` — сумма размеров всех файлов, включаемых в ZIP.
+- `contentHash: "sha256:..."` — детерминированный fingerprint
+  (sorted list of `<filename>:<size>` для server + client mods + configs).
+  Позволит лаунчеру дёшево обнаруживать обновления без скачивания binary.
 
-Metadata-only (без binary), для прогрева UI лаунчера.
+Сейчас этих полей нет — они требуют обращения к агенту, что замедляет
+metadata-запрос.
 
-```json
-{
-  "versionName": "MyPack",
-  "minecraft": "1.21.1",
-  "loader": "neoforge",
-  "loaderVersion": "21.1.228",
-  "modCount": 142,
-  "approxSizeBytes": 187654321,
-  "builtAt": "2026-05-05T12:00:00.000Z",
-  "contentHash": "sha256:..."
-}
-```
+### 6.2 `HEAD /api/p/<token>.mrpack` с `ETag`
 
-`contentHash` — SHA-256 от детерминированного фингерпринта (sorted list of
-`<filename>:<size>` для server mods + client mods + configs). Лаунчер
-сохраняет его и сравнивает на «есть ли апдейт» без скачивания.
-
-### 6.2 `HEAD /api/p/<token>.mrpack`
-
-Должен возвращать `ETag: "<contentHash>"` + `Last-Modified`. После этого
-лаунчер может делать conditional GET с `If-None-Match` → `304 Not Modified`,
+Возвращать `ETag: "<contentHash>"` + `Last-Modified`. После этого лаунчер
+может делать conditional GET с `If-None-Match` → `304 Not Modified`,
 если ничего не изменилось.
 
-### 6.3 `GET /api/packs/public-index.json`
+### 6.3 Гейт на `/api/p/index.json`
 
-Multi-pack листинг — список всех серверов с активным `publicPackToken`,
-с metadata (как §6.1) + URL. Опционально гейтить по `X-Index-Token` header
-(один shared secret), чтобы не индексировать всю панель публично.
-
-```json
-{
-  "packs": [
-    {
-      "id": "<server-id>",
-      "displayName": "Main",
-      "mrpackUrl": "https://panel.cofemine.ru/api/p/<token>.mrpack",
-      "metadata": { /* §6.1 shape */ }
-    }
-  ],
-  "generatedAt": "2026-05-05T12:00:00.000Z"
-}
-```
-
-Это позволит лаунчеру и сайту брать список сборок одним запросом, без
-ручного конфига.
+Если нужно прятать листинг от случайных посетителей — добавить опциональный
+shared secret через header `X-Index-Token` (читать из конфига панели).
+Лаунчер хранит секрет в собственной конфигурации.
 
 ---
 
