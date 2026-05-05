@@ -1122,20 +1122,23 @@ export async function serversAgentRoutes(app: FastifyInstance): Promise<void> {
       }
     }
 
-    // Client-leaning dirs — shaderpacks/resourcepacks are pure-client
-    // content, the server doesn't render them. Prefer client-staging
-    // (.cofemine-client/<sub>/) since that's where the panel UI lets
-    // owners drop these. Fall back to /data/<sub>/ if someone dumped
-    // files there directly (Files tab / SFTP).
+    // Shaderpacks / resourcepacks: bundle BOTH server and client-staging
+    // sources. The CF pack's overrides extract to /data/<sub>/, the user
+    // can additionally drop their own .zip via the panel's client-staging
+    // upload — both should ship. Different filenames → no collision in
+    // the ZIP. Same filename → archiver writes both entries; PKZIP
+    // extractors take the last one (the client-staging copy, since we
+    // add server first).
     for (const sub of ["shaderpacks", "resourcepacks"]) {
-      const clientSrc = path.join(base, ".cofemine-client", sub);
       const serverSrc = path.join(base, sub);
+      if (await dirExists(serverSrc)) {
+        archive.directory(serverSrc, `overrides/${sub}`);
+        includedDirs.push(`server/${sub}`);
+      }
+      const clientSrc = path.join(base, ".cofemine-client", sub);
       if (await dirExists(clientSrc)) {
         archive.directory(clientSrc, `overrides/${sub}`);
         includedDirs.push(`client/${sub}`);
-      } else if (await dirExists(serverSrc)) {
-        archive.directory(serverSrc, `overrides/${sub}`);
-        includedDirs.push(`server/${sub}`);
       }
     }
     req.log.info(
@@ -3458,10 +3461,12 @@ async function openHttpStream(
     await res.body.dump().catch(() => {});
     throw new Error(`HTTP ${res.statusCode}`);
   }
-  // undici returns a web ReadableStream; convert to Node Readable
-  // so archiver / node:fs APIs accept it.
-  const { Readable } = await import("node:stream");
-  return Readable.fromWeb(res.body as any);
+  // `res.body` is undici's BodyReadable, which already extends
+  // Node's Readable — pipe-compatible with archiver / fs.createWriteStream
+  // out of the box. The earlier `Readable.fromWeb(res.body)` call was a
+  // bug: fromWeb expects a WHATWG ReadableStream, throws TypeError on
+  // BodyReadable.
+  return res.body as unknown as NodeJS.ReadableStream;
 }
 
 /**
