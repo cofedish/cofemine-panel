@@ -1,7 +1,7 @@
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import type { Server } from "@prisma/client";
 import { prisma } from "../db.js";
-import { streamMrpack } from "./export-mrpack.js";
+import { streamMrpack, resolveMcVersion } from "./export-mrpack.js";
 
 /**
  * Unauthenticated client-pack endpoints. Mounted at root under /p/.
@@ -61,7 +61,7 @@ function packMetadata(server: Server, baseUrl: string): PackMetadata {
     id: server.id,
     displayName: server.name,
     versionName: server.name,
-    minecraft: server.version,
+    minecraft: resolveMcVersion(server),
     loader,
     loaderVersion,
     mrpackUrl: `${baseUrl}/api/p/${token}.mrpack`,

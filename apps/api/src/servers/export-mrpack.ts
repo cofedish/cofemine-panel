@@ -8,6 +8,56 @@ function resolveAgentToken(nodeName: string): string {
   return perNode ?? process.env.AGENT_TOKEN ?? "";
 }
 
+const MC_VERSION_RE = /^\d+\.\d+(\.\d+)?$/;
+
+/**
+ * Derive a real Minecraft version (e.g. "1.21.1") from the server record.
+ *
+ * `server.version` is what's typed into the panel's "version" field, but
+ * for CF / Modrinth packs that's frequently "LATEST" — itzg accepts that
+ * literal as "use whatever the pack manifest says". The string then leaks
+ * into our generated .mrpack as `dependencies.minecraft = "LATEST"`, and
+ * any sane launcher (HMCL, Prism, Modrinth App) errors out trying to
+ * resolve it against Mojang's piston-meta.
+ *
+ * Strategy: if `server.version` already looks like a real version
+ * (X.Y / X.Y.Z), use it. Otherwise derive from the loader-version env
+ * because every loader's version string carries the MC version it
+ * targets:
+ *   - NeoForge "21.1.228"     → "1.21.1"
+ *   - NeoForge "21.0.143"     → "1.21"      (patch 0 collapses)
+ *   - Forge    "1.20.1-47.3.0" → "1.20.1"
+ *   - Fabric / Quilt: loader version doesn't carry MC version → fall
+ *     back to whatever's in server.version (best effort).
+ */
+export function resolveMcVersion(server: Server): string {
+  const stored = server.version;
+  if (MC_VERSION_RE.test(stored)) return stored;
+  const env = ((server.env as Record<string, string> | null) ?? {}) as Record<
+    string,
+    string
+  >;
+  if (env.NEOFORGE_VERSION) {
+    const parts = env.NEOFORGE_VERSION.split(".");
+    if (parts.length >= 2) {
+      const [major, patch] = parts;
+      return patch === "0" ? `1.${major}` : `1.${major}.${patch}`;
+    }
+  }
+  if (env.FORGE_VERSION && env.FORGE_VERSION.includes("-")) {
+    const mc = env.FORGE_VERSION.split("-")[0];
+    if (mc && MC_VERSION_RE.test(mc)) return mc;
+  }
+  if (env.CF_MOD_LOADER_VERSION) {
+    const parts = env.CF_MOD_LOADER_VERSION.split(".");
+    if (parts.length >= 2) {
+      const [major, patch] = parts;
+      return patch === "0" ? `1.${major}` : `1.${major}.${patch}`;
+    }
+  }
+  return stored;
+}
+
 /**
  * Stream the agent's .mrpack export through the panel to the caller.
  * Used by both the authenticated /servers/:id/export-mrpack endpoint
@@ -41,7 +91,7 @@ export async function streamMrpack(
   }
   const params = new URLSearchParams();
   params.set("packName", server.name);
-  params.set("mcVersion", server.version);
+  params.set("mcVersion", resolveMcVersion(server));
   if (loader) params.set("loader", loader);
   if (loaderVersion) params.set("loaderVersion", loaderVersion);
   const proxy = await readDownloadProxy().catch(() => null);
