@@ -1,4 +1,5 @@
 import type { FastifyInstance } from "fastify";
+import { randomBytes } from "node:crypto";
 import { z } from "zod";
 import { request } from "undici";
 import {
@@ -1090,7 +1091,7 @@ export async function serversRoutes(app: FastifyInstance): Promise<void> {
   app.post("/:id/public-pack-token", async (req) => {
     const { id } = req.params as { id: string };
     await assertServerPermission(req, id, "server.edit");
-    const token = require("node:crypto").randomBytes(16).toString("hex");
+    const token = randomBytes(16).toString("hex");
     await prisma.server.update({
       where: { id },
       data: { publicPackToken: token },
