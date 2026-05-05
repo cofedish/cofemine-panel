@@ -554,13 +554,8 @@ export async function serversAgentRoutes(app: FastifyInstance): Promise<void> {
   // miniмap mods, Iris/Sodium, Distant Horizons, JEI client extras…).
   // They live at `<dataDir>/.cofemine-client/mods/`. The leading dot
   // hides them from itzg's mod scanner; nothing in itzg's image walks
-  // dot-prefixed paths.
-  //
-  // Side metadata for *every* mod (both client-only ones above and the
-  // regular /data/mods entries) lives at `<dataDir>/.cofemine-client/
-  // sides.json`. The .mrpack generator reads this to set per-file
-  // env.client / env.server. "auto" defers to the file's Modrinth
-  // metadata; explicit "server" / "client" / "both" override it.
+  // dot-prefixed paths. The .mrpack export bundles every jar from this
+  // directory + every jar from /data/mods/ into `overrides/mods/`.
 
   app.get("/servers/:id/client-mods", async (req) => {
     const { id } = req.params as { id: string };
@@ -754,17 +749,6 @@ export async function serversAgentRoutes(app: FastifyInstance): Promise<void> {
     return { ok: true };
   });
 
-  app.get("/servers/:id/sides", async (req) => {
-    const { id } = req.params as { id: string };
-    const file = path.join(dataDirFor(id), ".cofemine-client", "sides.json");
-    try {
-      const text = await fs.readFile(file, "utf8");
-      return JSON.parse(text);
-    } catch {
-      return {};
-    }
-  });
-
   /**
    * Fix root-owned files in /data left over from earlier root-running
    * installer phases. uid 1000 (itzg's runtime user) needs to be able
@@ -856,48 +840,17 @@ export async function serversAgentRoutes(app: FastifyInstance): Promise<void> {
     };
   });
 
-  app.put("/servers/:id/sides", async (req) => {
-    const { id } = req.params as { id: string };
-    const body = z
-      .record(
-        z.string().min(1).max(256),
-        z.enum(["server", "client", "both", "auto"])
-      )
-      .parse(req.body);
-    const dir = path.join(dataDirFor(id), ".cofemine-client");
-    await ensureDir(dir);
-    await fs.writeFile(
-      path.join(dir, "sides.json"),
-      JSON.stringify(body, null, 2),
-      "utf8"
-    );
-    return { ok: true };
-  });
-
   /**
    * Generate a Modrinth-format pack (.mrpack) from the server's
    * mod state and stream it back as a downloadable ZIP.
    *
-   * v1 strategy — bundle everything as overrides:
-   *   /data/mods/*           → server-overrides/mods/<name>  (default)
-   *                            or overrides/mods/<name>  if side=both
-   *   /data/.cofemine-client/mods/*  → client-overrides/mods/<name>
-   *
-   * Per-file side comes from .cofemine-client/sides.json. Defaults:
-   *   - files in /data/mods/ default to "both" (most modpack mods are
-   *     dual-side; explicit "server"-only marks let admins flag the
-   *     handful that aren't, like dynmap-server).
-   *   - files in /data/.cofemine-client/mods/ default to "client".
-   *
-   * Bundling-everything is bigger than referencing Modrinth CDN URLs,
-   * but it works for ANY source — CF distribution-blocked mods,
-   * manual uploads, custom builds — without needing API access from
-   * the importing client. The friend opens the .mrpack in Prism /
-   * ATLauncher / Modrinth App and gets a complete client install in
-   * one click.
-   *
-   * The manifest carries name, MC version, and the loader-version
-   * dependency so the launcher knows which loader profile to create.
+   * Strategy: bundle EVERYTHING as overrides. Every jar from
+   * `/data/mods/` and `/data/.cofemine-client/mods/` lands in
+   * `overrides/mods/`. Configs and resourcepacks ride along under
+   * `overrides/<sub>/`. No side-splitting, no allow/deny — the friend
+   * gets the same thing the server runs (plus whatever you've staged
+   * in the client-only area). HMCL, Modrinth App, Prism all extract
+   * `overrides/` so the pack works everywhere.
    */
   app.get("/servers/:id/export-mrpack", async (req, reply) => {
     const { id } = req.params as { id: string };
@@ -910,13 +863,6 @@ export async function serversAgentRoutes(app: FastifyInstance): Promise<void> {
       includeAutoDetected?: string;
     };
     const base = dataDirFor(id);
-    const sideFile = path.join(base, ".cofemine-client", "sides.json");
-    let sides: Record<string, "server" | "client" | "both" | "auto"> = {};
-    try {
-      sides = JSON.parse(await fs.readFile(sideFile, "utf8"));
-    } catch {
-      /* no overrides yet */
-    }
 
     const serverModsDir = path.join(base, "mods");
     const clientModsDir = path.join(base, ".cofemine-client", "mods");
@@ -925,14 +871,12 @@ export async function serversAgentRoutes(app: FastifyInstance): Promise<void> {
       sourcePath: string;
       filename: string;
       origin: "server" | "client";
-      side: "server" | "client" | "both";
     };
     const entries: Entry[] = [];
 
     async function collect(
       dir: string,
-      origin: "server" | "client",
-      defaultSide: "server" | "client" | "both"
+      origin: "server" | "client"
     ): Promise<void> {
       let items: string[] = [];
       try {
@@ -942,19 +886,15 @@ export async function serversAgentRoutes(app: FastifyInstance): Promise<void> {
       }
       for (const name of items) {
         if (!/\.(jar|zip)$/i.test(name)) continue;
-        const userSide = sides[name];
-        const side: "server" | "client" | "both" =
-          userSide && userSide !== "auto" ? userSide : defaultSide;
         entries.push({
           sourcePath: path.join(dir, name),
           filename: name,
           origin,
-          side,
         });
       }
     }
-    await collect(serverModsDir, "server", "both");
-    await collect(clientModsDir, "client", "client");
+    await collect(serverModsDir, "server");
+    await collect(clientModsDir, "client");
 
     const packName = q.packName ?? `cofemine-${id.slice(0, 8)}`;
     const versionId = new Date().toISOString().slice(0, 10);
@@ -1012,22 +952,11 @@ export async function serversAgentRoutes(app: FastifyInstance): Promise<void> {
     // Pipe archive bytes straight into the HTTP response.
     archive.pipe(reply.raw);
 
-    // Bundle every local jar into overrides/mods/ (NOT split into
-    // client-overrides/ and server-overrides/). Reasoning: HMCL — one
-    // of the most popular launchers in the RU/CN segment — only
-    // extracts the canonical `overrides/` directory and silently drops
-    // `client-overrides/` and `server-overrides/`. Modrinth App + Prism
-    // honour the side-split; HMCL doesn't. Splitting saves a few MB on
-    // a Modrinth-App install but breaks the entire pack on HMCL, so
-    // pragmatically we collapse to `overrides/` for everyone.
-    //
-    // Server-only mods (sides.json says "server") are SKIPPED entirely:
-    // the client doesn't need them, and shipping a server-only jar to
-    // the client at best wastes bandwidth, at worst crashes Forge if
-    // the mod has a side-strict @Mod registration.
+    // Bundle every jar into overrides/mods/. No side-splitting — HMCL
+    // doesn't extract client-overrides/ / server-overrides/, so the
+    // canonical `overrides/` is the only safe target across launchers.
     const bundledFilenames = new Set<string>();
     for (const e of entries) {
-      if (e.side === "server") continue; // skip server-only on client pack
       archive.file(e.sourcePath, {
         name: `overrides/mods/${e.filename}`,
       });
@@ -1133,7 +1062,6 @@ export async function serversAgentRoutes(app: FastifyInstance): Promise<void> {
       {
         serverMods: entries.filter((e) => e.origin === "server").length,
         clientMods: entries.filter((e) => e.origin === "client").length,
-        skippedServerOnly: entries.filter((e) => e.side === "server").length,
         bundledTotal: bundledFilenames.size,
         includedDirs,
       },

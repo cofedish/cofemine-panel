@@ -966,11 +966,6 @@ export async function serversRoutes(app: FastifyInstance): Promise<void> {
   // minimaps, Iris/Sodium, Distant Horizons, JEI client extras, etc.).
   // The agent stores them at /data/.cofemine-client/mods/, hidden from
   // itzg's mod scanner so they never get loaded by the server JVM.
-  //
-  // Side metadata for every mod (server + client) lives in
-  // /data/.cofemine-client/sides.json and is consulted by the .mrpack
-  // export to set per-file env.client / env.server. "auto" = use the
-  // mod's Modrinth client_side / server_side metadata.
 
   app.get("/:id/client-mods", async (req) => {
     const { id } = req.params as { id: string };
@@ -1064,22 +1059,6 @@ export async function serversRoutes(app: FastifyInstance): Promise<void> {
     return result;
   });
 
-  app.get("/:id/sides", async (req) => {
-    const { id } = req.params as { id: string };
-    await assertServerPermission(req, id, "server.view");
-    const server = await prisma.server.findUniqueOrThrow({ where: { id } });
-    const client = await NodeClient.forId(server.nodeId);
-    return client.call("GET", `/servers/${id}/sides`);
-  });
-
-  app.put("/:id/sides", async (req) => {
-    const { id } = req.params as { id: string };
-    await assertServerPermission(req, id, "server.edit");
-    const server = await prisma.server.findUniqueOrThrow({ where: { id } });
-    const client = await NodeClient.forId(server.nodeId);
-    return client.call("PUT", `/servers/${id}/sides`, req.body);
-  });
-
   /**
    * Generate or rotate the public pack token for this server.
    * Once set, the URL `/p/<token>.mrpack` (registered separately
@@ -1119,10 +1098,10 @@ export async function serversRoutes(app: FastifyInstance): Promise<void> {
 
   /**
    * Stream the agent's .mrpack export through to the browser. The
-   * agent generates a ZIP on the fly — server mods + uploaded client
-   * mods, each placed in the appropriate overrides path based on the
-   * sides.json metadata. We don't buffer here; the response is piped
-   * straight from agent → panel → browser.
+   * agent generates a ZIP on the fly — every jar from /data/mods
+   * plus the client-mods staging area, all under overrides/. We don't
+   * buffer here; the response is piped straight from agent → panel →
+   * browser.
    */
   app.get("/:id/export-mrpack", async (req, reply) => {
     const { id } = req.params as { id: string };
