@@ -967,17 +967,29 @@ export async function serversRoutes(app: FastifyInstance): Promise<void> {
   // The agent stores them at /data/.cofemine-client/mods/, hidden from
   // itzg's mod scanner so they never get loaded by the server JVM.
 
+  // The `kind` query param picks the staging subdir under
+  // .cofemine-client/. Default `mods`, also `shaderpacks` and
+  // `resourcepacks`. Anything else falls back to `mods` on the agent
+  // side.
+  const clientKindSchema = z.enum(["mods", "shaderpacks", "resourcepacks"]).default("mods");
+
   app.get("/:id/client-mods", async (req) => {
     const { id } = req.params as { id: string };
     await assertServerPermission(req, id, "server.view");
+    const kind = clientKindSchema.parse(
+      (req.query as { kind?: string }).kind ?? "mods"
+    );
     const server = await prisma.server.findUniqueOrThrow({ where: { id } });
     const client = await NodeClient.forId(server.nodeId);
-    return client.call("GET", `/servers/${id}/client-mods`);
+    return client.call("GET", `/servers/${id}/client-mods?kind=${kind}`);
   });
 
   app.post("/:id/client-mods", async (req) => {
     const { id } = req.params as { id: string };
     await assertServerPermission(req, id, "server.edit");
+    const kind = clientKindSchema.parse(
+      (req.query as { kind?: string }).kind ?? "mods"
+    );
     const body = z
       .object({
         filename: z.string().min(1).max(256),
@@ -988,13 +1000,13 @@ export async function serversRoutes(app: FastifyInstance): Promise<void> {
     const client = await NodeClient.forId(server.nodeId);
     const res = await client.call(
       "POST",
-      `/servers/${id}/client-mods`,
+      `/servers/${id}/client-mods?kind=${kind}`,
       body
     );
     await writeAudit(req, {
       action: "server.client-mods.upload",
       resource: id,
-      metadata: { name: body.filename },
+      metadata: { name: body.filename, kind },
     });
     return res;
   });
@@ -1002,17 +1014,18 @@ export async function serversRoutes(app: FastifyInstance): Promise<void> {
   app.delete("/:id/client-mods", async (req) => {
     const { id } = req.params as { id: string };
     await assertServerPermission(req, id, "server.edit");
-    const q = req.query as { name?: string };
+    const q = req.query as { name?: string; kind?: string };
+    const kind = clientKindSchema.parse(q.kind ?? "mods");
     const server = await prisma.server.findUniqueOrThrow({ where: { id } });
     const client = await NodeClient.forId(server.nodeId);
     await client.call(
       "DELETE",
-      `/servers/${id}/client-mods?name=${encodeURIComponent(q.name ?? "")}`
+      `/servers/${id}/client-mods?kind=${kind}&name=${encodeURIComponent(q.name ?? "")}`
     );
     await writeAudit(req, {
       action: "server.client-mods.delete",
       resource: id,
-      metadata: { name: q.name },
+      metadata: { name: q.name, kind },
     });
     return { ok: true };
   });

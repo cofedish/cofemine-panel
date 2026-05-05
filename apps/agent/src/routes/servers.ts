@@ -557,9 +557,24 @@ export async function serversAgentRoutes(app: FastifyInstance): Promise<void> {
   // dot-prefixed paths. The .mrpack export bundles every jar from this
   // directory + every jar from /data/mods/ into `overrides/mods/`.
 
+  /** Client-pack staging area kind. Each maps to a subdirectory under
+   *  .cofemine-client/ that gets bundled into overrides/<kind>/ when
+   *  the .mrpack is exported. */
+  const CLIENT_KINDS = ["mods", "shaderpacks", "resourcepacks"] as const;
+  type ClientKind = (typeof CLIENT_KINDS)[number];
+  function parseClientKind(raw: unknown): ClientKind {
+    return CLIENT_KINDS.includes(raw as ClientKind)
+      ? (raw as ClientKind)
+      : "mods";
+  }
+  function clientStagingDir(serverId: string, kind: ClientKind): string {
+    return path.join(dataDirFor(serverId), ".cofemine-client", kind);
+  }
+
   app.get("/servers/:id/client-mods", async (req) => {
     const { id } = req.params as { id: string };
-    const dir = path.join(dataDirFor(id), ".cofemine-client", "mods");
+    const kind = parseClientKind((req.query as { kind?: string }).kind);
+    const dir = clientStagingDir(id, kind);
     await ensureDir(dir);
     const entries = await fs.readdir(dir, { withFileTypes: true });
     const out: Array<{ name: string; size: number; mtime: string }> = [];
@@ -707,22 +722,31 @@ export async function serversAgentRoutes(app: FastifyInstance): Promise<void> {
 
   app.post("/servers/:id/client-mods", async (req, reply) => {
     const { id } = req.params as { id: string };
+    const kind = parseClientKind((req.query as { kind?: string }).kind);
     const body = z
       .object({
         filename: z.string().min(1).max(256),
-        // base64-encoded jar bytes. We accept up to ~50MB per jar in
-        // a single request — most client mods (Iris, Xaero, Sodium)
-        // are well under 5MB.
         contentBase64: z.string().min(1),
       })
       .parse(req.body);
-    if (!/\.(jar|zip)$/i.test(body.filename)) {
-      return reply.code(400).send({ error: "Only .jar / .zip files allowed" });
+    // Mods are .jar (or rare .zip-format mods); shaderpacks and
+    // resourcepacks are always .zip. Reject mismatched extensions
+    // early so the user doesn't end up with a shaderpack uploaded
+    // into mods/ silently.
+    const allowed =
+      kind === "mods" ? /\.(jar|zip)$/i : /\.zip$/i;
+    if (!allowed.test(body.filename)) {
+      return reply.code(400).send({
+        error:
+          kind === "mods"
+            ? "Only .jar / .zip files allowed for mods"
+            : `Only .zip files allowed for ${kind}`,
+      });
     }
     if (body.filename.includes("/") || body.filename.includes("\\")) {
       return reply.code(400).send({ error: "Bare filename only" });
     }
-    const dir = path.join(dataDirFor(id), ".cofemine-client", "mods");
+    const dir = clientStagingDir(id, kind);
     await ensureDir(dir);
     const buf = Buffer.from(body.contentBase64, "base64");
     if (buf.length > 100 * 1024 * 1024) {
@@ -734,17 +758,13 @@ export async function serversAgentRoutes(app: FastifyInstance): Promise<void> {
 
   app.delete("/servers/:id/client-mods", async (req) => {
     const { id } = req.params as { id: string };
-    const q = req.query as { name?: string };
+    const q = req.query as { name?: string; kind?: string };
     if (!q.name) return { ok: true };
     if (q.name.includes("/") || q.name.includes("\\")) {
       return { ok: false };
     }
-    const file = path.join(
-      dataDirFor(id),
-      ".cofemine-client",
-      "mods",
-      q.name
-    );
+    const kind = parseClientKind(q.kind);
+    const file = path.join(clientStagingDir(id, kind), q.name);
     await fs.rm(file, { force: true });
     return { ok: true };
   });
@@ -1051,11 +1071,38 @@ export async function serversAgentRoutes(app: FastifyInstance): Promise<void> {
       }
     }
     const includedDirs: string[] = [];
-    for (const sub of ["config", "resourcepacks", "kubejs", "defaultconfigs"]) {
+
+    // Server-side dirs — pulled from /data/<sub>/. These are populated
+    // by the server (configs generated, kubejs scripts authored, etc.)
+    // and there's no client-side equivalent worth shipping.
+    for (const sub of [
+      "config",
+      "kubejs",
+      "defaultconfigs",
+      "scripts",
+      "openloader",
+    ]) {
       const src = path.join(base, sub);
       if (await dirExists(src)) {
         archive.directory(src, `overrides/${sub}`);
-        includedDirs.push(sub);
+        includedDirs.push(`server/${sub}`);
+      }
+    }
+
+    // Client-leaning dirs — shaderpacks/resourcepacks are pure-client
+    // content, the server doesn't render them. Prefer client-staging
+    // (.cofemine-client/<sub>/) since that's where the panel UI lets
+    // owners drop these. Fall back to /data/<sub>/ if someone dumped
+    // files there directly (Files tab / SFTP).
+    for (const sub of ["shaderpacks", "resourcepacks"]) {
+      const clientSrc = path.join(base, ".cofemine-client", sub);
+      const serverSrc = path.join(base, sub);
+      if (await dirExists(clientSrc)) {
+        archive.directory(clientSrc, `overrides/${sub}`);
+        includedDirs.push(`client/${sub}`);
+      } else if (await dirExists(serverSrc)) {
+        archive.directory(serverSrc, `overrides/${sub}`);
+        includedDirs.push(`server/${sub}`);
       }
     }
     req.log.info(

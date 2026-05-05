@@ -18,18 +18,21 @@ import { useDialog } from "./dialog-provider";
 import { useT } from "@/lib/i18n";
 
 /**
- * Per-server staging area for client-only mods (shaders, minimaps,
- * Iris/Sodium, Distant Horizons, JEI client extras…). Files uploaded
- * here are NEVER installed on the server — they live in /data/.cofemine
- * -client/mods/ which itzg's mod scanner ignores. They get bundled
- * into the .mrpack export so a friend importing the pack into Prism
- * Launcher gets a complete client install.
+ * Per-server staging area for client-only content that ships with the
+ * .mrpack export but isn't installed on the server. Three kinds:
+ *   - mods (.jar/.zip)        — Iris, Sodium, Xaero, JEI client extras…
+ *   - shaderpacks (.zip)      — BSL, Complementary, SEUS, etc.
+ *   - resourcepacks (.zip)    — texture/sound packs the friend should get
  *
- * The "Download .mrpack" button at the bottom triggers GET /servers/
- * :id/export-mrpack on the panel, which streams a freshly-built ZIP
- * with the server's mods (under server-overrides/ or overrides/) plus
- * everything in this list (under client-overrides/).
+ * Each kind lives in /data/.cofemine-client/<kind>/ on the agent.
+ * itzg's mod scanner ignores dot-prefixed paths, so nothing here ever
+ * loads on the server. The .mrpack export bundles every kind into
+ * `overrides/<kind>/` so launchers (HMCL, Prism, Modrinth App) just
+ * extract them straight into the client instance.
  */
+
+type ClientKind = "mods" | "shaderpacks" | "resourcepacks";
+const ALL_KINDS: ClientKind[] = ["mods", "shaderpacks", "resourcepacks"];
 
 type ClientMod = {
   name: string;
@@ -53,8 +56,9 @@ export function ClientModsTab({ serverId }: { serverId: string }): JSX.Element {
   const fileRef = useRef<HTMLInputElement | null>(null);
   const [uploading, setUploading] = useState(false);
   const [progress, setProgress] = useState<string>("");
+  const [activeKind, setActiveKind] = useState<ClientKind>("mods");
   const { data, isLoading } = useSWR<{ mods: ClientMod[] }>(
-    `/servers/${serverId}/client-mods`,
+    `/servers/${serverId}/client-mods?kind=${activeKind}`,
     fetcher
   );
   const { data: detected } = useSWR<{ detected: DetectedClientMod[] }>(
@@ -151,7 +155,7 @@ export function ClientModsTab({ serverId }: { serverId: string }): JSX.Element {
       });
       const failed = result.results.filter((r) => !r.ok);
       const ok = result.results.length - failed.length;
-      mutate(`/servers/${serverId}/client-mods`);
+      mutate(`/servers/${serverId}/client-mods?kind=mods`);
       mutate(`/servers/${serverId}/client-mods/auto-detect`);
       if (failed.length > 0) {
         dialog.toast({
@@ -179,15 +183,29 @@ export function ClientModsTab({ serverId }: { serverId: string }): JSX.Element {
     }
   }
 
+  // Mods accept .jar OR .zip (rare but valid for some loaders);
+  // shaderpacks and resourcepacks are always .zip.
+  const acceptForKind: Record<ClientKind, string> = {
+    mods: ".jar,.zip",
+    shaderpacks: ".zip",
+    resourcepacks: ".zip",
+  };
+  const allowedRegex: Record<ClientKind, RegExp> = {
+    mods: /\.(jar|zip)$/i,
+    shaderpacks: /\.zip$/i,
+    resourcepacks: /\.zip$/i,
+  };
+
   async function uploadFiles(files: FileList | null): Promise<void> {
     if (!files || files.length === 0) return;
+    const kind = activeKind;
     setUploading(true);
     try {
       let i = 0;
       for (const f of Array.from(files)) {
         i++;
         setProgress(t("clientMods.uploading", { i, n: files.length, name: f.name }));
-        if (!/\.(jar|zip)$/i.test(f.name)) {
+        if (!allowedRegex[kind].test(f.name)) {
           dialog.toast({
             tone: "warning",
             message: t("clientMods.skipNotJar", { name: f.name }),
@@ -203,13 +221,13 @@ export function ClientModsTab({ serverId }: { serverId: string }): JSX.Element {
         }
         const buf = await f.arrayBuffer();
         const b64 = bufferToBase64(buf);
-        await api.post(`/servers/${serverId}/client-mods`, {
+        await api.post(`/servers/${serverId}/client-mods?kind=${kind}`, {
           filename: f.name,
           contentBase64: b64,
         });
       }
       setProgress("");
-      mutate(`/servers/${serverId}/client-mods`);
+      mutate(`/servers/${serverId}/client-mods?kind=${kind}`);
     } catch (e) {
       dialog.alert({
         tone: "danger",
@@ -224,6 +242,7 @@ export function ClientModsTab({ serverId }: { serverId: string }): JSX.Element {
   }
 
   async function removeOne(name: string): Promise<void> {
+    const kind = activeKind;
     const ok = await dialog.confirm({
       tone: "danger",
       danger: true,
@@ -234,9 +253,9 @@ export function ClientModsTab({ serverId }: { serverId: string }): JSX.Element {
     if (!ok) return;
     try {
       await api.del(
-        `/servers/${serverId}/client-mods?name=${encodeURIComponent(name)}`
+        `/servers/${serverId}/client-mods?kind=${kind}&name=${encodeURIComponent(name)}`
       );
-      mutate(`/servers/${serverId}/client-mods`);
+      mutate(`/servers/${serverId}/client-mods?kind=${kind}`);
     } catch (e) {
       dialog.alert({
         tone: "danger",
@@ -267,12 +286,30 @@ export function ClientModsTab({ serverId }: { serverId: string }): JSX.Element {
           </div>
         </header>
 
+        <div className="flex items-center gap-1 flex-wrap">
+          {ALL_KINDS.map((k) => (
+            <button
+              key={k}
+              type="button"
+              className={
+                "px-3 py-1 rounded-full text-xs font-medium transition " +
+                (k === activeKind
+                  ? "bg-[rgb(var(--accent))] text-white"
+                  : "bg-surface-2 text-ink-muted hover:text-ink")
+              }
+              onClick={() => setActiveKind(k)}
+            >
+              {t(`clientMods.kind.${k}` as never)}
+            </button>
+          ))}
+        </div>
+
         <div className="flex items-center gap-2 flex-wrap">
           <input
             ref={fileRef}
             type="file"
             multiple
-            accept=".jar,.zip"
+            accept={acceptForKind[activeKind]}
             className="hidden"
             onChange={(e) => void uploadFiles(e.target.files)}
           />
@@ -286,7 +323,7 @@ export function ClientModsTab({ serverId }: { serverId: string }): JSX.Element {
             ) : (
               <Upload size={14} />
             )}
-            {t("clientMods.upload")}
+            {t(`clientMods.uploadKind.${activeKind}` as never)}
           </button>
           <button
             className="btn btn-ghost"
@@ -381,7 +418,7 @@ export function ClientModsTab({ serverId }: { serverId: string }): JSX.Element {
         )}
       </div>
 
-      {detectedItems.length > 0 && (
+      {activeKind === "mods" && detectedItems.length > 0 && (
         <div className="tile p-4 space-y-3 border-[rgb(var(--accent))]/30">
           <header className="flex items-start gap-3 flex-wrap">
             <PackageOpen size={16} className="text-[rgb(var(--accent))] shrink-0 mt-0.5" />
