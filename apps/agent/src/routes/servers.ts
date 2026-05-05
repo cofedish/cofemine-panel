@@ -956,17 +956,34 @@ export async function serversAgentRoutes(app: FastifyInstance): Promise<void> {
     await collect(serverModsDir, "server", "both");
     await collect(clientModsDir, "client", "client");
 
+    const packName = q.packName ?? `cofemine-${id.slice(0, 8)}`;
+    const versionId = new Date().toISOString().slice(0, 10);
     const manifest = {
       formatVersion: 1,
       game: "minecraft",
-      versionId: new Date().toISOString().slice(0, 10),
-      name: q.packName ?? `cofemine-${id.slice(0, 8)}`,
+      versionId,
+      name: packName,
       summary: "Exported by Cofemine Panel",
       files: [] as Array<unknown>,
       dependencies: {
         minecraft: q.mcVersion ?? "1.21.1",
         ...(q.loader && q.loaderVersion ? { [q.loader]: q.loaderVersion } : {}),
       },
+    };
+    /**
+     * Friendly, human-readable sibling to modrinth.index.json. Sat at
+     * the ZIP root so a user inspecting the pack in a file manager can
+     * see at a glance which MC + loader version it was built against.
+     * Launchers ignore this file (they only look at modrinth.index.json),
+     * so it's safe to add.
+     */
+    const friendlyManifest = {
+      versionName: packName,
+      minecraft: q.mcVersion ?? "1.21.1",
+      loader: q.loader ?? null,
+      loaderVersion: q.loaderVersion ?? null,
+      builtAt: new Date().toISOString(),
+      builtBy: "Cofemine Panel",
     };
 
     // Set headers BEFORE the archive starts streaming.
@@ -1084,9 +1101,33 @@ export async function serversAgentRoutes(app: FastifyInstance): Promise<void> {
       }
     }
 
-    // Manifest at the root.
+    // Bundle config + resourcepacks under overrides/. These apply to
+    // both client and server when the launcher installs the pack —
+    // which matches how a real CurseForge / Modrinth pack ships them.
+    // Wrapped in try/catch per-dir so a missing directory just skips
+    // (a freshly-installed server has no /data/config until first boot).
+    async function dirExists(p: string): Promise<boolean> {
+      try {
+        const st = await fs.stat(p);
+        return st.isDirectory();
+      } catch {
+        return false;
+      }
+    }
+    for (const sub of ["config", "resourcepacks", "kubejs", "defaultconfigs"]) {
+      const src = path.join(base, sub);
+      if (await dirExists(src)) {
+        archive.directory(src, `overrides/${sub}`);
+      }
+    }
+
+    // Modrinth's spec manifest (launchers parse this).
     archive.append(JSON.stringify(manifest, null, 2), {
       name: "modrinth.index.json",
+    });
+    // Friendly sibling for humans.
+    archive.append(JSON.stringify(friendlyManifest, null, 2), {
+      name: "manifest.json",
     });
 
     await archive.finalize();

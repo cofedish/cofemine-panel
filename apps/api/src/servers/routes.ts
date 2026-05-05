@@ -22,6 +22,7 @@ import {
 import { readDownloadProxy, makeProxyUrl } from "../integrations/download-proxy.js";
 import { resetWatchdogState } from "./install-watchdog.js";
 import { reconcileMany } from "./status.js";
+import { streamMrpack } from "./export-mrpack.js";
 
 /** Parse the CSV-of-numeric-modIds form that itzg expects in
  *  CF_EXCLUDE_MODS. Permissive on whitespace and stray empty
@@ -1079,6 +1080,43 @@ export async function serversRoutes(app: FastifyInstance): Promise<void> {
   });
 
   /**
+   * Generate or rotate the public pack token for this server.
+   * Once set, the URL `/p/<token>.mrpack` (registered separately
+   * outside the auth gate) serves the freshly-built client-side
+   * modpack with no session auth — designed to be shared with
+   * friends. Re-running this endpoint rotates the token (any
+   * old links stop working).
+   */
+  app.post("/:id/public-pack-token", async (req) => {
+    const { id } = req.params as { id: string };
+    await assertServerPermission(req, id, "server.edit");
+    const token = require("node:crypto").randomBytes(16).toString("hex");
+    await prisma.server.update({
+      where: { id },
+      data: { publicPackToken: token },
+    });
+    await writeAudit(req, {
+      action: "server.public-pack-token.rotate",
+      resource: id,
+    });
+    return { ok: true, token };
+  });
+
+  app.delete("/:id/public-pack-token", async (req) => {
+    const { id } = req.params as { id: string };
+    await assertServerPermission(req, id, "server.edit");
+    await prisma.server.update({
+      where: { id },
+      data: { publicPackToken: null },
+    });
+    await writeAudit(req, {
+      action: "server.public-pack-token.disable",
+      resource: id,
+    });
+    return { ok: true };
+  });
+
+  /**
    * Stream the agent's .mrpack export through to the browser. The
    * agent generates a ZIP on the fly — server mods + uploaded client
    * mods, each placed in the appropriate overrides path based on the
@@ -1092,78 +1130,11 @@ export async function serversRoutes(app: FastifyInstance): Promise<void> {
     const node = await prisma.node.findUniqueOrThrow({
       where: { id: server.nodeId },
     });
-    // Derive loader + loaderVersion from env so the .mrpack manifest
-    // tells the importer which loader profile to create. Falls back
-    // to the server's stored MC version + a "no loader" pack (vanilla)
-    // if nothing is set.
-    const env = ((server.env as Record<string, string> | null) ?? {}) as Record<
-      string,
-      string
-    >;
-    let loader: string | null = null;
-    let loaderVersion: string | null = null;
-    if (env.NEOFORGE_VERSION) {
-      loader = "neoforge";
-      loaderVersion = env.NEOFORGE_VERSION;
-    } else if (env.FORGE_VERSION) {
-      loader = "forge";
-      loaderVersion = env.FORGE_VERSION;
-    } else if (env.FABRIC_LOADER_VERSION) {
-      loader = "fabric";
-      loaderVersion = env.FABRIC_LOADER_VERSION;
-    } else if (env.QUILT_LOADER_VERSION) {
-      loader = "quilt";
-      loaderVersion = env.QUILT_LOADER_VERSION;
-    }
-    const params = new URLSearchParams();
-    params.set("packName", server.name);
-    params.set("mcVersion", server.version);
-    if (loader) params.set("loader", loader);
-    if (loaderVersion) params.set("loaderVersion", loaderVersion);
-    // Forward the configured download-proxy so the agent's mrpack
-    // exporter can stream auto-detected client mods through it
-    // (CF CDN sometimes blocks direct from RU IPs; same proxy that
-    // worked for forgecdn during install is what works for the
-    // mod download URLs CF returns in its mod-info JSON).
-    const proxy = await readDownloadProxy().catch(() => null);
-    if (proxy) {
-      params.set("proxyUrl", makeProxyUrl(proxy));
-    }
-    // Disable auto-detected inline-streaming when the caller passes
-    // ?include_auto_detected=0 (only the local mods get bundled,
-    // no CDN streams). Useful for users who want a slim pack.
     const includeAuto = (req.query as { include_auto_detected?: string })
       .include_auto_detected;
-    if (includeAuto === "0") params.set("includeAutoDetected", "0");
-
-    const { Agent: UndiciAgent, request: undiciRequest } = await import("undici");
-    const dispatcher = new UndiciAgent({
-      connections: 4,
-      bodyTimeout: 10 * 60_000, // 10 min — big modpacks zip up slowly
+    return streamMrpack(server, node, reply, {
+      includeAutoDetected: includeAuto !== "0",
     });
-    const target = `${node.host.replace(/\/$/, "")}/servers/${id}/export-mrpack?${params.toString()}`;
-    const upstream = await undiciRequest(target, {
-      method: "GET",
-      headers: {
-        authorization: `Bearer ${process.env[
-          `AGENT_TOKEN_${node.name.toUpperCase()}`
-        ] ?? process.env.AGENT_TOKEN ?? ""}`,
-      },
-      dispatcher,
-      headersTimeout: 30_000,
-      bodyTimeout: 10 * 60_000,
-    });
-    if (upstream.statusCode >= 400) {
-      reply.code(upstream.statusCode);
-      return reply.send(upstream.body);
-    }
-    // Mirror critical headers + stream body straight through.
-    for (const h of ["content-type", "content-disposition"] as const) {
-      const v = upstream.headers[h];
-      if (v) reply.header(h, Array.isArray(v) ? v[0]! : v);
-    }
-    reply.code(upstream.statusCode);
-    return reply.send(upstream.body);
   });
 
   /**

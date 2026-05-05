@@ -272,6 +272,20 @@ const en: Dict = {
   "clientMods.autoDownloading": "Downloading {n} client mods…",
   "clientMods.autoAllOk": "Downloaded all {n} client mods.",
   "clientMods.autoSomeFail": "Downloaded {ok}/{n}; some failed (check logs).",
+  "clientMods.publicLink.title": "Public download link",
+  "clientMods.publicLink.intro":
+    "Share this URL with friends. They paste it into Prism / Modrinth App / ATLauncher and the client pack downloads with no panel account needed.",
+  "clientMods.publicLink.enable": "Enable public link",
+  "clientMods.publicLink.rotate": "Rotate (invalidate old URL)",
+  "clientMods.publicLink.disable": "Disable",
+  "clientMods.publicLink.copy": "Copy",
+  "clientMods.publicLink.copied": "Copied!",
+  "clientMods.publicLink.confirmRotate.title": "Rotate the public link?",
+  "clientMods.publicLink.confirmRotate.body":
+    "The current URL stops working immediately. Anyone who already downloaded the pack keeps it; future downloads need the new URL.",
+  "clientMods.publicLink.confirmDisable.title": "Disable the public link?",
+  "clientMods.publicLink.confirmDisable.body":
+    "Friends with the URL won't be able to download the pack anymore. You can re-enable it later — the new URL will be different.",
   "content.exclusions.intro":
     "These mod IDs are skipped on the next pack install and repair. Remove an entry to bring the mod back next time.",
   "content.exclusions.empty.title": "No mods are excluded.",
@@ -953,6 +967,20 @@ const ru: Dict = {
   "clientMods.autoDownloading": "Скачиваю {n} клиентских модов…",
   "clientMods.autoAllOk": "Скачано {n} клиентских модов.",
   "clientMods.autoSomeFail": "Скачано {ok}/{n}; часть не удалась (проверь логи).",
+  "clientMods.publicLink.title": "Публичная ссылка на скачивание",
+  "clientMods.publicLink.intro":
+    "Кидай эту ссылку друзьям. Они вставляют её в Prism / Modrinth App / ATLauncher — клиентская сборка качается без аккаунта в панели.",
+  "clientMods.publicLink.enable": "Включить публичную ссылку",
+  "clientMods.publicLink.rotate": "Сменить (старая ссылка перестанет работать)",
+  "clientMods.publicLink.disable": "Отключить",
+  "clientMods.publicLink.copy": "Скопировать",
+  "clientMods.publicLink.copied": "Скопировано!",
+  "clientMods.publicLink.confirmRotate.title": "Сменить публичную ссылку?",
+  "clientMods.publicLink.confirmRotate.body":
+    "Текущая ссылка сразу же перестанет работать. У тех, кто уже скачал сборку, ничего не пропадёт — но новые скачивания пойдут только по новой ссылке.",
+  "clientMods.publicLink.confirmDisable.title": "Отключить публичную ссылку?",
+  "clientMods.publicLink.confirmDisable.body":
+    "Друзья со ссылкой больше не смогут качать сборку. Можно снова включить — но ссылка будет другая.",
   "content.exclusions.intro":
     "Эти модификации пропускаются при следующей установке/починке сборки. Убери запись — мод вернётся при следующем запуске установщика.",
   "content.exclusions.empty.title": "Нет исключённых модов.",

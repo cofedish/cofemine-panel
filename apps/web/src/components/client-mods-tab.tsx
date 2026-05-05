@@ -7,6 +7,11 @@ import {
   Trash2,
   Download,
   PackageOpen,
+  Link2,
+  Link2Off,
+  RotateCw,
+  Copy,
+  Check,
 } from "lucide-react";
 import { api, ApiError, fetcher } from "@/lib/api";
 import { useDialog } from "./dialog-provider";
@@ -57,8 +62,77 @@ export function ClientModsTab({ serverId }: { serverId: string }): JSX.Element {
     fetcher,
     { revalidateOnFocus: false }
   );
+  const { data: server } = useSWR<{ publicPackToken: string | null }>(
+    `/servers/${serverId}`,
+    fetcher
+  );
+  const [linkBusy, setLinkBusy] = useState(false);
+  const [copied, setCopied] = useState(false);
   const items = data?.mods ?? [];
   const detectedItems = detected?.detected ?? [];
+  const publicToken = server?.publicPackToken ?? null;
+  const publicUrl = publicToken
+    ? `${typeof window !== "undefined" ? window.location.origin : ""}/api/p/${publicToken}.mrpack`
+    : null;
+
+  async function enablePublicLink(): Promise<void> {
+    setLinkBusy(true);
+    try {
+      await api.post(`/servers/${serverId}/public-pack-token`);
+      mutate(`/servers/${serverId}`);
+    } catch (e) {
+      dialog.alert({
+        tone: "danger",
+        title: t("common.error"),
+        message: e instanceof ApiError ? e.message : String(e),
+      });
+    } finally {
+      setLinkBusy(false);
+    }
+  }
+
+  async function rotatePublicLink(): Promise<void> {
+    const ok = await dialog.confirm({
+      title: t("clientMods.publicLink.confirmRotate.title"),
+      message: t("clientMods.publicLink.confirmRotate.body"),
+      tone: "warning",
+    });
+    if (!ok) return;
+    await enablePublicLink();
+  }
+
+  async function disablePublicLink(): Promise<void> {
+    const ok = await dialog.confirm({
+      title: t("clientMods.publicLink.confirmDisable.title"),
+      message: t("clientMods.publicLink.confirmDisable.body"),
+      tone: "warning",
+    });
+    if (!ok) return;
+    setLinkBusy(true);
+    try {
+      await api.del(`/servers/${serverId}/public-pack-token`);
+      mutate(`/servers/${serverId}`);
+    } catch (e) {
+      dialog.alert({
+        tone: "danger",
+        title: t("common.error"),
+        message: e instanceof ApiError ? e.message : String(e),
+      });
+    } finally {
+      setLinkBusy(false);
+    }
+  }
+
+  async function copyPublicLink(): Promise<void> {
+    if (!publicUrl) return;
+    try {
+      await navigator.clipboard.writeText(publicUrl);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      /* ignore — older browsers */
+    }
+  }
 
   async function downloadDetected(): Promise<void> {
     if (detectedItems.length === 0) return;
@@ -227,6 +301,84 @@ export function ClientModsTab({ serverId }: { serverId: string }): JSX.Element {
             <span className="text-[11px] text-ink-muted">{progress}</span>
           )}
         </div>
+      </div>
+
+      <div className="tile p-4 space-y-3">
+        <header className="flex items-start gap-3">
+          {publicToken ? (
+            <Link2 size={16} className="text-[rgb(var(--accent))] shrink-0 mt-0.5" />
+          ) : (
+            <Link2Off size={16} className="text-ink-muted shrink-0 mt-0.5" />
+          )}
+          <div className="flex-1 min-w-0">
+            <h3 className="text-sm font-medium">
+              {t("clientMods.publicLink.title")}
+            </h3>
+            <p className="text-[11px] text-ink-muted leading-relaxed mt-0.5">
+              {t("clientMods.publicLink.intro")}
+            </p>
+          </div>
+        </header>
+
+        {publicToken && publicUrl ? (
+          <>
+            <div className="flex items-center gap-2 rounded bg-surface-2 px-2 py-1.5">
+              <input
+                readOnly
+                value={publicUrl}
+                onClick={(e) => e.currentTarget.select()}
+                className="flex-1 bg-transparent text-xs font-mono outline-none truncate"
+              />
+              <button
+                className="btn btn-ghost !h-7"
+                onClick={() => void copyPublicLink()}
+                disabled={linkBusy}
+              >
+                {copied ? <Check size={13} /> : <Copy size={13} />}
+                {copied
+                  ? t("clientMods.publicLink.copied")
+                  : t("clientMods.publicLink.copy")}
+              </button>
+            </div>
+            <div className="flex items-center gap-2 flex-wrap">
+              <button
+                className="btn btn-ghost"
+                onClick={() => void rotatePublicLink()}
+                disabled={linkBusy}
+              >
+                {linkBusy ? (
+                  <Loader2 size={14} className="animate-spin" />
+                ) : (
+                  <RotateCw size={14} />
+                )}
+                {t("clientMods.publicLink.rotate")}
+              </button>
+              <button
+                className="btn btn-ghost"
+                onClick={() => void disablePublicLink()}
+                disabled={linkBusy}
+              >
+                <Link2Off size={14} />
+                {t("clientMods.publicLink.disable")}
+              </button>
+            </div>
+          </>
+        ) : (
+          <div>
+            <button
+              className="btn btn-primary"
+              onClick={() => void enablePublicLink()}
+              disabled={linkBusy}
+            >
+              {linkBusy ? (
+                <Loader2 size={14} className="animate-spin" />
+              ) : (
+                <Link2 size={14} />
+              )}
+              {t("clientMods.publicLink.enable")}
+            </button>
+          </div>
+        )}
       </div>
 
       {detectedItems.length > 0 && (

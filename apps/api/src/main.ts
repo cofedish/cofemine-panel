@@ -13,6 +13,7 @@ import { authRoutes } from "./auth/routes.js";
 import { nodesRoutes } from "./nodes/routes.js";
 import { serversRoutes } from "./servers/routes.js";
 import { mapRoutes } from "./servers/map-routes.js";
+import { publicPackRoutes } from "./servers/public-pack-routes.js";
 import { backupsRoutes } from "./backups/routes.js";
 import { schedulesRoutes } from "./schedules/routes.js";
 import { templatesRoutes } from "./templates/routes.js";
@@ -60,7 +61,9 @@ async function bootstrap(): Promise<void> {
   await registerAuthHook(app);
 
   // Global auth gate for protected routes. /auth/setup-status, /auth/setup,
-  // /auth/login are whitelisted.
+  // /auth/login are whitelisted. /p/* (public pack downloads) are also
+  // open by design — friends without a panel account need to be able
+  // to fetch the .mrpack from a shared link.
   app.addHook("preHandler", async (req, reply) => {
     const open = new Set([
       "/health",
@@ -71,6 +74,7 @@ async function bootstrap(): Promise<void> {
       "/auth/reset-password",
     ]);
     if (open.has(req.routerPath) || req.routerPath?.startsWith("/ws/")) return;
+    if (req.routerPath?.startsWith("/p/")) return;
     if (!req.user) return reply.code(401).send({ error: "Unauthorized" });
   });
 
@@ -96,6 +100,9 @@ async function bootstrap(): Promise<void> {
   // /servers would double the path. Auth is handled inside the
   // route via assertServerPermission.
   await app.register(mapRoutes);
+  // Public, unauthenticated client-pack downloads. Mounted at root
+  // because /p/* is whitelisted in the auth gate above. Token-gated.
+  await app.register(publicPackRoutes);
   await app.register(backupsRoutes); // mounts under /servers/:id/backups and /backups/:id
   await app.register(schedulesRoutes);
   await app.register(templatesRoutes, { prefix: "/templates" });

@@ -124,6 +124,11 @@ model Server {
   status        String   @default("stopped")
   lastStartedAt DateTime?
   templateId    String?
+  /// Optional unauthenticated download link for the client-side
+  /// modpack ZIP. When set, GET /public/packs/<token>.mrpack
+  /// serves a freshly-built ZIP without panel auth. Owner-controlled,
+  /// rotatable. Null = no public link.
+  publicPackToken String? @unique
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
