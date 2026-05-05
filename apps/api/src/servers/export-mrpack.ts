@@ -2,10 +2,40 @@ import type { FastifyReply } from "fastify";
 import { Agent as UndiciAgent, request as undiciRequest } from "undici";
 import type { Server, Node } from "@prisma/client";
 import { readDownloadProxy, makeProxyUrl } from "../integrations/download-proxy.js";
+import { readCurseforgeApiKey } from "./service.js";
 
 function resolveAgentToken(nodeName: string): string {
   const perNode = process.env[`AGENT_TOKEN_${nodeName.toUpperCase()}`];
   return perNode ?? process.env.AGENT_TOKEN ?? "";
+}
+
+/**
+ * Resolve a CF modpack slug → projectId via the CF API.
+ * itzg's CF feature stores the slug (CF_SLUG) and file id (CF_FILE_ID)
+ * in the server env, but the export-mrpack rebuild logic in the agent
+ * needs the numeric projectId for /v1/mods/<id>/files/<id>. Single
+ * /v1/mods/search call resolves it.
+ */
+async function resolveCfProjectIdFromSlug(
+  slug: string,
+  apiKey: string
+): Promise<number | null> {
+  const url = `https://api.curseforge.com/v1/mods/search?gameId=432&slug=${encodeURIComponent(slug)}`;
+  const res = await undiciRequest(url, {
+    method: "GET",
+    headers: { "x-api-key": apiKey, accept: "application/json" },
+    headersTimeout: 15_000,
+    bodyTimeout: 15_000,
+  });
+  if (res.statusCode >= 400) {
+    await res.body.dump().catch(() => {});
+    return null;
+  }
+  const body = (await res.body.json()) as {
+    data?: Array<{ id: number; slug: string }>;
+  };
+  const match = body.data?.find((m) => m.slug === slug) ?? body.data?.[0];
+  return match?.id ?? null;
 }
 
 const MC_VERSION_RE = /^\d+\.\d+(\.\d+)?$/;
@@ -98,19 +128,49 @@ export async function streamMrpack(
   if (proxy) params.set("proxyUrl", makeProxyUrl(proxy));
   if (opts.includeAutoDetected === false) params.set("includeAutoDetected", "0");
 
+  // CF rebuild mode: when the server has a stored CF pack reference
+  // AND we have the API key, pass them through so the agent re-fetches
+  // the canonical pack and produces a 1:1 client copy of it (instead
+  // of dumping /data/ verbatim). This is what makes the resulting
+  // .mrpack actually identical to "downloaded the pack from CurseForge
+  // App, plus user's manual mods on top".
+  //
+  // Priority: persisted server.cfPackProjectId/cfPackFileId (preferred,
+  // survives detach-from-source) → fall back to live env.CF_SLUG/
+  // CF_FILE_ID (for legacy servers without the persisted columns).
+  const cfApiKey = await readCurseforgeApiKey().catch(() => null);
+  let cfProjectId: number | null = server.cfPackProjectId ?? null;
+  let cfFileId: number | null = server.cfPackFileId ?? null;
+  if ((!cfProjectId || !cfFileId) && cfApiKey && env.CF_SLUG && env.CF_FILE_ID) {
+    const parsed = parseInt(env.CF_FILE_ID, 10);
+    if (Number.isFinite(parsed)) {
+      cfFileId = parsed;
+      cfProjectId = await resolveCfProjectIdFromSlug(env.CF_SLUG, cfApiKey).catch(
+        () => null
+      );
+    }
+  }
+  const cfHeaders: Record<string, string> = {};
+  if (cfApiKey && cfProjectId && cfFileId) {
+    params.set("cfPackProjectId", String(cfProjectId));
+    params.set("cfPackFileId", String(cfFileId));
+    cfHeaders["x-cf-api-key"] = cfApiKey;
+  }
+
   const dispatcher = new UndiciAgent({
     connections: 4,
-    bodyTimeout: 10 * 60_000,
+    bodyTimeout: 30 * 60_000, // 30 min — CF rebuild streams 320+ files
   });
   const target = `${node.host.replace(/\/$/, "")}/servers/${server.id}/export-mrpack?${params.toString()}`;
   const upstream = await undiciRequest(target, {
     method: "GET",
     headers: {
       authorization: `Bearer ${resolveAgentToken(node.name)}`,
+      ...cfHeaders,
     },
     dispatcher,
-    headersTimeout: 30_000,
-    bodyTimeout: 10 * 60_000,
+    headersTimeout: 60_000,
+    bodyTimeout: 30 * 60_000,
   });
   if (upstream.statusCode >= 400) {
     reply.code(upstream.statusCode);

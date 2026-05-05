@@ -1100,6 +1100,72 @@ export async function serversRoutes(app: FastifyInstance): Promise<void> {
    * friends. Re-running this endpoint rotates the token (any
    * old links stop working).
    */
+  /**
+   * Persist (or update) the CurseForge pack reference on the server.
+   * Used when the user has detached the server from its CF source —
+   * mc-image-helper-driven CF_SLUG/CF_FILE_ID env got dropped, but
+   * we still want the .mrpack export to rebuild from the canonical
+   * CF pack. Body accepts EITHER {projectId, fileId} directly OR a
+   * {slug, fileId} pair which we resolve via CF API.
+   */
+  app.post("/:id/cf-pack-source", async (req, reply) => {
+    const { id } = req.params as { id: string };
+    await assertServerPermission(req, id, "server.edit");
+    const body = z
+      .object({
+        projectId: z.coerce.number().int().positive().optional(),
+        slug: z.string().min(1).max(128).optional(),
+        fileId: z.coerce.number().int().positive(),
+      })
+      .refine((b) => b.projectId || b.slug, {
+        message: "Either projectId or slug must be provided",
+      })
+      .parse(req.body);
+    let projectId = body.projectId ?? null;
+    if (!projectId && body.slug) {
+      const cfKey = await readCurseforgeApiKey();
+      if (!cfKey) {
+        reply.code(503);
+        return reply.send({
+          error:
+            "CF API key not configured — set it under Integrations or pass projectId directly",
+        });
+      }
+      const url = `https://api.curseforge.com/v1/mods/search?gameId=432&slug=${encodeURIComponent(body.slug)}`;
+      const res = await request(url, {
+        method: "GET",
+        headers: { "x-api-key": cfKey, accept: "application/json" },
+        headersTimeout: 15_000,
+        bodyTimeout: 15_000,
+      });
+      if (res.statusCode >= 400) {
+        await res.body.dump().catch(() => {});
+        reply.code(502);
+        return reply.send({ error: `CF search failed (${res.statusCode})` });
+      }
+      const search = (await res.body.json()) as {
+        data?: Array<{ id: number; slug: string }>;
+      };
+      const match =
+        search.data?.find((p) => p.slug === body.slug) ?? search.data?.[0];
+      if (!match) {
+        reply.code(404);
+        return reply.send({ error: `No CF pack matched slug "${body.slug}"` });
+      }
+      projectId = match.id;
+    }
+    await prisma.server.update({
+      where: { id },
+      data: { cfPackProjectId: projectId!, cfPackFileId: body.fileId },
+    });
+    await writeAudit(req, {
+      action: "server.cf-pack-source.set",
+      resource: id,
+      metadata: { projectId, fileId: body.fileId },
+    });
+    return { ok: true, projectId, fileId: body.fileId };
+  });
+
   app.post("/:id/public-pack-token", async (req) => {
     const { id } = req.params as { id: string };
     await assertServerPermission(req, id, "server.edit");

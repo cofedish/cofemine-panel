@@ -1,4 +1,5 @@
 import { prisma } from "../db.js";
+import { request } from "undici";
 import { NodeClient } from "../nodes/node-client.js";
 import type { CreateServerInput } from "@cofemine/shared";
 import { decryptSecret } from "../crypto.js";
@@ -158,6 +159,48 @@ export async function createServerRecord(input: CreateServerInput) {
     });
   }
   const env = await mergeModpackEnv(input);
+
+  // For CurseForge servers — resolve the slug to a numeric projectId
+  // and persist it (with the file id) on the row. Done here once at
+  // create-time so the .mrpack export can rebuild from the canonical
+  // CF pack later, even after the server has been detached from its
+  // source. Best-effort: if CF API is unavailable, fields stay null
+  // and the export falls back to dump-disk mode.
+  let cfPackProjectId: number | null = null;
+  let cfPackFileId: number | null = null;
+  if (input.type === "CURSEFORGE" && env.CF_SLUG && env.CF_FILE_ID) {
+    const fileId = parseInt(env.CF_FILE_ID, 10);
+    if (Number.isFinite(fileId)) {
+      const cfApiKey = await readCurseforgeApiKey().catch(() => null);
+      if (cfApiKey) {
+        try {
+          const url = `https://api.curseforge.com/v1/mods/search?gameId=432&slug=${encodeURIComponent(env.CF_SLUG)}`;
+          const res = await request(url, {
+            method: "GET",
+            headers: { "x-api-key": cfApiKey, accept: "application/json" },
+            headersTimeout: 15_000,
+            bodyTimeout: 15_000,
+          });
+          if (res.statusCode < 400) {
+            const body = (await res.body.json()) as {
+              data?: Array<{ id: number; slug: string }>;
+            };
+            const m =
+              body.data?.find((p) => p.slug === env.CF_SLUG) ?? body.data?.[0];
+            if (m) {
+              cfPackProjectId = m.id;
+              cfPackFileId = fileId;
+            }
+          } else {
+            await res.body.dump().catch(() => {});
+          }
+        } catch {
+          /* swallow — non-fatal */
+        }
+      }
+    }
+  }
+
   return prisma.server.create({
     data: {
       name: input.name,
@@ -172,6 +215,8 @@ export async function createServerRecord(input: CreateServerInput) {
       eulaAccepted: input.eulaAccepted,
       templateId: input.templateId ?? null,
       status: "stopped",
+      cfPackProjectId,
+      cfPackFileId,
     },
   });
 }

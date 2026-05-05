@@ -1,4 +1,4 @@
-import type { FastifyInstance } from "fastify";
+import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
 import { z } from "zod";
 import { promises as fs, createReadStream } from "node:fs";
 import crypto from "node:crypto";
@@ -910,8 +910,20 @@ export async function serversAgentRoutes(app: FastifyInstance): Promise<void> {
       loaderVersion?: string;
       proxyUrl?: string;
       includeAutoDetected?: string;
+      cfPackProjectId?: string;
+      cfPackFileId?: string;
     };
     const base = dataDirFor(id);
+
+    // CF rebuild mode: when the panel passes the original CF pack's
+    // (projectId, fileId), we re-fetch the pack from CurseForge and use
+    // its manifest as the source of truth. This guarantees the client
+    // pack matches the server's CF source 1:1, with the user's manual
+    // /data/mods/ additions layered on top. Stale .cofemine-client
+    // staging is ignored entirely.
+    if (q.cfPackProjectId && q.cfPackFileId) {
+      return exportMrpackFromCfPack(req, reply, id, q, base);
+    }
 
     const serverModsDir = path.join(base, "mods");
     const clientModsDir = path.join(base, ".cofemine-client", "mods");
@@ -3390,6 +3402,311 @@ async function chownRecursive(
  * Both stream the response straight to disk so a 50MB installer
  * doesn't spike RSS.
  */
+/**
+ * "CF rebuild" mode of the .mrpack export. Instead of dumping
+ * /data/mods/ verbatim (which mixes in stale staging and is missing
+ * client-only mods because mc-image-helper skips them server-side),
+ * we re-fetch the original CurseForge pack and use its manifest as
+ * the canonical mod list. Steps:
+ *
+ *   1. Look up the pack file via CF API → get its CDN URL
+ *   2. Stream-download the pack zip into a local cache (idempotent)
+ *   3. Read manifest.json from the cached zip
+ *   4. Resolve every (projectId, fileId) pair via /v1/mods/files
+ *   5. Resolve each parent project's classId via /v1/mods so we
+ *      can route shaderpacks → overrides/shaderpacks/, resourcepacks
+ *      → overrides/resourcepacks/, mods → overrides/mods/
+ *   6. Stream each file from CF CDN through the configured proxy
+ *      straight into archiver
+ *   7. Inline every entry under the pack zip's overrides/ into our
+ *      overrides/ (configs, kubejs, journeymap, …)
+ *   8. Compute /data/mods/* not in the CF expected list → those are
+ *      the user's manual additions on top of the pack → also include
+ *
+ * The result is an .mrpack that, when imported into a launcher, gives
+ * the same instance as if you'd installed the original CF pack from
+ * CurseForge App and then dropped in the user's extra jars.
+ *
+ * Required query params:
+ *   cfPackProjectId — modpack project ID on CurseForge
+ *   cfPackFileId    — specific file (version) of the pack
+ *   packName        — display name for modrinth.index.json
+ * Required header:
+ *   x-cf-api-key    — CurseForge API key
+ * Optional query:
+ *   proxyUrl        — SOCKS5/HTTP proxy for CF CDN downloads
+ */
+async function exportMrpackFromCfPack(
+  req: FastifyRequest,
+  reply: FastifyReply,
+  serverId: string,
+  q: {
+    packName?: string;
+    proxyUrl?: string;
+    cfPackProjectId?: string;
+    cfPackFileId?: string;
+  },
+  base: string
+): Promise<FastifyReply> {
+  const cfApiKey = req.headers["x-cf-api-key"] as string | undefined;
+  if (!cfApiKey) {
+    reply.code(400);
+    return reply.send({
+      error: "x-cf-api-key header required for CF rebuild mode",
+    });
+  }
+  const projectId = parseInt(q.cfPackProjectId!, 10);
+  const fileId = parseInt(q.cfPackFileId!, 10);
+  if (!Number.isFinite(projectId) || !Number.isFinite(fileId)) {
+    reply.code(400);
+    return reply.send({ error: "cfPackProjectId/cfPackFileId must be integers" });
+  }
+  const proxyUrl = q.proxyUrl ?? null;
+
+  async function cfGet(path: string): Promise<any> {
+    const res = await request(`https://api.curseforge.com${path}`, {
+      method: "GET",
+      headers: { "x-api-key": cfApiKey, accept: "application/json" },
+      headersTimeout: 30_000,
+      bodyTimeout: 30_000,
+    });
+    if (res.statusCode >= 400) {
+      const body = await res.body.text().catch(() => "");
+      throw new Error(`CF GET ${path} → ${res.statusCode}: ${body.slice(0, 200)}`);
+    }
+    return res.body.json();
+  }
+  async function cfPost(path: string, body: unknown): Promise<any> {
+    const res = await request(`https://api.curseforge.com${path}`, {
+      method: "POST",
+      headers: {
+        "x-api-key": cfApiKey,
+        accept: "application/json",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify(body),
+      headersTimeout: 30_000,
+      bodyTimeout: 60_000,
+    });
+    if (res.statusCode >= 400) {
+      const t = await res.body.text().catch(() => "");
+      throw new Error(`CF POST ${path} → ${res.statusCode}: ${t.slice(0, 200)}`);
+    }
+    return res.body.json();
+  }
+
+  // 1. Resolve pack file → downloadUrl + fileName
+  req.log.info({ projectId, fileId }, "cf-rebuild: fetching pack file info");
+  const packFileInfo = (await cfGet(
+    `/v1/mods/${projectId}/files/${fileId}`
+  )) as { data: { fileName: string; downloadUrl: string } };
+  const packDownloadUrl = packFileInfo.data.downloadUrl;
+  const packFileName = packFileInfo.data.fileName;
+  if (!packDownloadUrl) {
+    reply.code(502);
+    return reply.send({
+      error: "CF pack file has no downloadUrl (third-party download disabled?)",
+    });
+  }
+
+  // 2. Cache pack zip on disk (idempotent)
+  const cacheDir = path.join(base, ".cofemine-cf-cache");
+  await ensureDir(cacheDir);
+  const packZipPath = path.join(
+    cacheDir,
+    `pack-${projectId}-${fileId}.zip`
+  );
+  let needDownload = true;
+  try {
+    const st = await fs.stat(packZipPath);
+    if (st.size > 0) needDownload = false;
+  } catch {
+    /* not cached, will download */
+  }
+  if (needDownload) {
+    req.log.info({ url: packDownloadUrl }, "cf-rebuild: downloading pack zip");
+    const stream = await openHttpStream(packDownloadUrl, proxyUrl);
+    const out = (await import("node:fs")).createWriteStream(packZipPath);
+    await new Promise<void>((resolve, reject) => {
+      stream.pipe(out);
+      out.on("finish", () => resolve());
+      out.on("error", reject);
+      stream.on("error", reject);
+    });
+  }
+
+  // 3. Read manifest.json from cached zip
+  const { default: AdmZip } = await import("adm-zip");
+  const packZip = new AdmZip(packZipPath);
+  const manifestEntry = packZip.getEntry("manifest.json");
+  if (!manifestEntry) {
+    reply.code(502);
+    return reply.send({ error: "CF pack zip has no manifest.json" });
+  }
+  const cfManifest = JSON.parse(manifestEntry.getData().toString("utf8")) as {
+    name: string;
+    version: string;
+    minecraft: { version: string; modLoaders: { id: string; primary: boolean }[] };
+    files: { projectID: number; fileID: number; required: boolean }[];
+  };
+
+  // 4. Bulk resolve manifest files → fileName + downloadUrl + modId
+  req.log.info(
+    { count: cfManifest.files.length },
+    "cf-rebuild: resolving manifest files"
+  );
+  const fileIds = cfManifest.files.map((f) => f.fileID);
+  const filesRes = (await cfPost("/v1/mods/files", { fileIds })) as {
+    data: Array<{
+      id: number;
+      modId: number;
+      fileName: string;
+      downloadUrl: string | null;
+    }>;
+  };
+
+  // 5. Bulk resolve projects → classId for routing
+  const modIds = [...new Set(filesRes.data.map((f) => f.modId))];
+  const modsRes = (await cfPost("/v1/mods", { modIds })) as {
+    data: Array<{ id: number; classId: number; name: string }>;
+  };
+  const classIdByMod = new Map<number, number>();
+  for (const p of modsRes.data) classIdByMod.set(p.id, p.classId);
+  function targetSubdir(modId: number): string {
+    const c = classIdByMod.get(modId);
+    if (c === 12) return "resourcepacks";
+    if (c === 6552) return "shaderpacks";
+    return "mods"; // classId 6 (Mods) and any unknown
+  }
+
+  // 6. Build modrinth manifest
+  const primaryLoader = cfManifest.minecraft.modLoaders.find((m) => m.primary);
+  let modrinthLoaderKey: string | null = null;
+  let modrinthLoaderVer: string | null = null;
+  if (primaryLoader) {
+    const m = /^(neoforge|forge|fabric|quilt)-(.+)$/i.exec(primaryLoader.id);
+    if (m) {
+      const k = m[1]!.toLowerCase();
+      modrinthLoaderKey =
+        k === "fabric" ? "fabric-loader" : k === "quilt" ? "quilt-loader" : k;
+      modrinthLoaderVer = m[2]!;
+    }
+  }
+  const packDisplayName = q.packName || cfManifest.name;
+  const modrinthIndex = {
+    formatVersion: 1,
+    game: "minecraft",
+    versionId: cfManifest.version,
+    name: packDisplayName,
+    summary: `Cofemine rebuild of ${cfManifest.name} v${cfManifest.version}`,
+    files: [] as Array<unknown>,
+    dependencies: {
+      minecraft: cfManifest.minecraft.version,
+      ...(modrinthLoaderKey && modrinthLoaderVer
+        ? { [modrinthLoaderKey]: modrinthLoaderVer }
+        : {}),
+    },
+  };
+  const friendlyManifest = {
+    versionName: `${cfManifest.name} v${cfManifest.version}`,
+    minecraft: cfManifest.minecraft.version,
+    loader: primaryLoader?.id.split("-")[0] ?? null,
+    loaderVersion: modrinthLoaderVer,
+    cfSource: { projectId, fileId, fileName: packFileName },
+    builtAt: new Date().toISOString(),
+    builtBy: "Cofemine Panel (CF rebuild)",
+  };
+
+  // 7. Set up archiver, headers, pipe
+  const safeName = packDisplayName.replace(/[^a-zA-Z0-9._-]+/g, "-");
+  reply.header("content-type", "application/zip");
+  reply.header(
+    "content-disposition",
+    `attachment; filename="${safeName}.mrpack"`
+  );
+  const { default: archiver } = await import("archiver");
+  const archive = archiver("zip", { zlib: { level: 6 } });
+  archive.on("warning", (err) => req.log.warn({ err }, "archiver warning"));
+  archive.on("error", (err) => {
+    req.log.error({ err }, "archiver error");
+    reply.raw.destroy(err);
+  });
+  archive.pipe(reply.raw);
+
+  // 8. Inline pack zip's overrides/ into our overrides/
+  const packEntries = packZip.getEntries();
+  let inlinedFromPack = 0;
+  for (const e of packEntries) {
+    if (e.isDirectory) continue;
+    if (!e.entryName.startsWith("overrides/")) continue;
+    archive.append(e.getData(), { name: e.entryName });
+    inlinedFromPack++;
+  }
+
+  // 9. Stream every manifest file from CF CDN into the right subdir
+  const expectedFilenames = new Set<string>();
+  const failed: string[] = [];
+  let streamedOk = 0;
+  for (const f of filesRes.data) {
+    if (!f.downloadUrl) {
+      failed.push(`${f.fileName} (no downloadUrl)`);
+      continue;
+    }
+    const sub = targetSubdir(f.modId);
+    try {
+      const s = await openHttpStream(f.downloadUrl, proxyUrl);
+      archive.append(s as any, { name: `overrides/${sub}/${f.fileName}` });
+      expectedFilenames.add(f.fileName);
+      streamedOk++;
+    } catch (err) {
+      req.log.warn(
+        { err, fileName: f.fileName },
+        "cf-rebuild: skipping file, fetch failed"
+      );
+      failed.push(f.fileName);
+    }
+  }
+
+  // 10. User's manual additions: any /data/mods/*.jar not in expected list
+  const serverModsDir = path.join(base, "mods");
+  let userExtras = 0;
+  try {
+    const items = await fs.readdir(serverModsDir);
+    for (const name of items) {
+      if (!/\.(jar|zip)$/i.test(name)) continue;
+      if (expectedFilenames.has(name)) continue;
+      archive.file(path.join(serverModsDir, name), {
+        name: `overrides/mods/${name}`,
+      });
+      userExtras++;
+    }
+  } catch {
+    /* no /data/mods/ — pack just hasn't installed yet */
+  }
+
+  // 11. Manifests at root
+  archive.append(JSON.stringify(modrinthIndex, null, 2), {
+    name: "modrinth.index.json",
+  });
+  archive.append(JSON.stringify(friendlyManifest, null, 2), {
+    name: "manifest.json",
+  });
+
+  req.log.info(
+    {
+      cfManifestFiles: cfManifest.files.length,
+      streamedOk,
+      failed: failed.length,
+      inlinedFromPack,
+      userExtras,
+    },
+    "cf-rebuild: assembled"
+  );
+
+  await archive.finalize();
+  return reply;
+}
+
 /**
  * Open an HTTPS stream to `url`, optionally tunnelled through a
  * SOCKS5 proxy (xray etc.). Returns a Readable that emits the

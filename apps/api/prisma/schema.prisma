@@ -129,6 +129,14 @@ model Server {
   /// serves a freshly-built ZIP without panel auth. Owner-controlled,
   /// rotatable. Null = no public link.
   publicPackToken String? @unique
+  /// Original CurseForge modpack reference. Persisted at install time
+  /// for CF servers and NOT cleared on detach-from-source — that way
+  /// the .mrpack export can rebuild from the canonical CF pack
+  /// (re-fetch its zip, resolve all 300+ mods to their CF download
+  /// URLs, lay overrides/ on top) regardless of whether the runtime
+  /// container is still attached. Stays null for non-CF sources.
+  cfPackProjectId Int?
+  cfPackFileId    Int?
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
