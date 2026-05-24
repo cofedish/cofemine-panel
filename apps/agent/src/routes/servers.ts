@@ -3713,39 +3713,120 @@ async function exportMrpackFromCfPack(
   }
 
   // 9. Stream every manifest file from CF CDN into the right subdir.
-  // The only way a CF-manifest mod is dropped is if it's in the
-  // owner's clientPackExclusions list (header above). We do NOT use
-  // "missing from /data/mods/" as a signal — many client-only mods
-  // (Iris, Sodium, Iceberg, etc.) are intentionally absent from
-  // /data/mods/ via CF_EXCLUDE_MODS, and treating that as a deletion
-  // would silently strip them from the client pack.
+  //
+  // Local jar cache + parallel downloads — without this, exporting a
+  // 320-mod pack via SOCKS proxy took ~10 minutes per request (each
+  // openHttpStream is a fresh TLS handshake through xray, ~1-3s per
+  // mod, sequential). With the cache, only the very first export
+  // pays that cost; subsequent .mrpack rebuilds zip from disk in
+  // seconds.
+  //
+  // Cache layout: /data/.cofemine-cf-cache/mods/<modId>/<fileId>/<fileName>
+  // Per-fileId path means a new pack version (different fileId) won't
+  // serve stale jars.
+  //
+  // Exclusion rule: only `clientPackExclusions` drops a mod. We don't
+  // use "missing from /data/mods/" as a signal — many client-only
+  // mods (Iris/Sodium/Iceberg) are intentionally absent from /data/
+  // mods/ via CF_EXCLUDE_MODS, and treating that as deletion would
+  // silently strip them.
   const expectedFilenames = new Set<string>();
   const failed: string[] = [];
   let streamedOk = 0;
   let skippedExcluded = 0;
+  let cacheHits = 0;
+  let cacheMisses = 0;
+
+  const modCacheDir = path.join(base, ".cofemine-cf-cache", "mods");
+  await ensureDir(modCacheDir);
+
+  type Ready = { filename: string; sub: string; path: string };
+  const ready: Ready[] = [];
+  const toFetch: typeof filesRes.data = [];
+
   for (const f of filesRes.data) {
     if (exclusions.has(f.fileName)) {
-      expectedFilenames.add(f.fileName); // also skip in user-additions pass
+      expectedFilenames.add(f.fileName);
       skippedExcluded++;
       continue;
+    }
+    const sub = targetSubdir(f.modId);
+    const cachePath = path.join(
+      modCacheDir,
+      String(f.modId),
+      String(f.id),
+      f.fileName
+    );
+    try {
+      const st = await fs.stat(cachePath);
+      if (st.size > 0) {
+        ready.push({ filename: f.fileName, sub, path: cachePath });
+        cacheHits++;
+        continue;
+      }
+    } catch {
+      /* not cached, will download below */
     }
     if (!f.downloadUrl) {
       failed.push(`${f.fileName} (no downloadUrl)`);
       continue;
     }
+    toFetch.push(f);
+  }
+
+  // Parallel download with concurrency cap. 6 concurrent SOCKS streams
+  // is the sweet spot — higher tends to saturate the proxy and hurts
+  // throughput per stream.
+  const { createWriteStream } = await import("node:fs");
+  async function downloadOne(f: (typeof toFetch)[0]): Promise<Ready> {
     const sub = targetSubdir(f.modId);
-    try {
-      const s = await openHttpStream(f.downloadUrl, proxyUrl);
-      archive.append(s as any, { name: `overrides/${sub}/${f.fileName}` });
-      expectedFilenames.add(f.fileName);
-      streamedOk++;
-    } catch (err) {
-      req.log.warn(
-        { err, fileName: f.fileName },
-        "cf-rebuild: skipping file, fetch failed"
-      );
-      failed.push(f.fileName);
+    const cacheDirForFile = path.join(
+      modCacheDir,
+      String(f.modId),
+      String(f.id)
+    );
+    await ensureDir(cacheDirForFile);
+    const cachePath = path.join(cacheDirForFile, f.fileName);
+    const tmpPath = cachePath + ".part";
+    const stream = await openHttpStream(f.downloadUrl!, proxyUrl);
+    await new Promise<void>((resolve, reject) => {
+      const out = createWriteStream(tmpPath);
+      stream.pipe(out);
+      out.on("finish", () => resolve());
+      out.on("error", reject);
+      stream.on("error", reject);
+    });
+    await fs.rename(tmpPath, cachePath);
+    return { filename: f.fileName, sub, path: cachePath };
+  }
+
+  const CONCURRENCY = 6;
+  for (let i = 0; i < toFetch.length; i += CONCURRENCY) {
+    const batch = toFetch.slice(i, i + CONCURRENCY);
+    const results = await Promise.allSettled(batch.map(downloadOne));
+    for (let j = 0; j < results.length; j++) {
+      const r = results[j]!;
+      if (r.status === "fulfilled") {
+        ready.push(r.value);
+        cacheMisses++;
+      } else {
+        const f = batch[j]!;
+        req.log.warn(
+          { err: r.reason, fileName: f.fileName },
+          "cf-rebuild: fetch failed"
+        );
+        failed.push(f.fileName);
+      }
     }
+  }
+
+  // Archive everything from the cache — pure disk reads, no network.
+  for (const item of ready) {
+    archive.file(item.path, {
+      name: `overrides/${item.sub}/${item.filename}`,
+    });
+    expectedFilenames.add(item.filename);
+    streamedOk++;
   }
 
   // 10. User's manual additions: any /data/mods/*.jar not in expected list
@@ -3821,6 +3902,8 @@ async function exportMrpackFromCfPack(
     {
       cfManifestFiles: cfManifest.files.length,
       streamedOk,
+      cacheHits,
+      cacheMisses,
       failed: failed.length,
       skippedExcluded,
       inlinedFromPack,
