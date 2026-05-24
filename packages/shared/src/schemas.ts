@@ -94,7 +94,19 @@ export type CreateServerInput = z.infer<typeof createServerSchema>;
 
 export const updateServerSchema = createServerShape
   .partial()
-  .omit({ eulaAccepted: true });
+  .omit({ eulaAccepted: true })
+  .extend({
+    /** Public connect address (host or host:port) for the auto-generated
+     *  servers.dat entry inside the client .mrpack. `null` clears it. */
+    clientServerAddress: z
+      .string()
+      .max(255)
+      .nullable()
+      .optional(),
+    /** Display name for the auto-generated servers.dat entry. `null`
+     *  falls back to the server's `name`. */
+    clientServerName: z.string().max(80).nullable().optional(),
+  });
 
 export const createNodeSchema = z.object({
   name: z.string().min(2).max(48),

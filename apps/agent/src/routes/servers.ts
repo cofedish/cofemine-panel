@@ -1199,6 +1199,8 @@ export async function serversAgentRoutes(app: FastifyInstance): Promise<void> {
     archive.append(JSON.stringify(friendlyManifest, null, 2), {
       name: "manifest.json",
     });
+    // Pre-populated multiplayer entry (if owner set client address).
+    maybeInjectServersDat(req, archive);
 
     await archive.finalize();
     // archiver.pipe(reply.raw) ends the stream itself; no further
@@ -3397,6 +3399,91 @@ async function verifyInstalledVersion(
   };
 }
 
+/**
+ * If the panel passed a `x-cofemine-client-server` header
+ * (JSON: `{"ip":"host[:port]", "name":"..."}`), generate a Minecraft
+ * `servers.dat` and inline it at `overrides/servers.dat`. Friends
+ * installing the .mrpack will see this server pre-populated in their
+ * multiplayer list — no manual "Add Server" step.
+ *
+ * Header is null/missing → no-op. Bad JSON → logged warning, no-op.
+ */
+function maybeInjectServersDat(
+  req: FastifyRequest,
+  archive: import("archiver").Archiver
+): void {
+  const raw = req.headers["x-cofemine-client-server"];
+  if (typeof raw !== "string" || !raw.trim()) return;
+  let cfg: { ip?: string; name?: string };
+  try {
+    cfg = JSON.parse(raw);
+  } catch (err) {
+    req.log.warn({ err, raw }, "servers.dat: bad x-cofemine-client-server header");
+    return;
+  }
+  if (!cfg.ip || !cfg.name) return;
+  const dat = makeServersDat([{ ip: cfg.ip, name: cfg.name }]);
+  archive.append(dat, { name: "overrides/servers.dat" });
+  req.log.info({ ip: cfg.ip, name: cfg.name }, "servers.dat: bundled");
+}
+
+/**
+ * Hand-rolled NBT encoder for Minecraft's `servers.dat` file. The
+ * full NBT spec is overkill — this format only ever has one shape:
+ *
+ *   TAG_Compound ""
+ *     TAG_List "servers" of TAG_Compound
+ *       TAG_String "ip"
+ *       TAG_String "name"
+ *
+ * We emit the bytes directly to avoid pulling in `prismarine-nbt` or
+ * any other NBT lib just for this. Big-endian per NBT spec. UTF-8 for
+ * strings, length prefix is UInt16.
+ */
+function makeServersDat(
+  servers: Array<{ ip: string; name: string }>
+): Buffer {
+  const chunks: Buffer[] = [];
+  // Outer wrapper: TAG_Compound("")
+  chunks.push(Buffer.from([0x0a]));            // TAG_Compound id
+  chunks.push(Buffer.from([0x00, 0x00]));      // name length = 0
+
+  // TAG_List "servers"
+  chunks.push(Buffer.from([0x09]));            // TAG_List id
+  const listName = Buffer.from("servers", "utf-8");
+  const listNameLen = Buffer.alloc(2);
+  listNameLen.writeUInt16BE(listName.length, 0);
+  chunks.push(listNameLen, listName);
+  chunks.push(Buffer.from([0x0a]));            // list element type = TAG_Compound
+  const listLen = Buffer.alloc(4);
+  listLen.writeInt32BE(servers.length, 0);     // count of entries
+  chunks.push(listLen);
+
+  for (const s of servers) {
+    // Each list element is an unnamed compound — we just emit children + TAG_End
+    pushString(chunks, "ip", s.ip);
+    pushString(chunks, "name", s.name);
+    chunks.push(Buffer.from([0x00]));          // TAG_End of inner compound
+  }
+
+  chunks.push(Buffer.from([0x00]));            // TAG_End of outer compound
+  return Buffer.concat(chunks);
+}
+
+function pushString(out: Buffer[], key: string, value: string): void {
+  const keyBuf = Buffer.from(key, "utf-8");
+  const keyLen = Buffer.alloc(2);
+  keyLen.writeUInt16BE(keyBuf.length, 0);
+  const valBuf = Buffer.from(value, "utf-8");
+  const valLen = Buffer.alloc(2);
+  valLen.writeUInt16BE(valBuf.length, 0);
+  out.push(
+    Buffer.from([0x08]),                       // TAG_String id
+    keyLen, keyBuf,
+    valLen, valBuf
+  );
+}
+
 async function chownRecursive(
   target: string,
   uid: number,
@@ -3890,13 +3977,14 @@ async function exportMrpackFromCfPack(
     }
   }
 
-  // 11. Manifests at root
+  // 11. Manifests at root + optional pre-populated multiplayer entry
   archive.append(JSON.stringify(modrinthIndex, null, 2), {
     name: "modrinth.index.json",
   });
   archive.append(JSON.stringify(friendlyManifest, null, 2), {
     name: "manifest.json",
   });
+  maybeInjectServersDat(req, archive);
 
   req.log.info(
     {

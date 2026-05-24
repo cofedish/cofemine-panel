@@ -165,6 +165,15 @@ export async function streamMrpack(
   if (exclusions.length > 0) {
     cfHeaders["x-cofemine-exclude-filenames"] = JSON.stringify(exclusions);
   }
+  // Pre-populated multiplayer entry (servers.dat) — when the owner has
+  // set a public connect address, ship one inside overrides/ so the
+  // friend's launcher pre-fills the server in their multiplayer list.
+  if (server.clientServerAddress) {
+    cfHeaders["x-cofemine-client-server"] = JSON.stringify({
+      ip: server.clientServerAddress,
+      name: server.clientServerName ?? server.name,
+    });
+  }
 
   const dispatcher = new UndiciAgent({
     connections: 4,

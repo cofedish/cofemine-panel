@@ -143,6 +143,15 @@ model Server {
   /// from the client pack when it conflicts with another mod, without
   /// touching the running server.
   clientPackExclusions String[] @default([])
+  /// Public connect address (host or host:port) baked into the
+  /// generated servers.dat shipped inside the .mrpack. When a friend
+  /// installs the pack, their multiplayer list auto-populates with
+  /// this entry — no manual "Add Server" step. Null = no servers.dat
+  /// generated.
+  clientServerAddress  String?
+  /// Optional override for the display name in the auto-generated
+  /// servers.dat entry. Defaults to `name` when null.
+  clientServerName     String?
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 

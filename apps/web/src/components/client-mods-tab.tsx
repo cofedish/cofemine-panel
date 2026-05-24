@@ -1,5 +1,5 @@
 "use client";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import useSWR, { mutate } from "swr";
 import {
   Upload,
@@ -13,6 +13,8 @@ import {
   RotateCw,
   Copy,
   Check,
+  Globe,
+  Save,
 } from "lucide-react";
 import { api, ApiError, fetcher } from "@/lib/api";
 import { useDialog } from "./dialog-provider";
@@ -68,9 +70,12 @@ export function ClientModsTab({ serverId }: { serverId: string }): JSX.Element {
     { revalidateOnFocus: false }
   );
   const { data: server } = useSWR<{
+    name: string;
     publicPackToken: string | null;
     cfPackProjectId: number | null;
     cfPackFileId: number | null;
+    clientServerAddress: string | null;
+    clientServerName: string | null;
   }>(`/servers/${serverId}`, fetcher);
   const { data: exclusionsData } = useSWR<{ exclusions: string[] }>(
     `/servers/${serverId}/client-pack-exclusions`,
@@ -80,6 +85,37 @@ export function ClientModsTab({ serverId }: { serverId: string }): JSX.Element {
   const [linkBusy, setLinkBusy] = useState(false);
   const [copied, setCopied] = useState(false);
   const [excludeInput, setExcludeInput] = useState("");
+  const [mpAddr, setMpAddr] = useState("");
+  const [mpName, setMpName] = useState("");
+  const [mpSaving, setMpSaving] = useState(false);
+
+  // Seed multiplayer form from server data once it arrives. Empty
+  // strings if the owner hasn't set anything yet.
+  useEffect(() => {
+    if (!server) return;
+    setMpAddr(server.clientServerAddress ?? "");
+    setMpName(server.clientServerName ?? "");
+  }, [server?.clientServerAddress, server?.clientServerName]);
+
+  async function saveMpServer(): Promise<void> {
+    setMpSaving(true);
+    try {
+      await api.patch(`/servers/${serverId}`, {
+        clientServerAddress: mpAddr.trim() || null,
+        clientServerName: mpName.trim() || null,
+      });
+      mutate(`/servers/${serverId}`);
+      dialog.toast({ tone: "success", message: t("common.saved") });
+    } catch (e) {
+      dialog.alert({
+        tone: "danger",
+        title: t("common.error"),
+        message: e instanceof ApiError ? e.message : String(e),
+      });
+    } finally {
+      setMpSaving(false);
+    }
+  }
 
   async function addExclusion(name: string): Promise<void> {
     const trimmed = name.trim();
@@ -514,6 +550,62 @@ export function ClientModsTab({ serverId }: { serverId: string }): JSX.Element {
             </button>
           </div>
         )}
+      </div>
+
+      <div className="tile p-4 space-y-3">
+        <header className="flex items-start gap-3">
+          <Globe size={16} className="text-ink-muted shrink-0 mt-0.5" />
+          <div className="flex-1 min-w-0">
+            <h3 className="text-sm font-medium">
+              {t("clientMods.mpServer.title")}
+            </h3>
+            <p className="text-[11px] text-ink-muted leading-relaxed mt-0.5">
+              {t("clientMods.mpServer.intro")}
+            </p>
+          </div>
+        </header>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+          <label className="block">
+            <span className="text-[11px] text-ink-muted">
+              {t("clientMods.mpServer.addressLabel")}
+            </span>
+            <input
+              type="text"
+              value={mpAddr}
+              onChange={(e) => setMpAddr(e.target.value)}
+              placeholder="play.cofemine.ru:25565"
+              className="w-full mt-1 bg-surface-2 px-2 py-1.5 rounded text-xs font-mono outline-none focus:ring-1 focus:ring-[rgb(var(--accent))]"
+            />
+          </label>
+          <label className="block">
+            <span className="text-[11px] text-ink-muted">
+              {t("clientMods.mpServer.nameLabel", {
+                fallback: server?.name ?? "",
+              })}
+            </span>
+            <input
+              type="text"
+              value={mpName}
+              onChange={(e) => setMpName(e.target.value)}
+              placeholder={server?.name ?? ""}
+              className="w-full mt-1 bg-surface-2 px-2 py-1.5 rounded text-xs outline-none focus:ring-1 focus:ring-[rgb(var(--accent))]"
+            />
+          </label>
+        </div>
+        <div>
+          <button
+            className="btn btn-primary"
+            onClick={() => void saveMpServer()}
+            disabled={mpSaving}
+          >
+            {mpSaving ? (
+              <Loader2 size={14} className="animate-spin" />
+            ) : (
+              <Save size={14} />
+            )}
+            {t("common.save")}
+          </button>
+        </div>
       </div>
 
       <div className="tile p-4 space-y-3">

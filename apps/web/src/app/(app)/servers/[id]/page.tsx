@@ -32,6 +32,7 @@ import {
   Cpu,
   HardDrive as HardDriveIcon,
   Clock,
+  Pencil,
 } from "lucide-react";
 
 type ServerDetail = {
@@ -153,6 +154,32 @@ export default function ServerDetailPage(): JSX.Element {
       });
     }
   }
+  async function rename(): Promise<void> {
+    if (!data) return;
+    const next = await dialog.prompt({
+      title: t("server.rename.title"),
+      message: t("server.rename.body"),
+      defaultValue: data.name,
+      placeholder: data.name,
+      validate: (v) => {
+        const trimmed = v.trim();
+        if (trimmed.length < 2) return t("server.rename.tooShort");
+        if (trimmed.length > 80) return t("server.rename.tooLong");
+        return null;
+      },
+    });
+    if (!next || next.trim() === data.name) return;
+    try {
+      await api.patch(`/servers/${id}`, { name: next.trim() });
+      mutate();
+    } catch (err) {
+      dialog.alert({
+        tone: "danger",
+        title: t("common.error"),
+        message: err instanceof ApiError ? err.message : String(err),
+      });
+    }
+  }
   async function remove(): Promise<void> {
     if (!data) return;
     // Typed confirmation. Server delete also nukes /data on the
@@ -196,7 +223,19 @@ export default function ServerDetailPage(): JSX.Element {
           { label: "Dashboard", href: "/" },
           { label: data.name },
         ]}
-        title={data.name}
+        title={
+          <span className="inline-flex items-center gap-2">
+            {data.name}
+            <button
+              className="btn-icon btn-ghost !h-7 !w-7 text-ink-muted"
+              onClick={() => void rename()}
+              aria-label={t("server.rename.button")}
+              title={t("server.rename.button")}
+            >
+              <Pencil size={14} />
+            </button>
+          </span>
+        }
         description={data.description || undefined}
         badge={
           <span className="chip chip-muted flex items-center gap-1.5">
