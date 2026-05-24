@@ -727,12 +727,15 @@ export async function serversAgentRoutes(app: FastifyInstance): Promise<void> {
       .object({
         filename: z.string().min(1).max(256),
         contentBase64: z.string().min(1),
+        // Chunked upload protocol: client splits big files into ~8 MB
+        // chunks and POSTs each sequentially. chunkIndex starts at 0;
+        // server appends until chunkIndex == totalChunks - 1, then
+        // promotes <name>.part → <name>. Single-shot uploads omit both
+        // fields → treated as chunkIndex=0, totalChunks=1 (one-and-done).
+        chunkIndex: z.coerce.number().int().min(0).default(0),
+        totalChunks: z.coerce.number().int().min(1).default(1),
       })
       .parse(req.body);
-    // Mods are .jar (or rare .zip-format mods); shaderpacks and
-    // resourcepacks are always .zip. Reject mismatched extensions
-    // early so the user doesn't end up with a shaderpack uploaded
-    // into mods/ silently.
     const allowed =
       kind === "mods" ? /\.(jar|zip)$/i : /\.zip$/i;
     if (!allowed.test(body.filename)) {
@@ -746,14 +749,39 @@ export async function serversAgentRoutes(app: FastifyInstance): Promise<void> {
     if (body.filename.includes("/") || body.filename.includes("\\")) {
       return reply.code(400).send({ error: "Bare filename only" });
     }
+    if (body.chunkIndex >= body.totalChunks) {
+      return reply.code(400).send({
+        error: `chunkIndex ${body.chunkIndex} >= totalChunks ${body.totalChunks}`,
+      });
+    }
     const dir = clientStagingDir(id, kind);
     await ensureDir(dir);
     const buf = Buffer.from(body.contentBase64, "base64");
-    if (buf.length > 1024 * 1024 * 1024) {
-      return reply.code(413).send({ error: "File too large (>1 GB)" });
+    // Cap per-chunk size — keeps JSON bodies reasonable and stops a
+    // pathological client from streaming a single 1 GB chunk. Whole-
+    // file cap is enforced implicitly via fs free space.
+    if (buf.length > 64 * 1024 * 1024) {
+      return reply.code(413).send({ error: "Chunk too large (>64 MB)" });
     }
-    await fs.writeFile(path.join(dir, body.filename), buf);
-    return { ok: true, name: body.filename, size: buf.length };
+    const finalPath = path.join(dir, body.filename);
+    const tempPath = finalPath + ".part";
+    if (body.chunkIndex === 0) {
+      await fs.writeFile(tempPath, buf);
+    } else {
+      await fs.appendFile(tempPath, buf);
+    }
+    if (body.chunkIndex === body.totalChunks - 1) {
+      await fs.rename(tempPath, finalPath);
+      const st = await fs.stat(finalPath);
+      return { ok: true, name: body.filename, size: st.size, complete: true };
+    }
+    return {
+      ok: true,
+      name: body.filename,
+      chunkIndex: body.chunkIndex,
+      totalChunks: body.totalChunks,
+      complete: false,
+    };
   });
 
   app.delete("/servers/:id/client-mods", async (req) => {

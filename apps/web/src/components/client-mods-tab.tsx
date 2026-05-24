@@ -259,11 +259,30 @@ export function ClientModsTab({ serverId }: { serverId: string }): JSX.Element {
           });
           continue;
         }
-        const b64 = await fileToBase64(f);
-        await api.post(`/servers/${serverId}/client-mods?kind=${kind}`, {
-          filename: f.name,
-          contentBase64: b64,
-        });
+        // Chunked upload: even FileReader.readAsDataURL on a 130+ MB
+        // file allocates a 175+ MB JS string, which V8 chokes on with
+        // `allocation size overflow`. Slice the file into ~8 MB pieces
+        // (base64 of each is ~10.7 MB — safe everywhere) and POST
+        // sequentially. The agent reassembles via append + rename.
+        const CHUNK_BYTES = 8 * 1024 * 1024;
+        const totalChunks = Math.max(1, Math.ceil(f.size / CHUNK_BYTES));
+        for (let ci = 0; ci < totalChunks; ci++) {
+          setProgress(
+            t("clientMods.uploading", {
+              i,
+              n: files.length,
+              name: `${f.name} ${ci + 1}/${totalChunks}`,
+            })
+          );
+          const slice = f.slice(ci * CHUNK_BYTES, (ci + 1) * CHUNK_BYTES);
+          const b64 = await blobToBase64(slice);
+          await api.post(`/servers/${serverId}/client-mods?kind=${kind}`, {
+            filename: f.name,
+            contentBase64: b64,
+            chunkIndex: ci,
+            totalChunks,
+          });
+        }
       }
       setProgress("");
       mutate(`/servers/${serverId}/client-mods?kind=${kind}`);
@@ -660,16 +679,16 @@ export function ClientModsTab({ serverId }: { serverId: string }): JSX.Element {
 }
 
 /**
- * Read a File as a base64 string via the browser's native FileReader.
- * Streams the conversion internally so a 133 MB physics-mod-pro doesn't
- * OOM the JS heap the way `btoa()` on a giant String does (allocation
- * size overflow at ~100 MB of accumulated chars).
+ * Read a Blob (or File slice) as a base64 string via FileReader.
+ * Always called on chunks ≤ 8 MB by the chunked uploader above —
+ * keeps the intermediate base64 string ≤ ~11 MB and well within
+ * V8's allocation limits.
  *
- * Output is the pure base64 payload — the `data:<mime>;base64,` prefix
- * that `readAsDataURL` returns is stripped so the server gets a clean
- * payload it can `Buffer.from(s, "base64")` directly.
+ * Output is the pure base64 payload — the `data:<mime>;base64,`
+ * prefix that `readAsDataURL` returns is stripped so the server
+ * gets a clean payload it can `Buffer.from(s, "base64")` directly.
  */
-function fileToBase64(f: File): Promise<string> {
+function blobToBase64(b: Blob): Promise<string> {
   return new Promise((resolve, reject) => {
     const r = new FileReader();
     r.onload = () => {
@@ -678,7 +697,7 @@ function fileToBase64(f: File): Promise<string> {
       resolve(comma === -1 ? result : result.slice(comma + 1));
     };
     r.onerror = () => reject(r.error ?? new Error("FileReader failed"));
-    r.readAsDataURL(f);
+    r.readAsDataURL(b);
   });
 }
 
