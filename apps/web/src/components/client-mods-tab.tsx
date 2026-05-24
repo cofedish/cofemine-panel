@@ -67,10 +67,11 @@ export function ClientModsTab({ serverId }: { serverId: string }): JSX.Element {
     fetcher,
     { revalidateOnFocus: false }
   );
-  const { data: server } = useSWR<{ publicPackToken: string | null }>(
-    `/servers/${serverId}`,
-    fetcher
-  );
+  const { data: server } = useSWR<{
+    publicPackToken: string | null;
+    cfPackProjectId: number | null;
+    cfPackFileId: number | null;
+  }>(`/servers/${serverId}`, fetcher);
   const { data: exclusionsData } = useSWR<{ exclusions: string[] }>(
     `/servers/${serverId}/client-pack-exclusions`,
     fetcher
@@ -575,7 +576,15 @@ export function ClientModsTab({ serverId }: { serverId: string }): JSX.Element {
         )}
       </div>
 
-      {activeKind === "mods" && detectedItems.length > 0 && (
+      {/* CF-rebuild mode already pulls all CF-manifest mods (including
+          client-only ones) straight from CF API into the .mrpack, so
+          this download-to-staging block is redundant — hide it when
+          a CF pack reference is set. Keep it visible for non-CF
+          servers where auto-detect is still the only way to grab
+          client-side mods. */}
+      {activeKind === "mods" &&
+        detectedItems.length > 0 &&
+        !server?.cfPackProjectId && (
         <div className="tile p-4 space-y-3 border-[rgb(var(--accent))]/30">
           <header className="flex items-start gap-3 flex-wrap">
             <PackageOpen size={16} className="text-[rgb(var(--accent))] shrink-0 mt-0.5" />

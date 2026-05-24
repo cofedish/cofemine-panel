@@ -1085,12 +1085,18 @@ export async function serversRoutes(app: FastifyInstance): Promise<void> {
     const proxy = await readDownloadProxy();
     const proxyUrl = proxy ? makeProxyUrl(proxy) : null;
     const clientNode = await NodeClient.forId(server.nodeId);
+    // Long timeouts: 200 mods × ~5s through SOCKS proxy = ~17 min,
+    // way past undici's 5-min default. Without this the API hangs up
+    // mid-batch and the panel sees 500.
     const result = await clientNode.call<{
       results: Array<{ filename: string; ok: boolean; error?: string }>;
-    }>("POST", `/servers/${id}/client-mods/download`, {
-      files: body.files,
-      proxyUrl,
-    });
+    }>(
+      "POST",
+      `/servers/${id}/client-mods/download`,
+      { files: body.files, proxyUrl },
+      undefined,
+      { headersTimeout: 60 * 60_000, bodyTimeout: 60 * 60_000 }
+    );
     await writeAudit(req, {
       action: "server.client-mods.bulk-download",
       resource: id,
