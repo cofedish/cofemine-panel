@@ -259,8 +259,7 @@ export function ClientModsTab({ serverId }: { serverId: string }): JSX.Element {
           });
           continue;
         }
-        const buf = await f.arrayBuffer();
-        const b64 = bufferToBase64(buf);
+        const b64 = await fileToBase64(f);
         await api.post(`/servers/${serverId}/client-mods?kind=${kind}`, {
           filename: f.name,
           contentBase64: b64,
@@ -660,18 +659,27 @@ export function ClientModsTab({ serverId }: { serverId: string }): JSX.Element {
   );
 }
 
-function bufferToBase64(buf: ArrayBuffer): string {
-  const bytes = new Uint8Array(buf);
-  let s = "";
-  // Chunk to avoid call-stack-overflow on large arrays.
-  const CHUNK = 0x8000;
-  for (let i = 0; i < bytes.length; i += CHUNK) {
-    s += String.fromCharCode.apply(
-      null,
-      Array.from(bytes.subarray(i, i + CHUNK))
-    );
-  }
-  return btoa(s);
+/**
+ * Read a File as a base64 string via the browser's native FileReader.
+ * Streams the conversion internally so a 133 MB physics-mod-pro doesn't
+ * OOM the JS heap the way `btoa()` on a giant String does (allocation
+ * size overflow at ~100 MB of accumulated chars).
+ *
+ * Output is the pure base64 payload — the `data:<mime>;base64,` prefix
+ * that `readAsDataURL` returns is stripped so the server gets a clean
+ * payload it can `Buffer.from(s, "base64")` directly.
+ */
+function fileToBase64(f: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => {
+      const result = r.result as string;
+      const comma = result.indexOf(",");
+      resolve(comma === -1 ? result : result.slice(comma + 1));
+    };
+    r.onerror = () => reject(r.error ?? new Error("FileReader failed"));
+    r.readAsDataURL(f);
+  });
 }
 
 function formatSize(bytes: number): string {
