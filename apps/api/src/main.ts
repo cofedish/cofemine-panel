@@ -37,6 +37,10 @@ async function bootstrap(): Promise<void> {
     // fell through to the legacy /map/* handler and 404'd because
     // BlueMap's container doesn't serve /bluemap as a path.
     ignoreTrailingSlash: true,
+    // Client-pack uploads (mods/shaderpacks/resourcepacks) come in as
+    // base64-encoded JSON bodies that the API proxies to the agent.
+    // Must match the agent's bodyLimit. See apps/agent/src/main.ts.
+    bodyLimit: 1024 * 1024 * 1024,
   });
 
   // BigInt serialization for JSON responses.

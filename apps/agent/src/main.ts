@@ -14,6 +14,11 @@ async function bootstrap(): Promise<void> {
     logger: {
       level: config.NODE_ENV === "production" ? "info" : "debug",
     },
+    // Client mods / shaderpacks / resourcepacks ride the JSON body
+    // (base64-encoded, ~1.33× the file size). 1 GB covers 700+ MB
+    // raw files — physics-mod-pro is 133 MB, big shaderpacks can be
+    // 300–500 MB. Default 1 MB would 413 long before our own check.
+    bodyLimit: 1024 * 1024 * 1024,
   });
 
   await app.register(websocket);

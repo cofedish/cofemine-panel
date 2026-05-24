@@ -749,8 +749,8 @@ export async function serversAgentRoutes(app: FastifyInstance): Promise<void> {
     const dir = clientStagingDir(id, kind);
     await ensureDir(dir);
     const buf = Buffer.from(body.contentBase64, "base64");
-    if (buf.length > 100 * 1024 * 1024) {
-      return reply.code(413).send({ error: "File too large (>100MB)" });
+    if (buf.length > 1024 * 1024 * 1024) {
+      return reply.code(413).send({ error: "File too large (>1 GB)" });
     }
     await fs.writeFile(path.join(dir, body.filename), buf);
     return { ok: true, name: body.filename, size: buf.length };

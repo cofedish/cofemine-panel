@@ -277,7 +277,7 @@ const en: Dict = {
   "clientMods.exclude.empty": "No exclusions — every mod ships in the client pack.",
   "clientMods.uploading": "Uploading {i}/{n}: {name}",
   "clientMods.skipNotJar": "Skipped {name} — not a .jar / .zip",
-  "clientMods.skipTooBig": "Skipped {name} — over 100 MB",
+  "clientMods.skipTooBig": "Skipped {name} — over 1 GB",
   "clientMods.exportMrpack": "Download .mrpack",
   "clientMods.exportTooltip":
     "Server mods + your client mods bundled into a Modrinth-format pack. Friends import it in Prism Launcher / Modrinth App with one click.",
@@ -996,7 +996,7 @@ const ru: Dict = {
   "clientMods.exclude.empty": "Исключений нет — все моды попадают в клиентскую сборку.",
   "clientMods.uploading": "Загрузка {i}/{n}: {name}",
   "clientMods.skipNotJar": "Пропущен {name} — не .jar / .zip",
-  "clientMods.skipTooBig": "Пропущен {name} — больше 100 МБ",
+  "clientMods.skipTooBig": "Пропущен {name} — больше 1 ГБ",
   "clientMods.exportMrpack": "Скачать .mrpack",
   "clientMods.exportTooltip":
     "Серверные моды + твои клиентские, упакованные в формат Modrinth. Друг открывает в Prism Launcher / Modrinth App одной кнопкой.",

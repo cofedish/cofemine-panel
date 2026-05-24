@@ -252,7 +252,7 @@ export function ClientModsTab({ serverId }: { serverId: string }): JSX.Element {
           });
           continue;
         }
-        if (f.size > 100 * 1024 * 1024) {
+        if (f.size > 1024 * 1024 * 1024) {
           dialog.toast({
             tone: "warning",
             message: t("clientMods.skipTooBig", { name: f.name }),
