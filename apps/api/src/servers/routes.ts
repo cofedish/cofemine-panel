@@ -990,10 +990,17 @@ export async function serversRoutes(app: FastifyInstance): Promise<void> {
     const kind = clientKindSchema.parse(
       (req.query as { kind?: string }).kind ?? "mods"
     );
+    // NOTE: keep chunkIndex/totalChunks in the schema so the chunked
+    // uploader's protocol fields pass through to the agent. Without
+    // them in the schema, Zod strips them silently and every chunk
+    // is treated as a one-shot upload — the agent overwrites the file
+    // on each request and only the LAST chunk's bytes survive.
     const body = z
       .object({
         filename: z.string().min(1).max(256),
         contentBase64: z.string().min(1),
+        chunkIndex: z.coerce.number().int().min(0).optional(),
+        totalChunks: z.coerce.number().int().min(1).optional(),
       })
       .parse(req.body);
     const server = await prisma.server.findUniqueOrThrow({ where: { id } });
