@@ -19,7 +19,10 @@ import { schedulesRoutes } from "./schedules/routes.js";
 import { templatesRoutes } from "./templates/routes.js";
 import { usersRoutes } from "./users/routes.js";
 import { auditRoutes } from "./audit/routes.js";
-import { integrationsRoutes } from "./integrations/routes.js";
+import {
+  applyDownloadProxyToMavenCaches,
+  integrationsRoutes,
+} from "./integrations/routes.js";
 import { metaRoutes } from "./meta/routes.js";
 import { registerConsoleWs } from "./ws/console.js";
 import { startScheduler } from "./schedules/scheduler.js";
@@ -116,6 +119,37 @@ async function bootstrap(): Promise<void> {
   await registerConsoleWs(app);
 
   await startScheduler();
+
+  // Re-apply Download Proxy + CA to every node's maven-cache. Needed
+  // because `docker compose up -d --force-recreate` reinstates
+  // maven-cache with UPSTREAM_PROXY from .env (typically empty), which
+  // overwrites whatever the operator set via the panel UI. Same goes
+  // for the CA in the volume — the volume content survives compose
+  // recreate, but a fresh container with no CA pushed to it falls
+  // back to splice-only mode. Best-effort, never blocks boot.
+  //
+  // Deferred via setImmediate so the API binds its port first and CI
+  // health checks pass even if every agent is still booting up.
+  setImmediate(() => {
+    void applyDownloadProxyToMavenCaches(app.log)
+      .then((results) => {
+        const failed = results.filter((r) => !r.ok);
+        if (failed.length > 0) {
+          app.log.warn(
+            { failed },
+            "post-boot maven-cache apply: some nodes failed (will pick up on next /apply or UI save)"
+          );
+        } else {
+          app.log.info(
+            { nodes: results.length },
+            "post-boot maven-cache apply succeeded"
+          );
+        }
+      })
+      .catch((err) => {
+        app.log.warn({ err }, "post-boot maven-cache apply threw");
+      });
+  });
 
   app.addHook("onClose", async () => {
     await prisma.$disconnect();

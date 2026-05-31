@@ -58,7 +58,7 @@ const settingPatchSchema = z.object({
  * host xray via the same alias, so any "localhost"-ish address the
  * operator typed in the UI is rewritten to host.docker.internal here.
  */
-async function applyDownloadProxyToMavenCaches(
+export async function applyDownloadProxyToMavenCaches(
   log: { warn: (...args: unknown[]) => void; info: (...args: unknown[]) => void }
 ): Promise<Array<{ node: string; ok: boolean; error?: string }>> {
   const proxy = await readDownloadProxy();
