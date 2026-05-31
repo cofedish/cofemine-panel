@@ -272,6 +272,9 @@ export async function createServerRecord(input: CreateServerInput) {
  * Idempotent: if an equivalent UDP entry already exists, leave the
  * input untouched.
  */
+const SVC_DEFAULT_PORT = 24454;
+const MC_DEFAULT_PORT = 25565;
+
 function mirrorUdpForMcPorts(
   ports: Array<{ host: number; container: number; protocol: "tcp" | "udp" }>
 ): Array<{ host: number; container: number; protocol: "tcp" | "udp" }> {
@@ -281,9 +284,9 @@ function mirrorUdpForMcPorts(
     // RCON is TCP-only — never mirror it.
     if (p.container === 25575) continue;
     // Mirror every other TCP entry. Covers the default MC port (25565),
-    // operator-renumbered game ports, and any future SVC-style mod that
-    // expects UDP on the same number. Idempotent — skip when a matching
-    // UDP entry is already present (operator added one manually).
+    // operator-renumbered game ports, and any future mod that expects
+    // UDP on the same number. Idempotent — skip when a matching UDP
+    // entry is already present (operator added one manually).
     const exists = ports.some(
       (q) =>
         q.protocol === "udp" &&
@@ -292,6 +295,30 @@ function mirrorUdpForMcPorts(
     );
     if (!exists) {
       out.push({ host: p.host, container: p.container, protocol: "udp" });
+    }
+  }
+  // Simple Voice Chat ships with `port=24454` in its default
+  // voicechat-server.properties — a separate UDP port from the game.
+  // Open it automatically so SVC works out of the box; if no SVC
+  // mod is installed, the unused port binding is harmless.
+  //
+  // Host port = 24454 offset by however far MC's host port is from
+  // its default (25565). That way two MC servers on the same node
+  // pick non-colliding SVC ports: MC 25566 → SVC 24455, etc.
+  const mcTcp = ports.find(
+    (p) => p.protocol === "tcp" && p.container === MC_DEFAULT_PORT
+  );
+  if (mcTcp) {
+    const svcHostPort = SVC_DEFAULT_PORT + (mcTcp.host - MC_DEFAULT_PORT);
+    const svcExists = out.some(
+      (q) => q.protocol === "udp" && q.container === SVC_DEFAULT_PORT
+    );
+    if (!svcExists && svcHostPort >= 1 && svcHostPort <= 65535) {
+      out.push({
+        host: svcHostPort,
+        container: SVC_DEFAULT_PORT,
+        protocol: "udp",
+      });
     }
   }
   return out;

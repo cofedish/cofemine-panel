@@ -683,6 +683,7 @@ export async function serversAgentRoutes(app: FastifyInstance): Promise<void> {
    */
   app.post("/servers/:id/client-mods/download", async (req, reply) => {
     const { id } = req.params as { id: string };
+    const kind = parseClientKind((req.query as { kind?: string }).kind);
     const body = z
       .object({
         files: z
@@ -697,7 +698,7 @@ export async function serversAgentRoutes(app: FastifyInstance): Promise<void> {
         proxyUrl: z.string().url().nullable().optional(),
       })
       .parse(req.body);
-    const dir = path.join(dataDirFor(id), ".cofemine-client", "mods");
+    const dir = clientStagingDir(id, kind);
     await ensureDir(dir);
     const results: Array<{ filename: string; ok: boolean; error?: string }> = [];
     for (const f of body.files) {

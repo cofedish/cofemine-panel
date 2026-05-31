@@ -18,6 +18,7 @@ import { CurseForgeProvider } from "./curseforge-provider.js";
 import type { ContentProvider } from "./content-provider.js";
 import {
   clearDownloadProxy,
+  makeProxyUrl,
   readDownloadProxy,
   readDownloadProxyForDisplay,
   writeDownloadProxy,
@@ -247,6 +248,125 @@ export async function integrationsRoutes(app: FastifyInstance): Promise<void> {
       action: "content.install",
       resource: id,
       metadata: { provider: "modrinth", projectId: body.projectId, kind: body.kind },
+    });
+    return { ok: true, result: res };
+  });
+
+  // Client-side install — same provider machinery as /install/* above
+  // but the downloaded files land in /data/.cofemine-client/<kind>/
+  // instead of /data/mods. itzg's mod scanner ignores that path, so the
+  // jar/zip is invisible to the running server but bundled into the
+  // .mrpack export for clients to extract. Supports mods, shaderpacks,
+  // and resourcepacks; the provider's version resolution covers all
+  // three (CF/Modrinth tag projectType=mod | shader | resourcepack).
+  const clientKindSchema = z.enum(["mods", "shaderpacks", "resourcepacks"]);
+  const clientInstallModrinthSchema = z.object({
+    projectId: z.string().min(1),
+    versionId: z.string().optional(),
+    kind: clientKindSchema,
+    gameVersion: z.string().optional(),
+    loader: z.string().optional(),
+  });
+  const clientInstallCurseforgeSchema = z.object({
+    projectId: z.coerce.number().int().positive(),
+    fileId: z.coerce.number().int().positive().optional(),
+    kind: clientKindSchema,
+    gameVersion: z.string().optional(),
+    loader: z.string().optional(),
+  });
+
+  async function dispatchClientFiles(
+    serverId: string,
+    nodeId: string,
+    kind: "mods" | "shaderpacks" | "resourcepacks",
+    files: Array<{ filename: string; downloadUrl: string }>
+  ): Promise<unknown> {
+    const proxy = await readDownloadProxy().catch(() => null);
+    const proxyUrl = proxy ? makeProxyUrl(proxy) : null;
+    const client = await NodeClient.forId(nodeId);
+    return client.call(
+      "POST",
+      `/servers/${serverId}/client-mods/download?kind=${kind}`,
+      { files, proxyUrl }
+    );
+  }
+
+  app.post("/servers/:id/client-install/modrinth", async (req) => {
+    const { id } = req.params as { id: string };
+    await assertServerPermission(req, id, "server.edit");
+    const body = clientInstallModrinthSchema.parse(req.body);
+    const server = await prisma.server.findUniqueOrThrow({ where: { id } });
+    const versions = await modrinth.getVersions(body.projectId, {
+      gameVersion: body.gameVersion,
+      loader: body.loader,
+    });
+    const version =
+      versions.find((v) => v.id === body.versionId) ?? versions[0];
+    if (!version) {
+      throw new Error("No compatible Modrinth version found.");
+    }
+    const files = version.files
+      .filter((f) => f.url)
+      .map((f) => ({ filename: f.filename, downloadUrl: f.url }));
+    if (files.length === 0) {
+      throw new Error("Modrinth version has no downloadable files.");
+    }
+    const res = await dispatchClientFiles(id, server.nodeId, body.kind, files);
+    await writeAudit(req, {
+      action: "client-content.install",
+      resource: id,
+      metadata: {
+        provider: "modrinth",
+        projectId: body.projectId,
+        kind: body.kind,
+      },
+    });
+    return { ok: true, result: res };
+  });
+
+  app.post("/servers/:id/client-install/curseforge", async (req) => {
+    const { id } = req.params as { id: string };
+    await assertServerPermission(req, id, "server.edit");
+    const body = clientInstallCurseforgeSchema.parse(req.body);
+    if (!(await curseforge.isEnabled())) {
+      const err = new Error(
+        "CurseForge API key is not set. Configure it in Integrations or use manual upload."
+      );
+      (err as any).statusCode = 409;
+      throw err;
+    }
+    const server = await prisma.server.findUniqueOrThrow({ where: { id } });
+    const versions = await curseforge.getVersions(body.projectId, {
+      gameVersion: body.gameVersion,
+      loader: body.loader,
+    });
+    const version =
+      versions.find((v) => v.id === String(body.fileId)) ?? versions[0];
+    if (!version) {
+      throw new Error("No compatible CurseForge file found.");
+    }
+    if (version.distributionBlocked) {
+      const err = new Error(
+        "This CurseForge file disables third-party downloads. Try a different version or upload manually."
+      );
+      (err as any).statusCode = 409;
+      throw err;
+    }
+    const files = version.files
+      .filter((f) => f.url)
+      .map((f) => ({ filename: f.filename, downloadUrl: f.url }));
+    if (files.length === 0) {
+      throw new Error("CurseForge file has no downloadable URL.");
+    }
+    const res = await dispatchClientFiles(id, server.nodeId, body.kind, files);
+    await writeAudit(req, {
+      action: "client-content.install",
+      resource: id,
+      metadata: {
+        provider: "curseforge",
+        projectId: body.projectId,
+        kind: body.kind,
+      },
     });
     return { ok: true, result: res };
   });

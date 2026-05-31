@@ -15,6 +15,8 @@ import {
   Check,
   Globe,
   Save,
+  Search,
+  Plus,
 } from "lucide-react";
 import { api, ApiError, fetcher } from "@/lib/api";
 import { useDialog } from "./dialog-provider";
@@ -472,6 +474,12 @@ export function ClientModsTab({ serverId }: { serverId: string }): JSX.Element {
             <span className="text-[11px] text-ink-muted">{progress}</span>
           )}
         </div>
+
+        <ClientPackSearch
+          serverId={serverId}
+          kind={activeKind}
+          onInstalled={() => mutate(`/servers/${serverId}/client-mods?kind=${activeKind}`)}
+        />
       </div>
 
       <div className="tile p-4 space-y-3">
@@ -806,4 +814,186 @@ function formatSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / 1024 / 1024).toFixed(2)} MB`;
+}
+
+type SearchHit = {
+  id: string;
+  provider: "modrinth" | "curseforge";
+  name: string;
+  author?: string;
+  description?: string;
+  iconUrl?: string;
+  downloads?: number;
+  pageUrl?: string;
+};
+
+/**
+ * Modrinth + CurseForge search for client-only content. Result cards
+ * have an "Add" button that POSTs to /integrations/servers/:id/client-
+ * install/<provider>?kind=<activeKind>, which lands the binary in
+ * /data/.cofemine-client/<kind>/ on the agent. Manual upload of bespoke
+ * files (operator's own jars) stays separately above — this only
+ * helps with public content.
+ */
+function ClientPackSearch({
+  serverId,
+  kind,
+  onInstalled,
+}: {
+  serverId: string;
+  kind: "mods" | "shaderpacks" | "resourcepacks";
+  onInstalled: () => void;
+}): JSX.Element {
+  const [provider, setProvider] = useState<"modrinth" | "curseforge">(
+    "modrinth"
+  );
+  const [query, setQuery] = useState("");
+  const [results, setResults] = useState<SearchHit[]>([]);
+  const [busy, setBusy] = useState(false);
+  const [installingId, setInstallingId] = useState<string | null>(null);
+  const [msg, setMsg] = useState<string | null>(null);
+
+  // Client kind → provider projectType. Modrinth uses these exact
+  // strings; CF maps internally via classId.
+  const projectType =
+    kind === "mods" ? "mod" : kind === "shaderpacks" ? "shader" : "resourcepack";
+
+  async function search(): Promise<void> {
+    const q = query.trim();
+    if (!q) {
+      setResults([]);
+      return;
+    }
+    setBusy(true);
+    setMsg(null);
+    try {
+      const qp = new URLSearchParams();
+      qp.set("query", q);
+      qp.set("projectType", projectType);
+      qp.set("pageSize", "12");
+      const res = await api.get<{ results?: SearchHit[] } | SearchHit[]>(
+        `/integrations/${provider}/search?${qp.toString()}`
+      );
+      const arr: SearchHit[] = Array.isArray(res) ? res : (res.results ?? []);
+      setResults(arr);
+      if (arr.length === 0) setMsg("Ничего не найдено");
+    } catch (e) {
+      setMsg(e instanceof ApiError ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function install(hit: SearchHit): Promise<void> {
+    setInstallingId(hit.id);
+    setMsg(null);
+    try {
+      const path = `/integrations/servers/${serverId}/client-install/${provider}`;
+      const body: Record<string, unknown> = {
+        projectId: provider === "curseforge" ? Number(hit.id) : hit.id,
+        kind,
+      };
+      await api.post(path, body);
+      onInstalled();
+      setMsg(`Добавлено: ${hit.name}`);
+    } catch (e) {
+      setMsg(e instanceof ApiError ? e.message : String(e));
+    } finally {
+      setInstallingId(null);
+    }
+  }
+
+  return (
+    <div className="space-y-2 rounded-lg border border-border/60 bg-surface-1/40 p-3">
+      <div className="flex gap-2 flex-wrap items-center">
+        <div className="flex rounded-md overflow-hidden border border-border/60">
+          {(["modrinth", "curseforge"] as const).map((p) => (
+            <button
+              key={p}
+              type="button"
+              className={
+                "px-3 py-1 text-xs " +
+                (p === provider
+                  ? "bg-[rgb(var(--accent))] text-white"
+                  : "bg-surface-2 text-ink-muted hover:text-ink")
+              }
+              onClick={() => setProvider(p)}
+            >
+              {p === "modrinth" ? "Modrinth" : "CurseForge"}
+            </button>
+          ))}
+        </div>
+        <input
+          className="input flex-1 min-w-[200px]"
+          placeholder={`Поиск ${
+            kind === "mods" ? "модов" : kind === "shaderpacks" ? "шейдеров" : "ресурс-паков"
+          }…`}
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") void search();
+          }}
+        />
+        <button
+          className="btn btn-primary"
+          onClick={() => void search()}
+          disabled={busy}
+        >
+          {busy ? <Loader2 size={14} className="animate-spin" /> : <Search size={14} />}
+          Найти
+        </button>
+      </div>
+      {msg && <div className="text-xs text-ink-secondary">{msg}</div>}
+      {results.length > 0 && (
+        <ul className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-1">
+          {results.map((r) => (
+            <li
+              key={`${r.provider}:${r.id}`}
+              className="flex items-start gap-2 rounded-md bg-surface-2/60 p-2"
+            >
+              {r.iconUrl && (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={r.iconUrl}
+                  alt=""
+                  className="w-9 h-9 rounded shrink-0 object-cover"
+                />
+              )}
+              <div className="flex-1 min-w-0">
+                <div className="text-sm font-medium truncate">{r.name}</div>
+                {r.author && (
+                  <div className="text-[11px] text-ink-muted truncate">
+                    {r.author}
+                    {typeof r.downloads === "number" && (
+                      <span className="ml-2">
+                        ↓ {(r.downloads / 1000).toFixed(0)}k
+                      </span>
+                    )}
+                  </div>
+                )}
+                {r.description && (
+                  <div className="text-[11px] text-ink-muted line-clamp-2 mt-0.5">
+                    {r.description}
+                  </div>
+                )}
+              </div>
+              <button
+                className="btn btn-ghost shrink-0 !h-8"
+                onClick={() => void install(r)}
+                disabled={installingId !== null}
+                title="Добавить в клиентский пак"
+              >
+                {installingId === r.id ? (
+                  <Loader2 size={13} className="animate-spin" />
+                ) : (
+                  <Plus size={13} />
+                )}
+                Добавить
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
 }
