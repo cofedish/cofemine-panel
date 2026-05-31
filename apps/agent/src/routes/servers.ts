@@ -2658,18 +2658,29 @@ function detectBooted(text: string): boolean {
 }
 
 function parseInstallInterrupt(text: string): InstallInterrupt | null {
+  // TLS handshake never completed — typical for direct egress to
+  // maven.neoforged.net / forgecdn / api.modrinth.com from a region-
+  // blocked host. Hits BEFORE any download starts. The IPv4 stack
+  // hint can't fix this; only routing through the proxy will.
+  if (/SslHandshakeTimeoutException|handshake timed out/.test(text)) {
+    return {
+      kind: "timeout",
+      message:
+        "TLS handshake to the upstream maven / CDN timed out — egress is being blocked. Routing the install through the configured proxy and resuming.",
+    };
+  }
   if (/io\.netty\.handler\.timeout\.ReadTimeoutException/.test(text)) {
     return {
       kind: "timeout",
       message:
-        "CurseForge read timed out while downloading modpack files. Files already on disk are kept — press Start to resume the install.",
+        "Read timed out while downloading install files. Files already on disk are kept — press Start to resume the install.",
     };
   }
   if (/RetryExhaustedException|Retries exhausted/.test(text)) {
     return {
       kind: "exhausted",
       message:
-        "CurseForge install gave up after repeated retries. Most files already downloaded — press Start to resume.",
+        "Install gave up after repeated retries. Most files already downloaded — press Start to resume.",
     };
   }
   if (/Failed to auto-install CurseForge modpack/.test(text)) {
@@ -2677,6 +2688,18 @@ function parseInstallInterrupt(text: string): InstallInterrupt | null {
       kind: "generic",
       message:
         "CurseForge modpack install was interrupted. Press Start to resume — already-downloaded files are preserved.",
+    };
+  }
+  // Native loader install failures (NeoForge / Forge / Fabric / Quilt).
+  // mc-image-helper prints e.g. "[ERROR] Failed to install NeoForge"
+  // on its own line after the underlying exception. Catching this
+  // alongside SslHandshake covers both "network blocked entirely"
+  // and "metadata fetched, jar download then failed" paths.
+  if (/Failed to install (NeoForge|Forge|Fabric|Quilt)/i.test(text)) {
+    return {
+      kind: "generic",
+      message:
+        "Loader installer failed. Routing through the configured proxy and resuming.",
     };
   }
   // CDN-side 403 storm — usually means the host's IP got region-
