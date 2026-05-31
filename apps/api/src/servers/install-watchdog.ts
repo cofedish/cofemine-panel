@@ -68,9 +68,15 @@ export function startInstallWatchdog(): void {
 }
 
 async function tick(): Promise<void> {
+  // Watch any server that runs through itzg's mc-image-helper install
+  // phase — that includes the modpack sources (CURSEFORGE, MODRINTH)
+  // AND the native loader types (NEOFORGE/FORGE/FABRIC/QUILT), which
+  // also fetch their installer.jar from maven on first start. Vanilla
+  // servers don't need this — they only need the MC jar from Mojang,
+  // which is rarely blocked.
   const servers = await prisma.server.findMany({
     where: {
-      OR: [{ type: "CURSEFORGE" }, { type: "MODRINTH" }],
+      type: { in: ["CURSEFORGE", "MODRINTH", "NEOFORGE", "FORGE", "FABRIC", "QUILT"] },
       status: { in: ["starting", "running"] },
     },
   });
