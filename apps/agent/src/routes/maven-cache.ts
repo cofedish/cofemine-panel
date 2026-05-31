@@ -107,9 +107,20 @@ import_ca() {
 }
 import_ca
 # Hand off to itzg's stock entrypoint. The image declares ENTRYPOINT
-# ["/start"] — we replaced it with this script, so we have to invoke
-# /start ourselves and forward the original CMD ("$@").
+# ["/start"] (which itself exec's /image/scripts/start) — we replaced
+# it with this script, so we have to invoke it ourselves and forward
+# the original CMD ("$@"). Verify it exists with a clear log line so
+# a missing /start in a future itzg image variant is obvious instead
+# of looking like a silent crash-loop.
+if [ ! -x /start ]; then
+  echo '[cofemine-ca] FATAL /start not executable — image layout changed?'
+  ls -la /start /image/scripts/start 2>&1
+  exit 1
+fi
+echo '[cofemine-ca] handing off to /start'
 exec /start "$@"
+echo '[cofemine-ca] FATAL exec /start returned (should be unreachable)'
+exit 1
 `;
 
 export async function mavenCacheRoutes(app: FastifyInstance): Promise<void> {
