@@ -25,6 +25,29 @@ services:
       options: { max-size: "10m", max-file: "5" }
     networks: [cofemine_internal]
 
+  # Caching reverse proxy for Minecraft loader / CDN endpoints. See
+  # docker-compose.yml + services/maven-cache/ for the full rationale.
+  # Set MAVEN_CACHE_UPSTREAM in .env to chain through your xray:
+  #   MAVEN_CACHE_UPSTREAM=socks5://host.docker.internal:10808
+  maven-cache:
+    image: ${MAVEN_CACHE_IMAGE:-ghcr.io/cofedish/cofemine-panel/maven-cache:latest}
+    restart: always
+    environment:
+      UPSTREAM_PROXY: ${MAVEN_CACHE_UPSTREAM:-}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - maven_cache_data:/var/cache/nginx/maven
+    networks: [cofemine_mcnet]
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1/healthz"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+
   agent:
     image: ${AGENT_IMAGE:-ghcr.io/cofedish/cofemine-panel/agent:latest}
     restart: always
@@ -34,6 +57,7 @@ services:
       AGENT_BACKUP_ROOT: ${BACKUP_ROOT:-/var/lib/cofemine/backups}
       AGENT_DOCKER_NETWORK: "cofemine_mcnet"
       AGENT_LABEL_PREFIX: "cofemine"
+      AGENT_MAVEN_CACHE_HOST: "maven-cache"
       AGENT_MC_MAX_RETRIES: ${AGENT_MC_MAX_RETRIES:-10}
       AGENT_MC_RETRY_BACKOFF: ${AGENT_MC_RETRY_BACKOFF:-10}
     # The agent itself needs host.docker.internal resolvable so it
@@ -161,6 +185,7 @@ services:
 
 volumes:
   db_data:
+  maven_cache_data:
   # mc_data / mc_backups are now bind-mounts to DATA_ROOT / BACKUP_ROOT,
   # not named volumes, so the agent and MC containers see the same host
   # paths. See the agent service definition.

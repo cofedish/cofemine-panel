@@ -25,7 +25,19 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        service: [api, agent, web]
+        include:
+          - service: api
+            context: .
+            file: apps/api/Dockerfile
+          - service: agent
+            context: .
+            file: apps/agent/Dockerfile
+          - service: web
+            context: .
+            file: apps/web/Dockerfile
+          - service: maven-cache
+            context: ./services/maven-cache
+            file: services/maven-cache/Dockerfile
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -52,8 +64,8 @@ jobs:
       - name: Build and push
         uses: docker/build-push-action@v5
         with:
-          context: .
-          file: apps/${{ matrix.service }}/Dockerfile
+          context: ${{ matrix.context }}
+          file: ${{ matrix.file }}
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}

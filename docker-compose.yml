@@ -22,6 +22,36 @@ services:
       timeout: 3s
       retries: 20
 
+  # Caching reverse proxy for the Minecraft loader/CDN endpoints
+  # (NeoForge / Forge / Fabric / Quilt / Mojang piston / forgecdn /
+  # Modrinth). Sits on cofemine_mcnet so every MC container can reach
+  # it as http://maven-cache. The agent injects *_INSTALLER_URL into
+  # spawned MC containers pointing at this service — first download
+  # warms the cache through xray, subsequent downloads serve from disk
+  # without touching the proxy or hitting any region-blocked CDN.
+  #
+  # MAVEN_CACHE_UPSTREAM env (optional): forward proxy gost chains to.
+  #   socks5://host.docker.internal:10808  → user's xray on host
+  #   http://host.docker.internal:2080     → xray in HTTP-CONNECT mode
+  #   unset                                → direct egress (dev only)
+  maven-cache:
+    build:
+      context: ./services/maven-cache
+    restart: unless-stopped
+    environment:
+      UPSTREAM_PROXY: ${MAVEN_CACHE_UPSTREAM:-}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - maven_cache_data:/var/cache/nginx/maven
+    networks:
+      - cofemine_mcnet
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1/healthz"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+
   agent:
     build:
       context: .
@@ -35,6 +65,10 @@ services:
       AGENT_BACKUP_ROOT: ${BACKUP_ROOT:-/var/lib/cofemine/backups}
       AGENT_DOCKER_NETWORK: "cofemine_mcnet"
       AGENT_LABEL_PREFIX: "cofemine"
+      # When set, the agent injects loader-installer URL overrides
+      # into spawned MC containers pointing at this maven-cache. The
+      # value is the cache's hostname inside cofemine_mcnet.
+      AGENT_MAVEN_CACHE_HOST: "maven-cache"
       DOCKER_SOCKET: "/var/run/docker.sock"
       AGENT_MC_MAX_RETRIES: ${AGENT_MC_MAX_RETRIES:-10}
       AGENT_MC_RETRY_BACKOFF: ${AGENT_MC_RETRY_BACKOFF:-10}
@@ -155,6 +189,7 @@ services:
 
 volumes:
   db_data:
+  maven_cache_data:
   # Server data lives on bind-mounted host paths (DATA_ROOT, BACKUP_ROOT)
   # rather than named volumes, so the agent and MC containers see the
   # same filesystem. See the agent service for the bind spec.

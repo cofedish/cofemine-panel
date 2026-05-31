@@ -9,6 +9,14 @@ const schema = z.object({
   AGENT_BACKUP_ROOT: z.string().default("/var/lib/cofemine/backups"),
   AGENT_DOCKER_NETWORK: z.string().default("cofemine_mcnet"),
   AGENT_LABEL_PREFIX: z.string().default("cofemine"),
+  /**
+   * Hostname of the maven-cache reverse proxy inside cofemine_mcnet.
+   * When set, the agent injects *_INSTALLER_URL overrides into spawned
+   * MC containers so mc-image-helper fetches NeoForge/Forge/Fabric/
+   * Quilt installers from the cache instead of hitting the real CDN
+   * directly. Empty string = disabled (fall back to historical behaviour).
+   */
+  AGENT_MAVEN_CACHE_HOST: z.string().default(""),
   DOCKER_SOCKET: z.string().default("/var/run/docker.sock"),
   /** If set, the agent talks to a remote Docker daemon via HTTP(s). */
   DOCKER_HOST_URL: z.string().url().optional(),

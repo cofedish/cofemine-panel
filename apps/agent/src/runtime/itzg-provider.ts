@@ -70,6 +70,36 @@ export class ItzgRuntimeProvider implements MinecraftRuntimeProvider {
           }
         : {};
 
+    // When the operator deployed the optional maven-cache sidecar, point
+    // the loader installers at it. mc-image-helper happily honours
+    // *_INSTALLER_URL env to override its built-in maven targets, so
+    // the entire install stops touching maven.neoforged.net etc. After
+    // the first server warms the cache, subsequent containers (even
+    // brand-new ones on a new MC version) serve from local disk — no
+    // proxy, no region-blocked CDNs, no install-retry dance.
+    const cacheDefaults: Record<string, string> = {};
+    const cacheHost = config.AGENT_MAVEN_CACHE_HOST;
+    if (cacheHost) {
+      const ver = spec.env.NEOFORGE_VERSION ?? spec.env.CF_MOD_LOADER_VERSION;
+      if (spec.type === "NEOFORGE" && ver) {
+        cacheDefaults.NEOFORGE_INSTALLER_URL =
+          `http://${cacheHost}/neoforge/releases/net/neoforged/neoforge/${ver}/neoforge-${ver}-installer.jar`;
+      }
+      if (spec.type === "FORGE" && spec.env.FORGE_VERSION) {
+        // Forge installer naming: forge-<mc>-<forgever>-installer.jar
+        const fv = spec.env.FORGE_VERSION;
+        const mcv = fv.includes("-") ? fv.split("-")[0] : spec.version;
+        const loaderVer = fv.includes("-") ? fv.split("-").slice(1).join("-") : fv;
+        cacheDefaults.FORGE_INSTALLER_URL =
+          `http://${cacheHost}/forge/net/minecraftforge/forge/${mcv}-${loaderVer}/forge-${mcv}-${loaderVer}-installer.jar`;
+      }
+      // Fabric / Quilt installers are looked up via meta endpoints,
+      // not direct URLs — itzg doesn't expose a single override. They
+      // still benefit because mc-image-helper falls through to
+      // meta.fabricmc.net which the cache fronts; routed via the
+      // operator's MAVEN_CACHE_UPSTREAM proxy.
+    }
+
     const envMap: Record<string, string> = {
       EULA: spec.eulaAccepted ? "TRUE" : "FALSE",
       TYPE: TYPE_MAP[spec.type] ?? "VANILLA",
@@ -78,6 +108,7 @@ export class ItzgRuntimeProvider implements MinecraftRuntimeProvider {
       ENABLE_RCON: "true",
       RCON_PASSWORD: `rcon-${spec.id}`,
       ...installRetryDefaults,
+      ...cacheDefaults,
       ...spec.env,
     };
     // The Java-version hint is panel-internal — we strip it from the
