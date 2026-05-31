@@ -132,13 +132,43 @@ export class ItzgRuntimeProvider implements MinecraftRuntimeProvider {
       cacheDefaults.NO_PROXY = noProxy;
       cacheDefaults.no_proxy = noProxy;
 
-      // Tell itzg to run our CA-import hook before mc-image-helper
-      // starts. The script lives on the shared CA volume mounted at
-      // /cofemine-ca (added to HostConfig.Binds below). It's a no-op
-      // when no CA is generated yet — squid then runs in pure splice
-      // mode and tunnels TLS without inspection, which still works
-      // for the operator, just without per-jar caching.
-      cacheDefaults.STARTUP_SCRIPT = `${CA_MOUNT_PATH}/import.sh`;
+      // JVM ignores HTTP_PROXY / HTTPS_PROXY env. Without explicit
+      // -Dhttps.proxyHost system properties, Java HttpClient — used by
+      // mc-image-helper to fetch CurseForge / Modrinth / loader jars
+      // — connects directly. CF then blocks the source IP (RU edge
+      // returns 403) and the install retries forever. JAVA_TOOL_OPTIONS
+      // is the standard JVM env that propagates to every Java process
+      // in the container, including mc-image-helper AND the MC server
+      // itself; the nonProxyHosts list keeps Mojang auth + skins direct
+      // so player joins don't pay an extra hop through squid.
+      //
+      // Java's nonProxyHosts syntax is pipe-separated and accepts a
+      // leading '*' glob — different from the comma-separated NO_PROXY
+      // env above, so we maintain both.
+      const javaNonProxy = [
+        "localhost",
+        "127.*",
+        "[::1]",
+        cacheHost,
+        "host.docker.internal",
+        "*.mojang.com",
+        "*.minecraft.net",
+        "*.minecraftservices.com",
+      ].join("|");
+      const javaProxyOpts = [
+        `-Dhttp.proxyHost=${cacheHost}`,
+        `-Dhttp.proxyPort=8081`,
+        `-Dhttps.proxyHost=${cacheHost}`,
+        `-Dhttps.proxyPort=8081`,
+        `-Dhttp.nonProxyHosts=${javaNonProxy}`,
+      ].join(" ");
+      // Preserve any pre-existing JAVA_TOOL_OPTIONS the operator set
+      // via the env tab. Last token wins inside the JVM, so put ours
+      // last to override any conflicting proxy props they had.
+      const existing = spec.env.JAVA_TOOL_OPTIONS?.trim();
+      cacheDefaults.JAVA_TOOL_OPTIONS = existing
+        ? `${existing} ${javaProxyOpts}`
+        : javaProxyOpts;
     }
 
     const envMap: Record<string, string> = {
@@ -233,7 +263,14 @@ export class ItzgRuntimeProvider implements MinecraftRuntimeProvider {
       [`${config.AGENT_LABEL_PREFIX}.version`]: spec.version,
     };
 
-    return {
+    // When the maven-cache CA is mounted, override the itzg image's
+    // ENTRYPOINT to a wrapper that imports the CA into JVM cacerts and
+    // then exec's the original /start. This is more reliable than
+    // relying on itzg's STARTUP_SCRIPT env, which behaves differently
+    // across variants (some only run on first boot, some don't run at
+    // all on :javaXX bases). The wrapper lives on the shared CA volume
+    // so all MC containers run the same code.
+    const containerOpts: ContainerCreateOptions = {
       name: spec.containerName,
       Image: javaImage,
       Env: env,
@@ -244,5 +281,9 @@ export class ItzgRuntimeProvider implements MinecraftRuntimeProvider {
       Labels: labels,
       HostConfig: hostConfig,
     };
+    if (config.AGENT_MAVEN_CACHE_HOST) {
+      containerOpts.Entrypoint = [`${CA_MOUNT_PATH}/import.sh`];
+    }
+    return containerOpts;
   }
 }

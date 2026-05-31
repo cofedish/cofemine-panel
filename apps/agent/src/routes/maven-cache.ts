@@ -45,50 +45,71 @@ export const CA_VOLUME_NAME = "cofemine_maven_cache_ca";
 export const CA_MOUNT_PATH = "/cofemine-ca";
 
 /**
- * Script seeded into the CA volume alongside ca.crt/ca.key, executed
- * by itzg's STARTUP_SCRIPT hook before mc-image-helper runs. Imports
- * the panel CA into the JVM cacerts so squid's MITM leaves validate
- * during the install phase. No-ops cleanly when no CA is configured.
+ * Wrapper entrypoint seeded into the CA volume alongside the cert.
+ * The agent overrides each MC container's `Entrypoint` to this script
+ * (NOT itzg's `STARTUP_SCRIPT` env — that helper isn't universal
+ * across itzg image variants). The wrapper:
  *
- * Keytool path resolves $JAVA_HOME at runtime — itzg images vary
- * (java8-jdk, java21, graalvm, …). Falls back to PATH lookup.
+ *   1. Imports the panel CA into the JVM cacerts (so mc-image-helper's
+ *      Java HttpClient trusts squid's MITM leaf certs).
+ *   2. Drops the CA into /usr/local/share/ca-certificates/ + runs
+ *      update-ca-certificates (so curl/wget paths used by install
+ *      scripts also trust it).
+ *   3. `exec /start "$@"` — hands off to itzg's normal entrypoint
+ *      with whatever CMD docker passed in.
+ *
+ * Robust to image variants: keytool path is probed across JAVA_HOME
+ * variants (java8-jdk, java17, java21, graalvm, …) and PATH. cacerts
+ * file is probed against both $JAVA_HOME/lib/security and the
+ * Debian-symlinked /etc/ssl/certs/java/. Any failure is logged and
+ * the wrapper still execs /start — we never want a CA hiccup to
+ * brick the MC server's boot.
  */
 const CA_IMPORT_SCRIPT = `#!/bin/sh
-set -u
+# NOTE: no \`set -e\` — failures here must not block /start.
 CA_FILE='${CA_MOUNT_PATH}/ca.crt'
 READY='${CA_MOUNT_PATH}/.ready'
-if [ ! -s "$CA_FILE" ] || [ ! -f "$READY" ] || [ "$(cat "$READY" 2>/dev/null)" != "1" ]; then
-  echo '[cofemine-ca] no CA configured — skipping import'
-  exit 0
-fi
-KEYTOOL="\${JAVA_HOME:-/opt/java/openjdk}/bin/keytool"
-if [ ! -x "$KEYTOOL" ]; then
-  KEYTOOL="$(command -v keytool || true)"
-fi
-if [ -z "$KEYTOOL" ] || [ ! -x "$KEYTOOL" ]; then
-  echo '[cofemine-ca] WARN keytool not found — TLS to maven-cache will fail'
-  exit 0
-fi
-CACERTS="\${JAVA_HOME:-/opt/java/openjdk}/lib/security/cacerts"
-if [ ! -f "$CACERTS" ] && [ -f /etc/ssl/certs/java/cacerts ]; then
-  CACERTS=/etc/ssl/certs/java/cacerts
-fi
-"$KEYTOOL" -delete -alias cofemine-maven-cache -keystore "$CACERTS" -storepass changeit >/dev/null 2>&1 || true
-if "$KEYTOOL" -importcert -noprompt -trustcacerts \\
-    -alias cofemine-maven-cache \\
-    -file "$CA_FILE" \\
-    -keystore "$CACERTS" \\
-    -storepass changeit; then
-  echo "[cofemine-ca] imported into $CACERTS"
-else
-  echo '[cofemine-ca] WARN keytool import failed (continuing)'
-fi
-if command -v update-ca-certificates >/dev/null 2>&1; then
-  mkdir -p /usr/local/share/ca-certificates
-  cp "$CA_FILE" /usr/local/share/ca-certificates/cofemine-maven-cache.crt
-  update-ca-certificates >/dev/null 2>&1 || true
-fi
-exit 0
+import_ca() {
+  if [ ! -s "$CA_FILE" ] || [ ! -f "$READY" ] || [ "$(cat "$READY" 2>/dev/null)" != "1" ]; then
+    echo '[cofemine-ca] no CA configured — skipping import'
+    return 0
+  fi
+  KEYTOOL=""
+  for cand in "\${JAVA_HOME:-}/bin/keytool" /opt/java/openjdk/bin/keytool /usr/lib/jvm/*/bin/keytool; do
+    if [ -x "$cand" ]; then KEYTOOL="$cand"; break; fi
+  done
+  if [ -z "$KEYTOOL" ]; then
+    KEYTOOL="$(command -v keytool 2>/dev/null || true)"
+  fi
+  if [ -z "$KEYTOOL" ] || [ ! -x "$KEYTOOL" ]; then
+    echo '[cofemine-ca] WARN keytool not found — JVM will not trust squid'
+  else
+    CACERTS=""
+    for cand in "\${JAVA_HOME:-}/lib/security/cacerts" /opt/java/openjdk/lib/security/cacerts /etc/ssl/certs/java/cacerts /usr/lib/jvm/*/lib/security/cacerts; do
+      if [ -f "$cand" ]; then CACERTS="$cand"; break; fi
+    done
+    if [ -z "$CACERTS" ]; then
+      echo '[cofemine-ca] WARN cacerts not found — JVM will not trust squid'
+    else
+      "$KEYTOOL" -delete -alias cofemine-maven-cache -keystore "$CACERTS" -storepass changeit >/dev/null 2>&1
+      if "$KEYTOOL" -importcert -noprompt -trustcacerts -alias cofemine-maven-cache -file "$CA_FILE" -keystore "$CACERTS" -storepass changeit >/dev/null 2>&1; then
+        echo "[cofemine-ca] imported into $CACERTS"
+      else
+        echo '[cofemine-ca] WARN keytool import failed (continuing)'
+      fi
+    fi
+  fi
+  if command -v update-ca-certificates >/dev/null 2>&1; then
+    mkdir -p /usr/local/share/ca-certificates
+    cp "$CA_FILE" /usr/local/share/ca-certificates/cofemine-maven-cache.crt 2>/dev/null
+    update-ca-certificates >/dev/null 2>&1
+  fi
+}
+import_ca
+# Hand off to itzg's stock entrypoint. The image declares ENTRYPOINT
+# ["/start"] — we replaced it with this script, so we have to invoke
+# /start ourselves and forward the original CMD ("$@").
+exec /start "$@"
 `;
 
 export async function mavenCacheRoutes(app: FastifyInstance): Promise<void> {
