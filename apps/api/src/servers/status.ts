@@ -76,8 +76,8 @@ export function dockerStateToPanelStatus(
  *   docker=running, db=starting  → write "running"
  *   docker=running, db=running   → no-op
  *   docker=running, db=stopped   → write "running" (drift detected)
- *   docker=exited, db=starting   → no-op (still booting up; could
- *     also be a crash, the install-watchdog handles that path)
+ *   docker=exited, db=starting   → no-op (still booting up; a real
+ *     crash will be picked up on the next reconcile tick)
  */
 export async function reconcileServerStatus(
   serverId: string,

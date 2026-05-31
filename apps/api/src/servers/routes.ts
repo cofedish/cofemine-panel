@@ -21,7 +21,6 @@ import {
   reconcileAndReprovision,
 } from "./service.js";
 import { readDownloadProxy, makeProxyUrl } from "../integrations/download-proxy.js";
-import { resetWatchdogState } from "./install-watchdog.js";
 import { reconcileMany } from "./status.js";
 import { streamMrpack } from "./export-mrpack.js";
 
@@ -204,7 +203,6 @@ export async function serversRoutes(app: FastifyInstance): Promise<void> {
       req.log.warn({ err }, "agent delete failed; continuing with DB cleanup");
     }
     await prisma.server.delete({ where: { id } });
-    resetWatchdogState(id);
     await writeAudit(req, { action: "server.delete", resource: id });
     return { ok: true };
   });
@@ -224,49 +222,6 @@ export async function serversRoutes(app: FastifyInstance): Promise<void> {
     return { ok: true, ...result };
   });
 
-  // Toggle the per-server "route modpack install through the download
-  // proxy" flag and reprovision the container so the new JAVA_TOOL_OPTIONS
-  // take effect. Useful after an install has failed with a CDN timeout:
-  // flip on → Start → install tunnels through the proxy. Once the server
-  // boots cleanly, flip off to keep MC's own traffic direct.
-  const toggleProxySchema = z.object({ enabled: z.boolean() });
-  app.post("/:id/install-proxy", async (req) => {
-    const { id } = req.params as { id: string };
-    await assertServerPermission(req, id, "server.edit");
-    const body = toggleProxySchema.parse(req.body);
-    // If the user is turning this ON, make sure there's actually a proxy
-    // to route through. Without the check the flag would flip silently
-    // and the "Retry via proxy" button would appear to do nothing.
-    if (body.enabled) {
-      const proxy = await readDownloadProxy();
-      if (!proxy) {
-        const err = new Error(
-          "Download proxy is not configured. Set host/port in Integrations → Download proxy first."
-        );
-        (err as any).statusCode = 409;
-        throw err;
-      }
-    }
-    const server = await prisma.server.findUniqueOrThrow({ where: { id } });
-    const env = { ...((server.env as Record<string, string> | null) ?? {}) };
-    if (body.enabled) {
-      env["__COFEMINE_INSTALL_PROXY"] = "1";
-    } else {
-      delete env["__COFEMINE_INSTALL_PROXY"];
-    }
-    await prisma.server.update({
-      where: { id },
-      data: { env: env as unknown as object },
-    });
-    const result = await reconcileAndReprovision(id);
-    await writeAudit(req, {
-      action: "server.install-proxy.toggle",
-      resource: id,
-      metadata: { enabled: body.enabled },
-    });
-    return { ok: true, ...result };
-  });
-
   // Lifecycle actions proxied to the agent.
   for (const action of ["start", "stop", "restart", "kill"] as const) {
     app.post(`/:id/${action}`, async (req) => {
@@ -276,23 +231,17 @@ export async function serversRoutes(app: FastifyInstance): Promise<void> {
       // Auto-heal: for modpack-source servers, make sure the container
       // has the current CF_API_KEY / MODRINTH config baked in.
       //
-      // Also: on CF/MR servers, the status reconciler / watchdog
-      // clears one-shot flags (CF_FORCE_REINSTALL_MODLOADER,
-      // __COFEMINE_INSTALL_PROXY) from DB after a successful boot
-      // without bouncing the container — so the LIVE container env
+      // Also: on CF/MR servers, the status reconciler clears one-shot
+      // flags (CF_FORCE_REINSTALL_MODLOADER) from DB after a successful
+      // boot without bouncing the container — so the LIVE container env
       // still has those flags. On the next user-initiated start
       // mc-image-helper would re-trigger a loader reinstall (because
-      // the container's env says CF_FORCE_REINSTALL=true) and try
-      // to download from neoforged maven without the proxy that DB
-      // already cleared from the materialised set. Net effect:
-      // ReadTimeout, server fails to start.
-      //
-      // Cheapest correct fix: reprovision unconditionally on start
-      // for modpack servers. It's ~1-2s when the container is
-      // stopped, so the user-visible delay is negligible, and it
-      // guarantees container.env == materializeEnv(DB.env). Native
-      // loader server types (FORGE/NEOFORGE/etc.) don't have these
-      // one-shot flags so they keep the lighter just-start path.
+      // the container's env says CF_FORCE_REINSTALL=true). Reprovision
+      // unconditionally on start for modpack servers — it's ~1-2s when
+      // the container is stopped, and guarantees
+      // container.env == materializeEnv(DB.env). Native loader server
+      // types (FORGE/NEOFORGE/etc.) don't have these one-shot flags so
+      // they keep the lighter just-start path.
       const startEnv = (server.env as Record<string, string> | null) ?? {};
       const needsReprov = startEnv.__COFEMINE_NEEDS_REPROV === "1";
       if (
@@ -343,12 +292,6 @@ export async function serversRoutes(app: FastifyInstance): Promise<void> {
           lastStartedAt: action === "start" ? new Date() : undefined,
         },
       });
-      // Reset the install-watchdog attempt counter whenever the user
-      // explicitly (re)starts or stops the server so we get a fresh
-      // proxy-retry budget on the next install session.
-      if (action === "start" || action === "restart" || action === "stop") {
-        resetWatchdogState(id);
-      }
       await writeAudit(req, { action: `server.${action}`, resource: id });
       return { ok: true };
     });
@@ -815,18 +758,6 @@ export async function serversRoutes(app: FastifyInstance): Promise<void> {
         // because "the pack is already installed". Auto-cleared by
         // the status reconciler once the server boots cleanly.
         next.CF_FORCE_REINSTALL_MODLOADER = "true";
-        // Re-enable the install-time download proxy. After the first
-        // pack install the watchdog flipped this off so MC's runtime
-        // traffic (Mojang auth, skins) goes direct, but the loader
-        // reinstall we're about to trigger needs maven.neoforged.net
-        // and forgecdn — both of which the proxy was originally for.
-        // Without this the next start ReadTimeoutEexceptions on the
-        // neoforge installer download. The watchdog's success-path
-        // flip-off on next boot will turn it off again automatically
-        // once the loader install completes.
-        if (await readDownloadProxy()) {
-          next.__COFEMINE_INSTALL_PROXY = "1";
-        }
       }
     }
     await prisma.server.update({

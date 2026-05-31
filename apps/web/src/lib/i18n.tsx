@@ -125,7 +125,7 @@ const en: Dict = {
   "server.tabs.backups": "Backups",
   "server.env.title": "Environment variables",
   "server.env.intro":
-    "Tweak the env passed to the container on next start. Panel-internal flags (__COFEMINE_*) are included — flip `__COFEMINE_INSTALL_PROXY=1` here to force install-time proxying when the watchdog doesn't kick in, or `0` to disable. Changes don't ship until you click Save.",
+    "Tweak the env passed to the container on next start. Panel-internal flags (__COFEMINE_*) are included for advanced use. Changes don't ship until you click Save.",
   "server.env.discard": "Discard",
   "envForm.searchPlaceholder": "Search {n}+ settings…",
   "envForm.settingsCount": "{n} settings",
@@ -659,16 +659,14 @@ const en: Dict = {
   "integrations.getKey": "Get a key",
 
   "proxy.title": "Download proxy",
-  "proxy.tagline": "Automatic fallback for modpack install downloads",
+  "proxy.tagline": "Upstream chain for the maven-cache sidecar",
   "proxy.subtitle":
-    "Auto-fallback proxy. On Start, the panel first tries to download mods directly. If the download aborts with a CDN timeout, it automatically reprovisions the container with JVM proxy flags and retries once. As soon as the server boots, it reprovisions back to a clean direct container — the MC server itself is never routed through the proxy.",
+    "Used by maven-cache to chain mod/loader downloads through your VPN (xray, etc.) when the host can't reach forgecdn / modrinth / maven directly. Mods are cached on disk in the sidecar after first download — the MC server itself never sees this proxy.",
   "proxy.cardDesc":
-    "Set once and forget. Direct is tried first; the panel falls back to this proxy only if the install aborts, then flips back off after boot.",
+    "Set once: maven-cache routes every install download through this upstream.",
   "proxy.detailsIntro":
-    "Stored encrypted. Used automatically by the install-watchdog on every modpack server — no per-server toggle.",
-  "proxy.enable": "Enable automatic fallback",
-  "proxy.autoActive":
-    "The install-watchdog has routed the current run through the download proxy. It will automatically switch back to direct once the server boots.",
+    "Stored encrypted. The value is pushed to every node's maven-cache as UPSTREAM_PROXY whenever you save.",
+  "proxy.enable": "Enable",
   "proxy.protocol": "Protocol",
   "proxy.host": "Host",
   "proxy.port": "Port",
@@ -679,7 +677,7 @@ const en: Dict = {
   "proxy.notConfigured": "Not configured",
   "proxy.configuredButOff": "Configured — off",
   "proxy.helperNote":
-    "How it works: the watchdog polls each modpack server every 15s while it's starting. If install aborts with a network timeout and this proxy is configured + enabled, the watchdog reprovisions the container with matching JVM flags (SOCKS or HTTP) and restarts. Once the MC server prints its boot marker, the watchdog reprovisions back to a clean container so MC's own HTTP traffic goes direct. One proxy attempt per install session.",
+    "How it works: the maven-cache sidecar runs squid + gost. It MITM-caches jar bodies for whitelisted CDNs (forgecdn / modrinth / neoforged / mojang etc.) and chains the outbound TCP through this proxy. MC containers reach it as http://maven-cache:8081 via HTTPS_PROXY; squid's MITM CA is auto-imported into each container's JVM cacerts on first start.",
 
   "proxy.cacheTitle": "Maven cache upstream",
   "proxy.cacheDesc":
@@ -893,7 +891,7 @@ const ru: Dict = {
   "server.tabs.backups": "Бэкапы",
   "server.env.title": "Переменные окружения",
   "server.env.intro":
-    "Правка env, который уйдёт в контейнер при следующем старте. Внутренние флаги панели (__COFEMINE_*) тоже видны — поставь `__COFEMINE_INSTALL_PROXY=1` чтобы принудительно включить прокси на установку (если watchdog не сработал), или `0` чтобы отключить. Изменения применяются только после кнопки «Сохранить».",
+    "Правка env, который уйдёт в контейнер при следующем старте. Внутренние флаги панели (__COFEMINE_*) тоже видны — для тонких сценариев. Изменения применяются только после кнопки «Сохранить».",
   "server.env.discard": "Отменить",
   "envForm.searchPlaceholder": "Поиск среди {n}+ настроек…",
   "envForm.settingsCount": "{n} настр.",
@@ -1431,16 +1429,14 @@ const ru: Dict = {
   "integrations.getKey": "Получить ключ",
 
   "proxy.title": "Прокси для скачиваний",
-  "proxy.tagline": "Автоматический fallback на установке модпаков",
+  "proxy.tagline": "Upstream-канал для maven-cache",
   "proxy.subtitle":
-    "Прокси-запаска. На Start панель сначала пробует скачать напрямую. Если установка упала с таймаутом — панель автоматически пересобирает контейнер с JVM-флагами прокси и повторяет запуск. Как только сервер поднялся — пересобирает обратно на прямое подключение. Сам MC-сервер через прокси не ходит.",
+    "Используется сайдкаром maven-cache чтобы прогонять моды/лоадеры через VPN (xray и т.п.), когда хост не может достучаться до forgecdn / modrinth / maven напрямую. После первой загрузки моды кешируются на диске сайдкара. Сам MC-сервер через этот прокси не ходит.",
   "proxy.cardDesc":
-    "Настроил один раз и забыл. Сначала пробуется напрямую, панель сама переключится на прокси только если установка упала, и так же сама вернётся на прямое после загрузки.",
+    "Настрой один раз: maven-cache гонит все install-загрузки через этот upstream.",
   "proxy.detailsIntro":
-    "Шифруется в БД. Используется автоматически watchdog'ом установки на всех модпак-серверах — никаких поштучных переключателей.",
-  "proxy.enable": "Включить автоматический fallback",
-  "proxy.autoActive":
-    "Watchdog установки переключил текущий прогон на прокси. Как только сервер загрузится — автоматически вернёт на прямое подключение.",
+    "Шифруется в БД. При сохранении значение пушится во все ноды как UPSTREAM_PROXY для maven-cache.",
+  "proxy.enable": "Включить",
   "proxy.protocol": "Протокол",
   "proxy.host": "Хост",
   "proxy.port": "Порт",
@@ -1451,7 +1447,7 @@ const ru: Dict = {
   "proxy.notConfigured": "Не настроен",
   "proxy.configuredButOff": "Настроен — выключен",
   "proxy.helperNote":
-    "Как это работает: watchdog опрашивает каждый модпак-сервер раз в 15с, пока он стартует. Если установка упала с сетевым таймаутом, а прокси настроен и включён — watchdog пересобирает контейнер с JVM-флагами (SOCKS или HTTP) и перезапускает. Как только MC напечатает маркер загрузки — watchdog пересобирает обратно на чистый контейнер, чтобы MC ходил напрямую. Одна попытка прокси на установку.",
+    "Как это работает: сайдкар maven-cache крутит squid + gost. Он MITM-кеширует jar-ы для разрешённых CDN (forgecdn / modrinth / neoforged / mojang и т.д.) и пробрасывает исходящий TCP через этот прокси. MC-контейнеры достают его как http://maven-cache:8081 через HTTPS_PROXY; CA squid'а автоматически импортируется в JVM cacerts каждого контейнера на старте.",
 
   "proxy.cacheTitle": "Upstream для maven-cache",
   "proxy.cacheDesc":

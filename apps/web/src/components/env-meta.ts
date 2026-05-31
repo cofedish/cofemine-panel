@@ -159,16 +159,6 @@ export const ENV_DEFS: EnvDef[] = [
   // never reach the container — they're consumed by the panel-API
   // layer (download-proxy injection, post-boot detach, etc.).
   {
-    key: "__COFEMINE_INSTALL_PROXY",
-    label: "Use global download proxy on install",
-    labelRu: "Использовать прокси для скачивания при установке",
-    help: "When ON, mc-image-helper's downloads (NeoForge installer, Modrinth/CurseForge pack zips, mod jars) tunnel through the proxy you configured under Integrations → Download proxy. The proxy is ONLY injected during the install phase — the install-watchdog automatically turns it off once the MC server has booted, so player traffic (Mojang auth, skins) goes direct. Use this when your network can't reach maven.neoforged.net / forgecdn.net / Modrinth CDN.",
-    helpRu: "Когда включено, загрузки mc-image-helper (installer NeoForge, pack-zip Modrinth/CurseForge, jar-моды) идут через прокси из Integrations → Download proxy. Прокси активен ТОЛЬКО на этапе установки — install-watchdog автоматически выключает его после буста MC, чтобы трафик игроков (Mojang auth, скины) шёл напрямую. Полезно когда твоя сеть не достаёт до maven.neoforged.net / forgecdn.net / Modrinth CDN.",
-    type: "boolean",
-    default: false,
-    group: "cofemine",
-  },
-  {
     key: "__COFEMINE_DECOUPLE_AFTER_BOOT",
     label: "Detach from pack source after first boot",
     labelRu: "Отвязать от источника сборки после первого старта",

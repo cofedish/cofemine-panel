@@ -155,11 +155,7 @@ export function ServerContent({ serverId }: { serverId: string }): JSX.Element {
   return (
     <div className="space-y-6">
       {failures?.interrupt && (
-        <InterruptBanner
-          serverId={serverId}
-          server={server}
-          interrupt={failures.interrupt}
-        />
+        <InterruptBanner interrupt={failures.interrupt} />
       )}
       {failures?.failures && failures.failures.length > 0 && (
         <FailuresPanel
@@ -874,14 +870,10 @@ function ExclusionsTab({ serverId }: { serverId: string }): JSX.Element {
 /* =============================== FAILURES =============================== */
 
 function InterruptBanner({
-  server,
   interrupt,
 }: {
-  serverId: string;
-  server: ServerContext | undefined;
   interrupt: InstallInterrupt;
 }): JSX.Element {
-  const { t } = useT();
   // Kind-specific heading so the user sees the nature of the problem
   // at a glance; the body is the agent-formatted human message.
   const titleMap: Record<InstallInterrupt["kind"], string> = {
@@ -890,8 +882,6 @@ function InterruptBanner({
     generic: "CurseForge: установка прервана",
     blocked: "CurseForge: 403 — IP заблокирован?",
   };
-  const proxyActive = server?.env?.__COFEMINE_INSTALL_PROXY === "1";
-
   return (
     <section className="tile p-5 flex items-start gap-3 border-[rgb(var(--warning))]/30">
       <span className="w-8 h-8 rounded-md bg-[rgb(var(--warning-soft))] text-[rgb(var(--warning))] grid place-items-center shrink-0">
@@ -902,11 +892,6 @@ function InterruptBanner({
         <p className="text-sm text-ink-secondary mt-1">
           {interrupt.message}
         </p>
-        {proxyActive && (
-          <p className="text-sm text-[rgb(var(--accent))] mt-2">
-            {t("proxy.autoActive")}
-          </p>
-        )}
       </div>
     </section>
   );

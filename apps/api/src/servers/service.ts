@@ -3,62 +3,26 @@ import { request } from "undici";
 import { NodeClient } from "../nodes/node-client.js";
 import type { CreateServerInput } from "@cofemine/shared";
 import { decryptSecret } from "../crypto.js";
-import {
-  INSTALL_PROXY_ENV_FLAG,
-  makeJavaToolOptions,
-  makeProxyEnv,
-  readDownloadProxy,
-} from "../integrations/download-proxy.js";
 
 /**
  * Transform the server's stored env into the env the agent will actually
- * ship to the container. Strips panel-internal state flags and, if the
- * server is opted-in (via `__COFEMINE_INSTALL_PROXY`), injects
- * JAVA_TOOL_OPTIONS built from the global download-proxy settings so
- * mc-image-helper tunnels its modpack downloads through the proxy.
+ * ship to the container. Strips panel-internal state flags and force-
+ * appends -Djava.net.preferIPv4Stack=true to JAVA_TOOL_OPTIONS — the
+ * cofemine_mcnet docker network is IPv4-only, so the JVM picking up an
+ * AAAA record from a CDN with no IPv6 routing wedges TLS for ~30s.
+ *
+ * Per-install proxying is no longer the API's job — the maven-cache
+ * sidecar handles it transparently. The agent's itzg-provider injects
+ * HTTPS_PROXY and the squid leaf-cert trust at container create time.
  */
 async function materializeEnv(
   env: Record<string, string>
 ): Promise<Record<string, string>> {
   const out: Record<string, string> = { ...env };
-  const useProxy = out[INSTALL_PROXY_ENV_FLAG] === "1";
-  // Always strip our sentinel so it never reaches the container.
-  delete out[INSTALL_PROXY_ENV_FLAG];
-
-  // Force IPv4 resolution UNIVERSALLY (not just when proxy is on).
-  // The cofemine_mcnet docker network is IPv4-only — when a hostname's
-  // DNS answer only contains AAAA records (e.g. maven.neoforged.net
-  // through CDN77, which we hit constantly during NeoForge install),
-  // Java's JDK resolver picks the IPv6 address, opens a TCP connect
-  // that has nowhere to route, and hangs for ~30s before TLS times
-  // out. `preferIPv4Stack=true` makes the JVM never even attempt
-  // IPv6, dodging the issue regardless of proxy state.
   const ipv4Opt = "-Djava.net.preferIPv4Stack=true";
   out.JAVA_TOOL_OPTIONS = out.JAVA_TOOL_OPTIONS
     ? `${out.JAVA_TOOL_OPTIONS} ${ipv4Opt}`
     : ipv4Opt;
-
-  if (!useProxy) return out;
-  const proxy = await readDownloadProxy();
-  if (!proxy) return out;
-  // JAVA_TOOL_OPTIONS — works for `java.net.URL` style HTTP clients
-  // (older JDKs, some library code paths). Kept for completeness.
-  const opts = makeJavaToolOptions(proxy);
-  out.JAVA_TOOL_OPTIONS = out.JAVA_TOOL_OPTIONS
-    ? `${out.JAVA_TOOL_OPTIONS} ${opts}`
-    : opts;
-  // The big one: HTTP_PROXY / HTTPS_PROXY / NO_PROXY. mc-image-helper
-  // uses reactor-netty for its downloads, and reactor-netty (like
-  // most modern HTTP clients in the JVM ecosystem — curl, wget, the
-  // JDK 11+ HttpClient) reads these env vars but DOES NOT honour
-  // Java's `-DsocksProxyHost` system property. The whole reason the
-  // user's container "wasn't going through the proxy" was that the
-  // JVM picked up our SOCKS settings but the actual download client
-  // ignored them. These env vars fix that — set both upper- and
-  // lowercase since different libs check different cases. NO_PROXY
-  // covers loopback, docker bridges, and `.ru` (which xray's routing
-  // already sends direct on the host anyway).
-  Object.assign(out, makeProxyEnv(proxy));
   return out;
 }
 
