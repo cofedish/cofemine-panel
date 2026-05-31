@@ -1,4 +1,7 @@
-#!/bin/sh
+#!/bin/bash
+# Use bash explicitly — `wait -n` is a bash-ism and Debian's /bin/sh
+# is dash which crashes with "Illegal option -n", silently exiting
+# the entrypoint and putting the container into a restart loop.
 # Boot order:
 #   1. gost (TCP relays 8001..8012 for nginx; HTTP forward :8082 for
 #      squid cache_peer when UPSTREAM_PROXY is set).
@@ -23,7 +26,27 @@
 
 set -eu
 
+# squid runs as `proxy` user but tries to write its access/cache log
+# straight to /dev/stdout — which is owned by root in docker (mode
+# 600). Without this chmod, squid FATAL-aborts on startup with
+# "Cannot open '/dev/stdout' for writing" and the container restart-
+# loops. world-writable on a pseudo-fd is safe — it's just a pipe
+# into docker's log driver.
+chmod 666 /dev/stdout /dev/stderr 2>/dev/null || true
+
 # 1. gost ------------------------------------------------------------
+# Docker Desktop adds BOTH A and AAAA records for host.docker.internal;
+# gost happily picks the IPv6 one, but xray on the host typically only
+# binds IPv4 (127.0.0.1:10808). Result is a silent EOF on first byte.
+# Pre-resolve to a literal IPv4 here so gost has no choice.
+if [ -n "${UPSTREAM_PROXY:-}" ] && echo "$UPSTREAM_PROXY" | grep -q "host.docker.internal"; then
+  HOST_V4="$(getent ahostsv4 host.docker.internal 2>/dev/null | awk '{print $1; exit}')"
+  if [ -n "$HOST_V4" ]; then
+    UPSTREAM_PROXY="$(echo "$UPSTREAM_PROXY" | sed "s/host.docker.internal/$HOST_V4/")"
+    echo "[maven-cache] resolved host.docker.internal → $HOST_V4"
+  fi
+fi
+
 FORWARD_FLAG=""
 if [ -n "${UPSTREAM_PROXY:-}" ]; then
   FORWARD_FLAG="-F=${UPSTREAM_PROXY}"
@@ -63,19 +86,6 @@ else
   export SQUID_PEER_BLOCK=''
 fi
 
-# A 2048-bit DH param for TLS — generated lazily so we don't slow
-# image builds. ~5–30s on first start; cached afterwards on the
-# /var/spool/squid volume.
-if [ ! -f /etc/ssl/dhparam.pem ]; then
-  if [ -f /var/spool/squid/dhparam.pem ]; then
-    cp /var/spool/squid/dhparam.pem /etc/ssl/dhparam.pem
-  else
-    echo "[maven-cache] generating DH params (one-time, ~10s)…"
-    openssl dhparam -out /etc/ssl/dhparam.pem 2048 2>/dev/null
-    cp /etc/ssl/dhparam.pem /var/spool/squid/dhparam.pem
-  fi
-fi
-
 envsubst '${SQUID_PEER_BLOCK}' < /etc/squid/squid.conf.template > /etc/squid/squid.conf
 
 # 3. CA presence check + ssl_db init --------------------------------
@@ -88,9 +98,9 @@ fi
 
 if [ "$CA_READY" = "1" ]; then
   echo "[maven-cache] CA present — squid MITM enabled"
-  chown proxy:proxy /etc/cofemine/ca/ca.crt /etc/cofemine/ca/ca.key 2>/dev/null || true
-  chmod 0644 /etc/cofemine/ca/ca.crt
-  chmod 0600 /etc/cofemine/ca/ca.key
+  # /etc/cofemine/ca is a read-only mount of the shared volume — the
+  # agent already chmod'd the files when seeding them, so we don't
+  # need to (and can't) change perms here.
   # Initialise the per-host leaf cert db once. We always purge and
   # recreate on container start so a CA rotation invalidates old
   # leaf certs (otherwise squid happily serves a leaf signed by the

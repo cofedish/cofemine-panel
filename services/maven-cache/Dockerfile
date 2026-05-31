@@ -29,6 +29,7 @@ RUN set -eux; \
         squid-openssl \
         ca-certificates \
         curl \
+        wget \
         gettext-base \
         openssl \
         tini; \

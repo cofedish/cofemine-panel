@@ -24,8 +24,7 @@ http_port 8081 ssl-bump \
     cert=/etc/cofemine/ca/ca.crt \
     key=/etc/cofemine/ca/ca.key \
     generate-host-certificates=on \
-    dynamic_cert_mem_cache_size=8MB \
-    tls-dh=prime256v1:/etc/ssl/dhparam.pem
+    dynamic_cert_mem_cache_size=8MB
 
 # Dynamic certificate generator — squid's helper that signs leaf
 # certs at request time. The on-disk db caches them so we don't
@@ -50,10 +49,17 @@ acl mitm_domains ssl::server_name .quiltmc.org
 acl mitm_domains ssl::server_name .mojang.com
 acl mitm_domains ssl::server_name .minecraft.net
 
+# at_step ACLs — squid evaluates ssl_bump rules at distinct phases of
+# the TLS handshake. step1=ClientHello received (we peek to learn the
+# SNI), step2=ServerHello received (we now know which side wants what
+# and can decide bump vs splice), step3=peer cert validated.
+acl step1 at_step SslBump1
+acl step2 at_step SslBump2
+acl step3 at_step SslBump3
+
 # Peek at TLS ClientHello → decide bump vs splice per SNI.
 ssl_bump peek step1
 ssl_bump bump step2 mitm_domains
-ssl_bump splice step3 all
 ssl_bump splice all
 
 # Allow everything by default — the panel network (cofemine_mcnet)

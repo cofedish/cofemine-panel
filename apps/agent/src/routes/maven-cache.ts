@@ -183,6 +183,20 @@ export async function mavenCacheRoutes(app: FastifyInstance): Promise<void> {
     const oldName = inspect.Name.replace(/^\//, "");
     const networkSettings = inspect.NetworkSettings?.Networks ?? {};
     const networkName = Object.keys(networkSettings)[0] ?? "cofemine_mcnet";
+    // Preserve the service alias (e.g. `maven-cache`) so MC containers
+    // and the agent itself can still resolve the cache by its short
+    // name after a recreate. Without this, every recreate strips the
+    // alias docker compose put on the container at first start, and
+    // anything pointing at `http://maven-cache` breaks with NXDOMAIN.
+    const rawAliases: string[] =
+      (networkSettings[networkName] as { Aliases?: string[] } | undefined)
+        ?.Aliases ?? [];
+    const existingAliases = rawAliases.filter(
+      (a) => typeof a === "string" && !a.startsWith(inspect.Id.slice(0, 12))
+    );
+    if (!existingAliases.includes("maven-cache")) {
+      existingAliases.push("maven-cache");
+    }
 
     // Make sure the CA volume is mounted into the new container. The
     // compose-created sidecar usually already has it, but on an older
@@ -206,15 +220,26 @@ export async function mavenCacheRoutes(app: FastifyInstance): Promise<void> {
     }
     await container.remove({ force: true });
 
+    // Use the image *tag* (Config.Image) rather than the resolved sha
+    // (inspect.Image). When the operator rebuilds the cache image
+    // locally (docker compose build maven-cache), the old sha is
+    // garbage-collected and the recreate call fails with "no such
+    // image". The tag is stable across rebuilds.
+    const imageRef =
+      inspect.Config?.Image && inspect.Config.Image.length > 0
+        ? inspect.Config.Image
+        : inspect.Image;
     const created = await docker.createContainer({
       name: oldName,
-      Image: inspect.Image,
+      Image: imageRef,
       Env: existingEnv,
       ExposedPorts: inspect.Config?.ExposedPorts ?? {},
       Labels: inspect.Config?.Labels ?? {},
       HostConfig: hostConfig,
       NetworkingConfig: {
-        EndpointsConfig: { [networkName]: {} },
+        EndpointsConfig: {
+          [networkName]: { Aliases: existingAliases },
+        },
       },
     });
     await created.start();
