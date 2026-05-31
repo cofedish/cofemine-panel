@@ -162,13 +162,11 @@ export class ItzgRuntimeProvider implements MinecraftRuntimeProvider {
         `-Dhttps.proxyPort=8081`,
         `-Dhttp.nonProxyHosts=${javaNonProxy}`,
       ].join(" ");
-      // Preserve any pre-existing JAVA_TOOL_OPTIONS the operator set
-      // via the env tab. Last token wins inside the JVM, so put ours
-      // last to override any conflicting proxy props they had.
-      const existing = spec.env.JAVA_TOOL_OPTIONS?.trim();
-      cacheDefaults.JAVA_TOOL_OPTIONS = existing
-        ? `${existing} ${javaProxyOpts}`
-        : javaProxyOpts;
+      // Stored bare here; merged with any pre-existing
+      // JAVA_TOOL_OPTIONS (from spec.env — typically the forced
+      // -Djava.net.preferIPv4Stack=true) further down where envMap
+      // is built. Doing it there keeps the merge logic in one place.
+      cacheDefaults.JAVA_TOOL_OPTIONS = javaProxyOpts;
     }
 
     const envMap: Record<string, string> = {
@@ -182,6 +180,26 @@ export class ItzgRuntimeProvider implements MinecraftRuntimeProvider {
       ...cacheDefaults,
       ...spec.env,
     };
+    // JAVA_TOOL_OPTIONS is special: spec.env almost always contains
+    // -Djava.net.preferIPv4Stack=true (force-injected upstream because
+    // cofemine_mcnet is IPv4-only), and our cacheDefaults adds the JVM
+    // proxy props. Plain spread above would let one silently clobber
+    // the other — the symptom is `Picked up JAVA_TOOL_OPTIONS:
+    // -Djava.net.preferIPv4Stack=true` in the container log with no
+    // proxy flags, and the install bypasses squid entirely. Merge
+    // explicitly: cacheDefaults first (proxy), spec.env last (IPv4 +
+    // any operator overrides), de-dup token-wise so a manual override
+    // of -Dhttps.proxyHost in the env tab still wins.
+    const javaToolMerged = [
+      cacheDefaults.JAVA_TOOL_OPTIONS,
+      spec.env.JAVA_TOOL_OPTIONS,
+    ]
+      .filter((s): s is string => !!s && s.trim().length > 0)
+      .join(" ")
+      .trim();
+    if (javaToolMerged) {
+      envMap.JAVA_TOOL_OPTIONS = javaToolMerged;
+    }
     // The Java-version hint is panel-internal — we strip it from the
     // env passed to itzg below, but read it here first to decide
     // which image variant to start the container with.
