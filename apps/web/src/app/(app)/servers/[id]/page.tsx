@@ -11,6 +11,7 @@ import { ServerProperties } from "@/components/server-properties";
 import { ServerContent } from "@/components/server-content";
 import { ServerDiagnostics } from "@/components/server-diagnostics";
 import { ServerSchedules } from "@/components/server-schedules";
+import { ServerEnvTab } from "@/components/server-env-tab";
 import { LoaderVersionRow } from "@/components/loader-version-editor";
 import Link from "next/link";
 import { StatusDot } from "@/components/status-dot";
@@ -65,6 +66,7 @@ const TABS = [
   { key: "console", i18n: "server.tabs.console" },
   { key: "files", i18n: "server.tabs.files" },
   { key: "properties", i18n: "server.tabs.properties" },
+  { key: "env", i18n: "server.tabs.env" },
   { key: "backups", i18n: "server.tabs.backups" },
   { key: "schedules", i18n: "server.tabs.schedules" },
   { key: "content", i18n: "server.tabs.content" },
@@ -400,6 +402,7 @@ export default function ServerDetailPage(): JSX.Element {
         {tab === "console" && <ServerConsole serverId={id} />}
         {tab === "files" && <ServerFiles serverId={id} />}
         {tab === "properties" && <ServerProperties serverId={id} />}
+        {tab === "env" && <ServerEnvTab serverId={id} />}
         {tab === "backups" && <ServerBackups serverId={id} />}
         {tab === "schedules" && <ServerSchedules serverId={id} />}
         {tab === "content" && <ServerContent serverId={id} />}
