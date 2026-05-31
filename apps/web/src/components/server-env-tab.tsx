@@ -108,6 +108,23 @@ export function ServerEnvTab({ serverId }: { serverId: string }): JSX.Element {
         env={draft}
         onChange={onChange}
         currentType={server.type}
+        // Hide groups that already have a proper UI in the Properties
+        // tab — having two places to edit `difficulty` / `motd` /
+        // `max-players` confuses users and makes the Env tab feel
+        // overloaded. The remaining groups (jvm / modpack / lifecycle
+        // / proxy / loader-specific / advanced) are itzg-only knobs
+        // that AREN'T server.properties and have no other UI surface.
+        hiddenGroups={[
+          "gameplay",
+          "world",
+          "spawning",
+          "players",
+          "resource-pack",
+          "network",
+          "rcon",
+          "security",
+          "performance",
+        ]}
       />
     </div>
   );

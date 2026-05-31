@@ -59,6 +59,30 @@ export const ENV_GROUP_LABELS: Record<EnvGroup, string> = {
   advanced: "Advanced",
 };
 
+export const ENV_GROUP_LABELS_RU: Record<EnvGroup, string> = {
+  gameplay: "Геймплей",
+  world: "Мир и сид",
+  spawning: "Спавн и сущности",
+  players: "Игроки и операторы",
+  "resource-pack": "Ресурспак",
+  network: "Сеть",
+  rcon: "RCON и запросы",
+  security: "Безопасность",
+  performance: "Производительность",
+  jvm: "JVM и runtime",
+  modpack: "Источники модпака",
+  lifecycle: "Жизненный цикл",
+  proxy: "Прокси (BungeeCord/Velocity)",
+  paper: "Опции Paper",
+  purpur: "Опции Purpur",
+  forge: "Опции Forge",
+  neoforge: "Опции NeoForge",
+  fabric: "Опции Fabric",
+  quilt: "Опции Quilt",
+  mohist: "Опции Mohist",
+  advanced: "Расширенные",
+};
+
 export const ENV_GROUP_ORDER: EnvGroup[] = [
   "gameplay",
   "world",
@@ -89,11 +113,22 @@ export const ENV_DEFAULT_OPEN: EnvGroup[] = ["gameplay"];
 type Common = {
   key: string;
   label: string;
+  labelRu?: string;
   help?: string;
+  helpRu?: string;
   group: EnvGroup;
   /** Optional filter: only show when current server type is in this list. */
   appliesTo?: readonly string[];
 };
+
+/** Pick label/help by locale, fall back to English if no RU translation. */
+export function envLabel(d: EnvDef, lang: "en" | "ru"): string {
+  return lang === "ru" && d.labelRu ? d.labelRu : d.label;
+}
+export function envHelp(d: EnvDef, lang: "en" | "ru"): string | undefined {
+  if (lang === "ru" && d.helpRu) return d.helpRu;
+  return d.help;
+}
 
 export type EnvDef =
   | (Common & { type: "boolean"; default?: boolean })
@@ -195,80 +230,80 @@ export const ENV_DEFS: EnvDef[] = [
   { key: "PLAYER_MOVEMENT_VELOCITY_CHECK", label: "Movement velocity check", type: "boolean", default: true, group: "performance" },
 
   /* ============================== JVM ================================= */
-  { key: "INIT_MEMORY", label: "Initial heap (-Xms)", help: "e.g. 512M, 2G. Leave blank to use MEMORY.", type: "string", monospace: true, group: "jvm" },
-  { key: "MAX_MEMORY", label: "Max heap (-Xmx)", help: "Overrides MEMORY. e.g. 4G.", type: "string", monospace: true, group: "jvm" },
-  { key: "USE_AIKAR_FLAGS", label: "Use Aikar's JVM flags", help: "Recommended GC tuning for Paper/Spigot-based servers ≥ 2 GB RAM.", type: "boolean", default: false, group: "jvm" },
-  { key: "USE_MEOWICE_FLAGS", label: "Use MeowIce's JVM flags", help: "Alternative GC tuning. Newer, aggressive.", type: "boolean", default: false, group: "jvm" },
-  { key: "JVM_OPTS", label: "Extra JVM options", help: "Passed to java directly.", type: "string", monospace: true, long: true, group: "jvm" },
-  { key: "JVM_XX_OPTS", label: "Extra -XX: options", type: "string", monospace: true, long: true, group: "jvm" },
-  { key: "JVM_DD_OPTS", label: "Extra -D system properties", help: "key=value,key=value", type: "string", monospace: true, long: true, group: "jvm" },
-  { key: "LOG4J2_XML", label: "Custom log4j2 XML path", type: "string", monospace: true, group: "jvm" },
-  { key: "TZ", label: "Timezone", help: "IANA TZ, e.g. Europe/Moscow.", type: "string", default: "UTC", group: "jvm" },
-  { key: "UID", label: "Run as UID", type: "number", min: 0, max: 65535, default: 1000, group: "jvm" },
-  { key: "GID", label: "Run as GID", type: "number", min: 0, max: 65535, default: 1000, group: "jvm" },
+  { key: "INIT_MEMORY", label: "Initial heap (-Xms)", labelRu: "Начальный heap (-Xms)", help: "e.g. 512M, 2G. Leave blank to use MEMORY.", helpRu: "Например 512M, 2G. Если пусто — берётся из MEMORY.", type: "string", monospace: true, group: "jvm" },
+  { key: "MAX_MEMORY", label: "Max heap (-Xmx)", labelRu: "Максимальный heap (-Xmx)", help: "Overrides MEMORY. e.g. 4G.", helpRu: "Переопределяет MEMORY. Например 4G.", type: "string", monospace: true, group: "jvm" },
+  { key: "USE_AIKAR_FLAGS", label: "Use Aikar's JVM flags", labelRu: "Флаги JVM от Aikar", help: "Recommended GC tuning for Paper/Spigot-based servers ≥ 2 GB RAM.", helpRu: "Рекомендуемый тюнинг GC для Paper/Spigot-серверов от 2 ГБ RAM.", type: "boolean", default: false, group: "jvm" },
+  { key: "USE_MEOWICE_FLAGS", label: "Use MeowIce's JVM flags", labelRu: "Флаги JVM от MeowIce", help: "Alternative GC tuning. Newer, aggressive.", helpRu: "Альтернативный тюнинг GC. Свежее, агрессивнее.", type: "boolean", default: false, group: "jvm" },
+  { key: "JVM_OPTS", label: "Extra JVM options", labelRu: "Доп. параметры JVM", help: "Passed to java directly.", helpRu: "Передаются java напрямую.", type: "string", monospace: true, long: true, group: "jvm" },
+  { key: "JVM_XX_OPTS", label: "Extra -XX: options", labelRu: "Доп. -XX: параметры", type: "string", monospace: true, long: true, group: "jvm" },
+  { key: "JVM_DD_OPTS", label: "Extra -D system properties", labelRu: "Доп. -D системные свойства", help: "key=value,key=value", helpRu: "key=value,key=value", type: "string", monospace: true, long: true, group: "jvm" },
+  { key: "LOG4J2_XML", label: "Custom log4j2 XML path", labelRu: "Путь к custom log4j2 XML", type: "string", monospace: true, group: "jvm" },
+  { key: "TZ", label: "Timezone", labelRu: "Часовой пояс", help: "IANA TZ, e.g. Europe/Moscow.", helpRu: "IANA TZ, например Europe/Moscow.", type: "string", default: "UTC", group: "jvm" },
+  { key: "UID", label: "Run as UID", labelRu: "Запускать от UID", type: "number", min: 0, max: 65535, default: 1000, group: "jvm" },
+  { key: "GID", label: "Run as GID", labelRu: "Запускать от GID", type: "number", min: 0, max: 65535, default: 1000, group: "jvm" },
 
   /* ============================= MODPACK ============================== */
-  { key: "MODRINTH_PROJECT", label: "Modrinth project", help: "Slug, ID, or direct version URL. Auto-detects loader+version.", type: "string", monospace: true, group: "modpack", appliesTo: ["MODRINTH"] },
-  { key: "MODRINTH_VERSION", label: "Modrinth version override", type: "string", monospace: true, group: "modpack", appliesTo: ["MODRINTH"] },
-  { key: "CF_PAGE_URL", label: "CurseForge page URL", type: "string", monospace: true, group: "modpack", appliesTo: ["CURSEFORGE"] },
-  { key: "CF_SLUG", label: "CurseForge slug", type: "string", monospace: true, group: "modpack", appliesTo: ["CURSEFORGE"] },
-  { key: "CF_FILE_ID", label: "CurseForge file ID", help: "Pins a specific modpack release.", type: "string", monospace: true, group: "modpack", appliesTo: ["CURSEFORGE"] },
-  { key: "CF_EXCLUDE_INCLUDE_FILE", label: "CF exclude/include file", help: "Advanced: path to JSON controlling which mods are kept.", type: "string", monospace: true, group: "modpack", appliesTo: ["CURSEFORGE"] },
-  { key: "FTB_MODPACK_ID", label: "FTB modpack ID", type: "number", min: 1, group: "modpack" },
-  { key: "FTB_MODPACK_VERSION_ID", label: "FTB version ID", type: "number", min: 1, group: "modpack" },
-  { key: "GENERIC_PACK", label: "Generic pack URL/path", help: "ZIP of a server directory to unpack over /data.", type: "string", monospace: true, group: "modpack" },
-  { key: "REMOVE_OLD_MODS", label: "Remove old mods before install", help: "Prevents stale mod jars from breaking upgrades.", type: "boolean", default: false, group: "modpack" },
-  { key: "MODS_FILE", label: "Mods list file path", help: "Newline-separated URLs of mods to download on start.", type: "string", monospace: true, group: "modpack" },
+  { key: "MODRINTH_PROJECT", label: "Modrinth project", labelRu: "Проект Modrinth", help: "Slug, ID, or direct version URL. Auto-detects loader+version.", helpRu: "Slug, ID или прямой URL версии. Лоадер и версия определяются автоматически.", type: "string", monospace: true, group: "modpack", appliesTo: ["MODRINTH"] },
+  { key: "MODRINTH_VERSION", label: "Modrinth version override", labelRu: "Переопределение версии Modrinth", type: "string", monospace: true, group: "modpack", appliesTo: ["MODRINTH"] },
+  { key: "CF_PAGE_URL", label: "CurseForge page URL", labelRu: "URL страницы CurseForge", type: "string", monospace: true, group: "modpack", appliesTo: ["CURSEFORGE"] },
+  { key: "CF_SLUG", label: "CurseForge slug", labelRu: "Slug на CurseForge", type: "string", monospace: true, group: "modpack", appliesTo: ["CURSEFORGE"] },
+  { key: "CF_FILE_ID", label: "CurseForge file ID", labelRu: "File ID на CurseForge", help: "Pins a specific modpack release.", helpRu: "Привязывает конкретный релиз сборки.", type: "string", monospace: true, group: "modpack", appliesTo: ["CURSEFORGE"] },
+  { key: "CF_EXCLUDE_INCLUDE_FILE", label: "CF exclude/include file", labelRu: "CF файл исключений/включений", help: "Advanced: path to JSON controlling which mods are kept.", helpRu: "Продвинутое: путь к JSON, который контролирует какие моды оставить.", type: "string", monospace: true, group: "modpack", appliesTo: ["CURSEFORGE"] },
+  { key: "FTB_MODPACK_ID", label: "FTB modpack ID", labelRu: "ID сборки FTB", type: "number", min: 1, group: "modpack" },
+  { key: "FTB_MODPACK_VERSION_ID", label: "FTB version ID", labelRu: "ID версии FTB", type: "number", min: 1, group: "modpack" },
+  { key: "GENERIC_PACK", label: "Generic pack URL/path", labelRu: "URL/путь generic-пака", help: "ZIP of a server directory to unpack over /data.", helpRu: "ZIP директории сервера, который распаковывается поверх /data.", type: "string", monospace: true, group: "modpack" },
+  { key: "REMOVE_OLD_MODS", label: "Remove old mods before install", labelRu: "Удалять старые моды перед установкой", help: "Prevents stale mod jars from breaking upgrades.", helpRu: "Предотвращает поломки апгрейдов из-за устаревших jar-ов.", type: "boolean", default: false, group: "modpack" },
+  { key: "MODS_FILE", label: "Mods list file path", labelRu: "Путь к файлу списка модов", help: "Newline-separated URLs of mods to download on start.", helpRu: "URL модов через перенос строки — скачиваются при старте.", type: "string", monospace: true, group: "modpack" },
 
   /* ============================ LIFECYCLE ============================= */
-  { key: "STOP_SERVER_ANNOUNCE_DELAY", label: "Shutdown announcement delay (sec)", help: "Seconds between 'server shutting down' and actual stop.", type: "number", min: 0, max: 3600, default: 0, group: "lifecycle" },
-  { key: "STOP_DURATION", label: "Graceful stop timeout (sec)", type: "number", min: 1, max: 300, default: 60, group: "lifecycle" },
-  { key: "EXEC_DIRECTLY", label: "Exec Java directly (no shell)", help: "Faster shutdown but disables some env wiring.", type: "boolean", default: false, group: "lifecycle" },
-  { key: "SKIP_LOG4J_CONFIG", label: "Skip log4j patching", type: "boolean", default: false, group: "lifecycle" },
-  { key: "SKIP_SERVER_PROPERTIES", label: "Skip server.properties templating", help: "Keep existing file as-is; don't overlay env values.", type: "boolean", default: false, group: "lifecycle" },
-  { key: "REPLACE_ENV_IN_PLACE", label: "Replace \\${ENV} in files", type: "boolean", default: false, group: "lifecycle" },
+  { key: "STOP_SERVER_ANNOUNCE_DELAY", label: "Shutdown announcement delay (sec)", labelRu: "Задержка анонса выключения (сек)", help: "Seconds between 'server shutting down' and actual stop.", helpRu: "Секунд между сообщением «сервер выключается» и реальной остановкой.", type: "number", min: 0, max: 3600, default: 0, group: "lifecycle" },
+  { key: "STOP_DURATION", label: "Graceful stop timeout (sec)", labelRu: "Таймаут плавной остановки (сек)", type: "number", min: 1, max: 300, default: 60, group: "lifecycle" },
+  { key: "EXEC_DIRECTLY", label: "Exec Java directly (no shell)", labelRu: "Запускать Java напрямую (без shell)", help: "Faster shutdown but disables some env wiring.", helpRu: "Быстрее завершается, но отключает часть env-обработки.", type: "boolean", default: false, group: "lifecycle" },
+  { key: "SKIP_LOG4J_CONFIG", label: "Skip log4j patching", labelRu: "Пропускать патчинг log4j", type: "boolean", default: false, group: "lifecycle" },
+  { key: "SKIP_SERVER_PROPERTIES", label: "Skip server.properties templating", labelRu: "Не шаблонизировать server.properties", help: "Keep existing file as-is; don't overlay env values.", helpRu: "Оставить существующий файл как есть, не накладывать env-значения.", type: "boolean", default: false, group: "lifecycle" },
+  { key: "REPLACE_ENV_IN_PLACE", label: "Replace \\${ENV} in files", labelRu: "Подставлять \\${ENV} в файлах", type: "boolean", default: false, group: "lifecycle" },
 
   /* ============================== PROXY =============================== */
-  { key: "PROXY", label: "HTTP(S) proxy", help: "URL of an outbound proxy for downloads, e.g. http://proxy:3128.", type: "string", monospace: true, group: "proxy" },
-  { key: "BUNGEECORD_NAME", label: "BungeeCord name", help: "Server identity inside a BungeeCord network.", type: "string", group: "proxy" },
-  { key: "VELOCITY_SECRET", label: "Velocity forwarding secret", help: "Required for modern forwarding mode.", type: "string", monospace: true, group: "proxy" },
+  { key: "PROXY", label: "HTTP(S) proxy", labelRu: "HTTP(S) прокси", help: "URL of an outbound proxy for downloads, e.g. http://proxy:3128.", helpRu: "URL исходящего прокси для загрузок, например http://proxy:3128.", type: "string", monospace: true, group: "proxy" },
+  { key: "BUNGEECORD_NAME", label: "BungeeCord name", labelRu: "Имя в BungeeCord", help: "Server identity inside a BungeeCord network.", helpRu: "Идентификатор сервера в BungeeCord-сети.", type: "string", group: "proxy" },
+  { key: "VELOCITY_SECRET", label: "Velocity forwarding secret", labelRu: "Секрет форвардинга Velocity", help: "Required for modern forwarding mode.", helpRu: "Нужен для режима modern forwarding.", type: "string", monospace: true, group: "proxy" },
 
   /* ============================== PAPER =============================== */
-  { key: "PAPER_CHANNEL", label: "Paper release channel", type: "enum", options: ["default", "experimental"], default: "default", group: "paper", appliesTo: ["PAPER"] },
-  { key: "PAPER_BUILD", label: "Paper build number", help: "Leave blank for latest.", type: "string", monospace: true, group: "paper", appliesTo: ["PAPER"] },
-  { key: "PAPER_DOWNLOAD_URL", label: "Custom Paper download URL", type: "string", monospace: true, group: "paper", appliesTo: ["PAPER"] },
+  { key: "PAPER_CHANNEL", label: "Paper release channel", labelRu: "Канал релизов Paper", type: "enum", options: ["default", "experimental"], default: "default", group: "paper", appliesTo: ["PAPER"] },
+  { key: "PAPER_BUILD", label: "Paper build number", labelRu: "Номер билда Paper", help: "Leave blank for latest.", helpRu: "Пусто — последний.", type: "string", monospace: true, group: "paper", appliesTo: ["PAPER"] },
+  { key: "PAPER_DOWNLOAD_URL", label: "Custom Paper download URL", labelRu: "Custom URL загрузки Paper", type: "string", monospace: true, group: "paper", appliesTo: ["PAPER"] },
 
   /* ============================= PURPUR =============================== */
-  { key: "PURPUR_BUILD", label: "Purpur build number", type: "string", monospace: true, group: "purpur", appliesTo: ["PURPUR"] },
-  { key: "PURPUR_DOWNLOAD_URL", label: "Custom Purpur download URL", type: "string", monospace: true, group: "purpur", appliesTo: ["PURPUR"] },
+  { key: "PURPUR_BUILD", label: "Purpur build number", labelRu: "Номер билда Purpur", type: "string", monospace: true, group: "purpur", appliesTo: ["PURPUR"] },
+  { key: "PURPUR_DOWNLOAD_URL", label: "Custom Purpur download URL", labelRu: "Custom URL загрузки Purpur", type: "string", monospace: true, group: "purpur", appliesTo: ["PURPUR"] },
 
   /* ============================== FORGE =============================== */
-  { key: "FORGE_VERSION", label: "Forge version", help: "Leave blank for Forge recommended for the MC version.", type: "string", monospace: true, group: "forge", appliesTo: ["FORGE"] },
-  { key: "FORGE_INSTALLER", label: "Forge installer path", type: "string", monospace: true, group: "forge", appliesTo: ["FORGE"] },
-  { key: "FORGE_INSTALLER_URL", label: "Forge installer URL", type: "string", monospace: true, group: "forge", appliesTo: ["FORGE"] },
+  { key: "FORGE_VERSION", label: "Forge version", labelRu: "Версия Forge", help: "Leave blank for Forge recommended for the MC version.", helpRu: "Пусто — рекомендуемая Forge для этой MC-версии.", type: "string", monospace: true, group: "forge", appliesTo: ["FORGE"] },
+  { key: "FORGE_INSTALLER", label: "Forge installer path", labelRu: "Путь к installer-у Forge", type: "string", monospace: true, group: "forge", appliesTo: ["FORGE"] },
+  { key: "FORGE_INSTALLER_URL", label: "Forge installer URL", labelRu: "URL installer-а Forge", type: "string", monospace: true, group: "forge", appliesTo: ["FORGE"] },
 
   /* ============================ NEOFORGE ============================== */
-  { key: "NEOFORGE_VERSION", label: "NeoForge version", type: "string", monospace: true, group: "neoforge", appliesTo: ["NEOFORGE"] },
-  { key: "NEOFORGE_INSTALLER", label: "NeoForge installer path", type: "string", monospace: true, group: "neoforge", appliesTo: ["NEOFORGE"] },
-  { key: "NEOFORGE_INSTALLER_URL", label: "NeoForge installer URL", type: "string", monospace: true, group: "neoforge", appliesTo: ["NEOFORGE"] },
+  { key: "NEOFORGE_VERSION", label: "NeoForge version", labelRu: "Версия NeoForge", type: "string", monospace: true, group: "neoforge", appliesTo: ["NEOFORGE"] },
+  { key: "NEOFORGE_INSTALLER", label: "NeoForge installer path", labelRu: "Путь к installer-у NeoForge", type: "string", monospace: true, group: "neoforge", appliesTo: ["NEOFORGE"] },
+  { key: "NEOFORGE_INSTALLER_URL", label: "NeoForge installer URL", labelRu: "URL installer-а NeoForge", type: "string", monospace: true, group: "neoforge", appliesTo: ["NEOFORGE"] },
 
   /* ============================= FABRIC =============================== */
-  { key: "FABRIC_LOADER_VERSION", label: "Fabric loader version", type: "string", monospace: true, group: "fabric", appliesTo: ["FABRIC"] },
-  { key: "FABRIC_INSTALLER_VERSION", label: "Fabric installer version", type: "string", monospace: true, group: "fabric", appliesTo: ["FABRIC"] },
-  { key: "FABRIC_LAUNCHER_VERSION", label: "Fabric launcher version", type: "string", monospace: true, group: "fabric", appliesTo: ["FABRIC"] },
+  { key: "FABRIC_LOADER_VERSION", label: "Fabric loader version", labelRu: "Версия Fabric loader", type: "string", monospace: true, group: "fabric", appliesTo: ["FABRIC"] },
+  { key: "FABRIC_INSTALLER_VERSION", label: "Fabric installer version", labelRu: "Версия Fabric installer", type: "string", monospace: true, group: "fabric", appliesTo: ["FABRIC"] },
+  { key: "FABRIC_LAUNCHER_VERSION", label: "Fabric launcher version", labelRu: "Версия Fabric launcher", type: "string", monospace: true, group: "fabric", appliesTo: ["FABRIC"] },
 
   /* ============================== QUILT ================================ */
-  { key: "QUILT_LOADER_VERSION", label: "Quilt loader version", type: "string", monospace: true, group: "quilt", appliesTo: ["QUILT"] },
-  { key: "QUILT_INSTALLER_VERSION", label: "Quilt installer version", type: "string", monospace: true, group: "quilt", appliesTo: ["QUILT"] },
+  { key: "QUILT_LOADER_VERSION", label: "Quilt loader version", labelRu: "Версия Quilt loader", type: "string", monospace: true, group: "quilt", appliesTo: ["QUILT"] },
+  { key: "QUILT_INSTALLER_VERSION", label: "Quilt installer version", labelRu: "Версия Quilt installer", type: "string", monospace: true, group: "quilt", appliesTo: ["QUILT"] },
 
   /* ============================= MOHIST =============================== */
-  { key: "MOHIST_BUILD", label: "Mohist build number", type: "string", monospace: true, group: "mohist", appliesTo: ["MOHIST"] },
+  { key: "MOHIST_BUILD", label: "Mohist build number", labelRu: "Номер билда Mohist", type: "string", monospace: true, group: "mohist", appliesTo: ["MOHIST"] },
 
   /* ============================ ADVANCED ============================== */
-  { key: "SNOOPER_ENABLED", label: "Snooper telemetry", help: "Legacy anonymous usage data. Off by default.", type: "boolean", default: false, group: "advanced" },
-  { key: "ENABLE_JMX_MONITORING", label: "Enable JMX monitoring", help: "Exposes JVM metrics via JMX for profilers.", type: "boolean", default: false, group: "advanced" },
-  { key: "INIT_POST_COMMANDS", label: "Post-init shell commands", help: "Run after setup but before JVM start. Advanced.", type: "string", monospace: true, long: true, group: "advanced" },
-  { key: "PRE_EXEC_SH", label: "Pre-exec script path", type: "string", monospace: true, group: "advanced" },
+  { key: "SNOOPER_ENABLED", label: "Snooper telemetry", labelRu: "Snooper-телеметрия", help: "Legacy anonymous usage data. Off by default.", helpRu: "Устаревший сбор анонимной статистики. По умолчанию выкл.", type: "boolean", default: false, group: "advanced" },
+  { key: "ENABLE_JMX_MONITORING", label: "Enable JMX monitoring", labelRu: "Включить JMX мониторинг", help: "Exposes JVM metrics via JMX for profilers.", helpRu: "Открывает JVM-метрики через JMX для профайлеров.", type: "boolean", default: false, group: "advanced" },
+  { key: "INIT_POST_COMMANDS", label: "Post-init shell commands", labelRu: "Shell-команды после инициализации", help: "Run after setup but before JVM start. Advanced.", helpRu: "Запускаются после setup, до старта JVM. Продвинутое.", type: "string", monospace: true, long: true, group: "advanced" },
+  { key: "PRE_EXEC_SH", label: "Pre-exec script path", labelRu: "Путь к pre-exec скрипту", type: "string", monospace: true, group: "advanced" },
 ];
 
 export const ENV_DEFS_BY_GROUP = ENV_DEFS.reduce<Record<EnvGroup, EnvDef[]>>(

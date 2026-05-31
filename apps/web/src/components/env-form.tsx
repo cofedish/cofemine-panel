@@ -5,14 +5,18 @@ import { cn } from "@/lib/cn";
 import {
   ENV_DEFS_BY_GROUP,
   ENV_GROUP_LABELS,
+  ENV_GROUP_LABELS_RU,
   ENV_GROUP_ORDER,
   ENV_KNOWN_KEYS,
   envDefApplies,
+  envHelp,
+  envLabel,
   isGroupVisibleForType,
   type EnvDef,
   type EnvGroup,
 } from "./env-meta";
 import { ChevronDown, Plus, Trash2, Search } from "lucide-react";
+import { useT } from "@/lib/i18n";
 
 /**
  * Typed form for itzg container env vars. The external state is the plain
@@ -29,11 +33,20 @@ export function EnvForm({
   env,
   onChange,
   currentType,
+  hiddenGroups,
 }: {
   env: Record<string, string>;
   onChange: (next: Record<string, string>) => void;
   currentType?: string;
+  /** Groups not rendered at all. Used by the post-create Env tab to drop
+   *  the gameplay/world/spawning/players/etc. groups that already have
+   *  proper UI in the Properties tab — avoids two places to edit the
+   *  same setting (e.g. `DIFFICULTY` env vs `difficulty` in properties). */
+  hiddenGroups?: readonly EnvGroup[];
 }): JSX.Element {
+  const { lang, t } = useT();
+  const groupLabel = (g: EnvGroup): string =>
+    (lang === "ru" ? ENV_GROUP_LABELS_RU : ENV_GROUP_LABELS)[g];
   const [query, setQuery] = useState("");
   const [openGroups, setOpenGroups] = useState<Partial<Record<EnvGroup, boolean>>>({
     gameplay: true,
@@ -48,17 +61,17 @@ export function EnvForm({
   );
 
   // Which groups are visible for this type?
-  const visibleGroups = useMemo(
-    () =>
-      ENV_GROUP_ORDER.filter((g) => {
-        if (!isGroupVisibleForType(g, currentType)) return false;
-        const defs = ENV_DEFS_BY_GROUP[g].filter((d) =>
-          envDefApplies(d, currentType)
-        );
-        return defs.length > 0;
-      }),
-    [currentType]
-  );
+  const visibleGroups = useMemo(() => {
+    const hidden = new Set(hiddenGroups ?? []);
+    return ENV_GROUP_ORDER.filter((g) => {
+      if (hidden.has(g)) return false;
+      if (!isGroupVisibleForType(g, currentType)) return false;
+      const defs = ENV_DEFS_BY_GROUP[g].filter((d) =>
+        envDefApplies(d, currentType)
+      );
+      return defs.length > 0;
+    });
+  }, [currentType, hiddenGroups]);
 
   const filteredDefs = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -69,11 +82,11 @@ export function EnvForm({
         .filter(
           (d) =>
             d.key.toLowerCase().includes(q) ||
-            d.label.toLowerCase().includes(q) ||
-            (d.help ?? "").toLowerCase().includes(q)
+            envLabel(d, lang).toLowerCase().includes(q) ||
+            (envHelp(d, lang) ?? "").toLowerCase().includes(q)
         )
     );
-  }, [query, visibleGroups, currentType]);
+  }, [query, visibleGroups, currentType, lang]);
 
   function setKey(key: string, value: string | undefined): void {
     const next = { ...env };
@@ -99,7 +112,9 @@ export function EnvForm({
         />
         <input
           className="input pl-8"
-          placeholder={`Search ${ENV_DEFS_BY_GROUP ? Object.values(ENV_DEFS_BY_GROUP).flat().length : 0}+ settings…`}
+          placeholder={t("envForm.searchPlaceholder", {
+            n: Object.values(ENV_DEFS_BY_GROUP).flat().length,
+          })}
           value={query}
           onChange={(e) => setQuery(e.target.value)}
         />
@@ -147,15 +162,15 @@ export function EnvForm({
             >
               <div className="flex items-center gap-3">
                 <span className="font-medium text-sm">
-                  {ENV_GROUP_LABELS[g]}
+                  {groupLabel(g)}
                 </span>
                 <span className="text-xs text-ink-muted">
-                  {defs.length} settings
+                  {t("envForm.settingsCount", { n: defs.length })}
                   {overriddenCount > 0 && (
                     <>
                       {" · "}
                       <span className="text-[rgb(var(--accent))]">
-                        {overriddenCount} set
+                        {t("envForm.setCount", { n: overriddenCount })}
                       </span>
                     </>
                   )}
@@ -210,12 +225,15 @@ function FieldRow({
   value: string | undefined;
   onChange: (v: string | undefined) => void;
 }): JSX.Element {
+  const { lang, t } = useT();
+  const label = envLabel(def, lang);
+  const help = envHelp(def, lang);
   const isSet = value !== undefined;
   const fullWidth = def.type === "string" && (def as any).long;
   return (
     <div className={cn("space-y-1.5", fullWidth && "md:col-span-2")}>
       <div className="flex items-center justify-between gap-2">
-        <label className="text-sm font-medium text-ink">{def.label}</label>
+        <label className="text-sm font-medium text-ink">{label}</label>
         <div className="flex items-center gap-2 text-[10px] text-ink-muted">
           <code className="font-mono">{def.key}</code>
           {isSet && (
@@ -224,15 +242,13 @@ function FieldRow({
               onClick={() => onChange(undefined)}
               className="underline hover:text-ink"
             >
-              clear
+              {t("envForm.clear")}
             </button>
           )}
         </div>
       </div>
-      {renderControl(def, value, onChange)}
-      {def.help && (
-        <div className="text-xs text-ink-muted">{def.help}</div>
-      )}
+      {renderControl(def, value, onChange, label)}
+      {help && <div className="text-xs text-ink-muted">{help}</div>}
     </div>
   );
 }
@@ -240,7 +256,8 @@ function FieldRow({
 function renderControl(
   def: EnvDef,
   current: string | undefined,
-  onChange: (v: string | undefined) => void
+  onChange: (v: string | undefined) => void,
+  ariaLabel?: string
 ): JSX.Element {
   if (def.type === "boolean") {
     const on =
@@ -258,7 +275,7 @@ function renderControl(
             : "bg-surface-3 border border-line"
         )}
         aria-pressed={on}
-        aria-label={def.label}
+        aria-label={ariaLabel ?? def.label}
       >
         <motion.span
           initial={false}
@@ -321,6 +338,7 @@ function CustomSection({
   env: Record<string, string>;
   onSet: (key: string, value: string | undefined) => void;
 }): JSX.Element {
+  const { t } = useT();
   const [newKey, setNewKey] = useState("");
   const [newValue, setNewValue] = useState("");
 
@@ -336,11 +354,13 @@ function CustomSection({
     <div className="border border-line rounded-lg overflow-hidden">
       <div className="px-4 py-3 bg-surface-2 flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <span className="font-medium text-sm">Custom variables</span>
+          <span className="font-medium text-sm">
+            {t("envForm.customSection")}
+          </span>
           <span className="text-xs text-ink-muted">
             {keys.length === 0
-              ? "none"
-              : `${keys.length} defined`}
+              ? t("envForm.customNone")
+              : t("envForm.customCount", { n: keys.length })}
           </span>
         </div>
       </div>
@@ -362,7 +382,7 @@ function CustomSection({
               type="button"
               className="btn btn-ghost btn-icon !h-8 !w-8"
               onClick={() => onSet(k, undefined)}
-              aria-label="Remove"
+              aria-label={t("common.remove")}
             >
               <Trash2 size={14} />
             </button>
@@ -380,7 +400,7 @@ function CustomSection({
           />
           <input
             className="input font-mono text-xs"
-            placeholder="value"
+            placeholder={t("envForm.valuePlaceholder")}
             value={newValue}
             onChange={(e) => setNewValue(e.target.value)}
             onKeyDown={(e) => {
@@ -393,7 +413,7 @@ function CustomSection({
             onClick={add}
             disabled={!newKey.trim() || !/^[A-Z_][A-Z0-9_]*$/.test(newKey.trim().toUpperCase())}
           >
-            <Plus size={14} /> Add
+            <Plus size={14} /> {t("common.add")}
           </button>
         </div>
         <p className="text-xs text-ink-muted">
