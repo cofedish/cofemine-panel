@@ -85,6 +85,12 @@ export function resolveMcVersion(server: Server): string {
       return patch === "0" ? `1.${major}` : `1.${major}.${patch}`;
     }
   }
+  // CURSEFORGE auto-pack: createServerRecord stamps CF_DETECTED_MC_VERSION
+  // from the CF file metadata so we don't have to guess from loader env
+  // (which CURSEFORGE servers don't get).
+  if (env.CF_DETECTED_MC_VERSION && MC_VERSION_RE.test(env.CF_DETECTED_MC_VERSION)) {
+    return env.CF_DETECTED_MC_VERSION;
+  }
   return stored;
 }
 
@@ -118,6 +124,12 @@ export async function streamMrpack(
   } else if (env.QUILT_LOADER_VERSION) {
     loader = "quilt";
     loaderVersion = env.QUILT_LOADER_VERSION;
+  } else if (env.CF_DETECTED_LOADER) {
+    // CURSEFORGE auto-pack — itzg detected the loader from the pack
+    // manifest but never wrote a *_VERSION env back. We stamped the
+    // type at create time from CF API; loaderVersion stays null
+    // because CF metadata doesn't pin a specific loader version.
+    loader = env.CF_DETECTED_LOADER;
   }
   const params = new URLSearchParams();
   params.set("packName", server.name);

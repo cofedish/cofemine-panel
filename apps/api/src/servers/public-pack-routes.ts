@@ -42,6 +42,18 @@ function deriveLoader(server: Server): {
   if (env.FORGE_VERSION) return { loader: "forge", loaderVersion: env.FORGE_VERSION };
   if (env.FABRIC_LOADER_VERSION) return { loader: "fabric", loaderVersion: env.FABRIC_LOADER_VERSION };
   if (env.QUILT_LOADER_VERSION) return { loader: "quilt", loaderVersion: env.QUILT_LOADER_VERSION };
+  // CURSEFORGE auto-pack servers don't have *_VERSION env set — itzg
+  // detects the loader from the pack manifest at install time and
+  // never writes it back. createServerRecord stamps CF_DETECTED_LOADER
+  // up-front from CF API so this metadata endpoint (and anything else
+  // that reads server.env) sees the right loader from day one. Loader
+  // version is null because CF metadata doesn't ship a pinned loader
+  // version — the launcher only needs the *type* to pick the right
+  // entry point.
+  const detected = env.CF_DETECTED_LOADER?.toLowerCase();
+  if (detected === "neoforge" || detected === "forge" || detected === "fabric" || detected === "quilt") {
+    return { loader: detected, loaderVersion: null };
+  }
   return { loader: null, loaderVersion: null };
 }
 

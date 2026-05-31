@@ -293,7 +293,7 @@ function classIdToKind(classId?: number): ContentKind | undefined {
   }
 }
 
-function extractLoaders(gameVersions: string[]): string[] {
+export function extractLoaders(gameVersions: string[]): string[] {
   const loaders = new Set<string>();
   for (const v of gameVersions) {
     const low = v.toLowerCase();
@@ -342,7 +342,7 @@ function extractLoaders(gameVersions: string[]): string[] {
  * "Server"), and Java version markers ("Java 17") out of CF's mixed
  * `gameVersions` arrays before we surface them to the UI.
  */
-function isMinecraftVersion(v: string): boolean {
+export function isMinecraftVersion(v: string): boolean {
   // Major.Minor[.Patch] starting with 1.
   return /^1\.\d+(?:\.\d+)?$/.test(v);
 }

@@ -3,6 +3,10 @@ import { request } from "undici";
 import { NodeClient } from "../nodes/node-client.js";
 import type { CreateServerInput } from "@cofemine/shared";
 import { decryptSecret } from "../crypto.js";
+import {
+  extractLoaders,
+  isMinecraftVersion,
+} from "../integrations/curseforge-provider.js";
 
 /**
  * Transform the server's stored env into the env the agent will actually
@@ -127,6 +131,53 @@ async function mergeModpackEnv(
   return env;
 }
 
+/**
+ * Look up loader + MC version from the CF file metadata and stamp
+ * them into the supplied env object as CF_DETECTED_LOADER /
+ * CF_DETECTED_MC_VERSION. Idempotent: re-stamps every call so a
+ * reattach to a new file id refreshes the values. Best-effort —
+ * swallows CF API failures.
+ *
+ * mc-image-helper figures these out at install time from the pack
+ * manifest, but never writes them back to spec.env. Without this
+ * stamp, anything that reads server.env after the install
+ * (public .mrpack metadata that drives the client launcher's pack
+ * picker, dynmap/bluemap install which needs to pick the right
+ * Modrinth loader build, etc.) defaults to "vanilla" for CURSEFORGE
+ * servers.
+ */
+async function stampCfDetectedMetadata(
+  env: Record<string, string>,
+  cfPackProjectId: number,
+  cfPackFileId: number
+): Promise<void> {
+  const cfApiKey = await readCurseforgeApiKey().catch(() => null);
+  if (!cfApiKey) return;
+  try {
+    const url = `https://api.curseforge.com/v1/mods/${cfPackProjectId}/files/${cfPackFileId}`;
+    const res = await request(url, {
+      method: "GET",
+      headers: { "x-api-key": cfApiKey, accept: "application/json" },
+      headersTimeout: 15_000,
+      bodyTimeout: 15_000,
+    });
+    if (res.statusCode >= 400) {
+      await res.body.dump().catch(() => {});
+      return;
+    }
+    const body = (await res.body.json()) as {
+      data?: { gameVersions?: string[] };
+    };
+    const raw = body.data?.gameVersions ?? [];
+    const mcVersion = raw.find(isMinecraftVersion);
+    const loader = extractLoaders(raw)[0];
+    if (loader) env.CF_DETECTED_LOADER = loader;
+    if (mcVersion) env.CF_DETECTED_MC_VERSION = mcVersion;
+  } catch {
+    /* non-fatal — deriveLoader will fall back to null */
+  }
+}
+
 export async function createServerRecord(input: CreateServerInput) {
   const existsName = await prisma.server.findFirst({
     where: { name: input.name, nodeId: input.nodeId },
@@ -179,6 +230,14 @@ export async function createServerRecord(input: CreateServerInput) {
     }
   }
 
+  if (
+    input.type === "CURSEFORGE" &&
+    cfPackProjectId &&
+    cfPackFileId
+  ) {
+    await stampCfDetectedMetadata(env, cfPackProjectId, cfPackFileId);
+  }
+
   return prisma.server.create({
     data: {
       name: input.name,
@@ -224,6 +283,22 @@ export async function reconcileAndReprovision(
     eulaAccepted: server.eulaAccepted as true,
     modpack: inferModpackHint(server.type, currentEnv),
   });
+  // Re-stamp CF_DETECTED_LOADER / CF_DETECTED_MC_VERSION on every
+  // repair too — covers servers created before this stamp existed
+  // (they'd show as "vanilla" in the launcher's pack picker forever
+  // otherwise) and refreshes the values after a re-attach to a
+  // newer pack file id.
+  if (
+    server.type === "CURSEFORGE" &&
+    server.cfPackProjectId &&
+    server.cfPackFileId
+  ) {
+    await stampCfDetectedMetadata(
+      refreshedEnv,
+      server.cfPackProjectId,
+      server.cfPackFileId
+    );
+  }
 
   const changed =
     JSON.stringify(refreshedEnv) !== JSON.stringify(currentEnv);
