@@ -13,6 +13,7 @@
  */
 
 export type EnvGroup =
+  | "cofemine"
   | "gameplay"
   | "world"
   | "spawning"
@@ -36,6 +37,7 @@ export type EnvGroup =
   | "advanced";
 
 export const ENV_GROUP_LABELS: Record<EnvGroup, string> = {
+  cofemine: "Cofemine Panel",
   gameplay: "Gameplay",
   world: "World & seed",
   spawning: "Spawning & entities",
@@ -60,6 +62,7 @@ export const ENV_GROUP_LABELS: Record<EnvGroup, string> = {
 };
 
 export const ENV_GROUP_LABELS_RU: Record<EnvGroup, string> = {
+  cofemine: "Панель Cofemine",
   gameplay: "Геймплей",
   world: "Мир и сид",
   spawning: "Спавн и сущности",
@@ -84,6 +87,7 @@ export const ENV_GROUP_LABELS_RU: Record<EnvGroup, string> = {
 };
 
 export const ENV_GROUP_ORDER: EnvGroup[] = [
+  "cofemine",
   "gameplay",
   "world",
   "spawning",
@@ -108,7 +112,7 @@ export const ENV_GROUP_ORDER: EnvGroup[] = [
 ];
 
 /** Shown open by default (others start collapsed). */
-export const ENV_DEFAULT_OPEN: EnvGroup[] = ["gameplay"];
+export const ENV_DEFAULT_OPEN: EnvGroup[] = ["cofemine", "gameplay"];
 
 type Common = {
   key: string;
@@ -149,6 +153,33 @@ export type EnvDef =
     });
 
 export const ENV_DEFS: EnvDef[] = [
+  /* ============================= COFEMINE PANEL ====================== */
+  // Panel-internal sentinels. The agent strips every key with the
+  // `__COFEMINE_` prefix before forwarding the env to itzg, so these
+  // never reach the container — they're consumed by the panel-API
+  // layer (download-proxy injection, post-boot detach, etc.).
+  {
+    key: "__COFEMINE_INSTALL_PROXY",
+    label: "Use global download proxy on install",
+    labelRu: "Использовать прокси для скачивания при установке",
+    help: "When ON, mc-image-helper's downloads (NeoForge installer, Modrinth/CurseForge pack zips, mod jars) tunnel through the proxy you configured under Integrations → Download proxy. The proxy is ONLY injected during the install phase — the install-watchdog automatically turns it off once the MC server has booted, so player traffic (Mojang auth, skins) goes direct. Use this when your network can't reach maven.neoforged.net / forgecdn.net / Modrinth CDN.",
+    helpRu: "Когда включено, загрузки mc-image-helper (installer NeoForge, pack-zip Modrinth/CurseForge, jar-моды) идут через прокси из Integrations → Download proxy. Прокси активен ТОЛЬКО на этапе установки — install-watchdog автоматически выключает его после буста MC, чтобы трафик игроков (Mojang auth, скины) шёл напрямую. Полезно когда твоя сеть не достаёт до maven.neoforged.net / forgecdn.net / Modrinth CDN.",
+    type: "boolean",
+    default: false,
+    group: "cofemine",
+  },
+  {
+    key: "__COFEMINE_DECOUPLE_AFTER_BOOT",
+    label: "Detach from pack source after first boot",
+    labelRu: "Отвязать от источника сборки после первого старта",
+    help: "One-shot flag for CURSEFORGE/MODRINTH servers: after the first successful boot the panel rips out CF_*/MODRINTH_* env and switches the server to its native loader (NEOFORGE/FORGE/FABRIC/QUILT). Use this when you want to take a pack as a starting point but then manage mods manually without itzg re-syncing them on every restart.",
+    helpRu: "Одноразовый флаг для серверов CURSEFORGE/MODRINTH: после первого успешного старта панель убирает CF_*/MODRINTH_* env и переключает сервер на нативный лоадер (NEOFORGE/FORGE/FABRIC/QUILT). Полезно если хочешь взять сборку как отправную точку, но потом управлять модами руками без того чтобы itzg их пере-синкал на каждом рестарте.",
+    type: "boolean",
+    default: false,
+    group: "cofemine",
+    appliesTo: ["CURSEFORGE", "MODRINTH"],
+  },
+
   /* ============================= GAMEPLAY ============================= */
   { key: "DIFFICULTY", label: "Difficulty", type: "enum", options: ["peaceful", "easy", "normal", "hard"], default: "normal", group: "gameplay" },
   { key: "MODE", label: "Default gamemode", type: "enum", options: ["survival", "creative", "adventure", "spectator"], default: "survival", group: "gameplay" },
@@ -312,6 +343,7 @@ export const ENV_DEFS_BY_GROUP = ENV_DEFS.reduce<Record<EnvGroup, EnvDef[]>>(
     return acc;
   },
   {
+    cofemine: [],
     gameplay: [],
     world: [],
     spawning: [],
