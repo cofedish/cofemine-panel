@@ -681,6 +681,17 @@ const en: Dict = {
   "proxy.helperNote":
     "How it works: the watchdog polls each modpack server every 15s while it's starting. If install aborts with a network timeout and this proxy is configured + enabled, the watchdog reprovisions the container with matching JVM flags (SOCKS or HTTP) and restarts. Once the MC server prints its boot marker, the watchdog reprovisions back to a clean container so MC's own HTTP traffic goes direct. One proxy attempt per install session.",
 
+  "proxy.cacheTitle": "Maven cache upstream",
+  "proxy.cacheDesc":
+    "The maven-cache sidecar uses the proxy above as its upstream chain — saving this form pushes the new UPSTREAM_PROXY to every node's cache automatically. Use Re-apply if a node was offline at save time.",
+  "proxy.cacheUpstream": "Current upstream",
+  "proxy.cacheRunning": "Running",
+  "proxy.cacheStopped": "Stopped",
+  "proxy.cacheDirect": "direct (no proxy)",
+  "proxy.cacheReapply": "Re-apply to caches",
+  "proxy.cacheRefresh": "Refresh",
+  "proxy.cacheApplying": "Applying…",
+
   "smtp.title": "Outgoing email (SMTP)",
   "smtp.tagline": "Used by password reset and future invites",
   "smtp.subtitle":
@@ -1430,6 +1441,17 @@ const ru: Dict = {
   "proxy.configuredButOff": "Настроен — выключен",
   "proxy.helperNote":
     "Как это работает: watchdog опрашивает каждый модпак-сервер раз в 15с, пока он стартует. Если установка упала с сетевым таймаутом, а прокси настроен и включён — watchdog пересобирает контейнер с JVM-флагами (SOCKS или HTTP) и перезапускает. Как только MC напечатает маркер загрузки — watchdog пересобирает обратно на чистый контейнер, чтобы MC ходил напрямую. Одна попытка прокси на установку.",
+
+  "proxy.cacheTitle": "Upstream для maven-cache",
+  "proxy.cacheDesc":
+    "Сайдкар maven-cache использует прокси выше как свой upstream-канал — при сохранении формы новый UPSTREAM_PROXY автоматически прокидывается во все ноды. «Применить заново» — если нода была оффлайн в момент сохранения.",
+  "proxy.cacheUpstream": "Текущий upstream",
+  "proxy.cacheRunning": "Запущен",
+  "proxy.cacheStopped": "Остановлен",
+  "proxy.cacheDirect": "напрямую (без прокси)",
+  "proxy.cacheReapply": "Применить заново",
+  "proxy.cacheRefresh": "Обновить",
+  "proxy.cacheApplying": "Применяю…",
 
   "smtp.title": "Исходящая почта (SMTP)",
   "smtp.tagline": "Используется для сброса пароля и приглашений",

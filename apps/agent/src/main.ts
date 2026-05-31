@@ -5,6 +5,7 @@ import { serversAgentRoutes } from "./routes/servers.js";
 import { backupsAgentRoutes } from "./routes/backups.js";
 import { installAgentRoutes } from "./routes/install.js";
 import { proxyAgentRoutes } from "./routes/proxy.js";
+import { mavenCacheRoutes } from "./routes/maven-cache.js";
 import { consoleAgentWs } from "./ws/console.js";
 import { ensureNetwork } from "./docker.js";
 import { ensureDir } from "./paths.js";
@@ -40,6 +41,7 @@ async function bootstrap(): Promise<void> {
   await app.register(backupsAgentRoutes);
   await app.register(installAgentRoutes);
   await app.register(proxyAgentRoutes);
+  await app.register(mavenCacheRoutes);
   await consoleAgentWs(app);
 
   await ensureDir(config.AGENT_DATA_ROOT);

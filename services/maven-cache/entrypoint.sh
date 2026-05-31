@@ -48,8 +48,17 @@ gost \
   -L="tcp://127.0.0.1:8010/libraries.minecraft.net:443" \
   -L="tcp://127.0.0.1:8011/edge.forgecdn.net:443" \
   -L="tcp://127.0.0.1:8012/cdn.modrinth.com:443" \
+  -L="http://0.0.0.0:8081" \
   ${FORWARD_FLAG} &
 GOST_PID=$!
+# The :8081 listener above is a generic HTTP/CONNECT forward proxy.
+# MC containers set HTTPS_PROXY=http://maven-cache:8081 so EVERY
+# install download (including CurseForge mod jars where we can't
+# rewrite the URL because mc-image-helper gets them from CF API at
+# runtime) tunnels through xray transparently. No TLS interception
+# happens at this layer — the CONNECT just relays bytes — so the
+# jars themselves aren't cached, but the request succeeds even from
+# region-blocked hosts.
 
 # Give gost ~0.5s to bind its listeners before nginx tries to use them.
 sleep 1

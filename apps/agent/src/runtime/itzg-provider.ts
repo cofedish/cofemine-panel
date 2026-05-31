@@ -71,12 +71,25 @@ export class ItzgRuntimeProvider implements MinecraftRuntimeProvider {
         : {};
 
     // When the operator deployed the optional maven-cache sidecar, point
-    // the loader installers at it. mc-image-helper happily honours
-    // *_INSTALLER_URL env to override its built-in maven targets, so
-    // the entire install stops touching maven.neoforged.net etc. After
-    // the first server warms the cache, subsequent containers (even
-    // brand-new ones on a new MC version) serve from local disk — no
-    // proxy, no region-blocked CDNs, no install-retry dance.
+    // the loader installers at it AND route the rest of the install
+    // traffic through the cache's HTTP-CONNECT proxy. Two layers:
+    //
+    //   1. *_INSTALLER_URL → http://maven-cache/<loader>/...
+    //      mc-image-helper honours these env overrides so the NeoForge
+    //      / Forge installer is fetched from cache (HTTP, cacheable).
+    //
+    //   2. HTTPS_PROXY → http://maven-cache:8081
+    //      Catches everything we CAN'T override individually — most
+    //      importantly CurseForge mod jars whose URLs come from CF API
+    //      at install time. mc-image-helper tunnels CONNECT through
+    //      gost on the cache, which chains via MAVEN_CACHE_UPSTREAM
+    //      (xray) to the real CDN. No TLS interception → no caching
+    //      of jars yet, but the download succeeds from region-blocked
+    //      hosts.
+    //
+    // Runtime concerns: HTTPS_PROXY affects EVERY HTTPS call the JVM
+    // makes. NO_PROXY excludes Mojang auth + skin domains so player
+    // joins stay direct and aren't slowed down by going through xray.
     const cacheDefaults: Record<string, string> = {};
     const cacheHost = config.AGENT_MAVEN_CACHE_HOST;
     if (cacheHost) {
@@ -93,11 +106,30 @@ export class ItzgRuntimeProvider implements MinecraftRuntimeProvider {
         cacheDefaults.FORGE_INSTALLER_URL =
           `http://${cacheHost}/forge/net/minecraftforge/forge/${mcv}-${loaderVer}/forge-${mcv}-${loaderVer}-installer.jar`;
       }
-      // Fabric / Quilt installers are looked up via meta endpoints,
-      // not direct URLs — itzg doesn't expose a single override. They
-      // still benefit because mc-image-helper falls through to
-      // meta.fabricmc.net which the cache fronts; routed via the
-      // operator's MAVEN_CACHE_UPSTREAM proxy.
+      // HTTP/HTTPS proxy via the cache's CONNECT listener. NO_PROXY
+      // keeps Mojang and host-local addresses direct so player auth
+      // and intra-network calls don't pay the proxy round-trip.
+      const proxyUrl = `http://${cacheHost}:8081`;
+      const noProxy = [
+        "localhost",
+        "127.0.0.1",
+        "::1",
+        cacheHost,
+        "host.docker.internal",
+        "sessionserver.mojang.com",
+        "api.mojang.com",
+        "api.minecraftservices.com",
+        "textures.minecraft.net",
+        "launchermeta.mojang.com",
+        ".mojang.com",
+        ".minecraft.net",
+      ].join(",");
+      cacheDefaults.HTTP_PROXY = proxyUrl;
+      cacheDefaults.HTTPS_PROXY = proxyUrl;
+      cacheDefaults.http_proxy = proxyUrl;
+      cacheDefaults.https_proxy = proxyUrl;
+      cacheDefaults.NO_PROXY = noProxy;
+      cacheDefaults.no_proxy = noProxy;
     }
 
     const envMap: Record<string, string> = {

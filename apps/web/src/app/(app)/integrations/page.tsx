@@ -461,6 +461,95 @@ function DownloadProxyDetails(): JSX.Element {
       <p className="text-xs text-ink-muted leading-relaxed">
         {t("proxy.helperNote")}
       </p>
+
+      <MavenCacheStatus />
+    </div>
+  );
+}
+
+type CacheStatusNode = {
+  node: string;
+  ok: boolean;
+  running?: boolean;
+  upstreamProxy?: string | null;
+  error?: string;
+};
+
+function MavenCacheStatus(): JSX.Element {
+  const { t } = useT();
+  const { data, mutate: refresh } = useSWR<{ nodes: CacheStatusNode[] }>(
+    "/integrations/maven-cache/status",
+    fetcher,
+    { refreshInterval: 0 }
+  );
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+
+  async function reapply(): Promise<void> {
+    setBusy(true);
+    setMsg(null);
+    try {
+      await api.post("/integrations/maven-cache/apply", {});
+      await refresh();
+    } catch (err) {
+      setMsg(err instanceof ApiError ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="space-y-2 rounded-lg border border-border/60 bg-surface-1/40 p-4">
+      <div className="flex items-center justify-between">
+        <div>
+          <div className="text-sm font-medium">{t("proxy.cacheTitle")}</div>
+          <p className="text-xs text-ink-secondary leading-relaxed mt-1">
+            {t("proxy.cacheDesc")}
+          </p>
+        </div>
+        <div className="flex gap-2 shrink-0">
+          <button
+            className="btn btn-ghost"
+            onClick={() => refresh()}
+            disabled={busy}
+          >
+            {t("proxy.cacheRefresh")}
+          </button>
+          <button
+            className="btn btn-secondary"
+            onClick={reapply}
+            disabled={busy}
+          >
+            {busy ? t("proxy.cacheApplying") : t("proxy.cacheReapply")}
+          </button>
+        </div>
+      </div>
+      {(data?.nodes ?? []).length > 0 && (
+        <ul className="mt-2 space-y-1.5">
+          {(data?.nodes ?? []).map((n) => (
+            <li
+              key={n.node}
+              className="flex items-center justify-between text-xs font-mono gap-3"
+            >
+              <span className="truncate">{n.node}</span>
+              <span
+                className={
+                  n.ok && n.running
+                    ? "text-emerald-400"
+                    : n.ok
+                      ? "text-amber-400"
+                      : "text-rose-400"
+                }
+              >
+                {n.ok
+                  ? `${n.running ? t("proxy.cacheRunning") : t("proxy.cacheStopped")} · ${n.upstreamProxy ?? t("proxy.cacheDirect")}`
+                  : n.error}
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+      {msg && <div className="text-xs text-rose-400">{msg}</div>}
     </div>
   );
 }

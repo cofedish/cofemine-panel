@@ -44,7 +44,9 @@ RUN chmod +x /usr/local/bin/entrypoint.sh \
  && mkdir -p /var/cache/nginx/maven \
  && chown -R nginx:nginx /var/cache/nginx
 
-EXPOSE 80
+# :80   — path-routed cache (loader installers)
+# :8081 — generic HTTP/CONNECT forward proxy (mod jars via xray chain)
+EXPOSE 80 8081
 
 VOLUME ["/var/cache/nginx/maven"]
 

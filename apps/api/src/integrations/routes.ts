@@ -18,6 +18,7 @@ import { CurseForgeProvider } from "./curseforge-provider.js";
 import type { ContentProvider } from "./content-provider.js";
 import {
   clearDownloadProxy,
+  readDownloadProxy,
   readDownloadProxyForDisplay,
   writeDownloadProxy,
 } from "./download-proxy.js";
@@ -38,6 +39,57 @@ const providers: Record<string, ContentProvider> = {
 const settingPatchSchema = z.object({
   value: z.string().max(1000),
 });
+
+/**
+ * Translate the current Download Proxy setting into the URL that
+ * maven-cache's gost expects as UPSTREAM_PROXY, and push it to every
+ * registered node's agent. Returns per-node results for the audit
+ * log; never throws — a single offline node shouldn't block the save.
+ *
+ * URL shape: `socks5://host.docker.internal:<port>` /
+ * `http://host.docker.internal:<port>`. The MC containers reach the
+ * host xray via the same alias, so any "localhost"-ish address the
+ * operator typed in the UI is rewritten to host.docker.internal here.
+ */
+async function applyDownloadProxyToMavenCaches(
+  log: { warn: (...args: unknown[]) => void; info: (...args: unknown[]) => void }
+): Promise<Array<{ node: string; ok: boolean; error?: string }>> {
+  const proxy = await readDownloadProxy();
+  let upstreamProxy = "";
+  if (proxy) {
+    const host =
+      proxy.host === "localhost" ||
+      proxy.host === "127.0.0.1" ||
+      proxy.host === "::1" ||
+      proxy.host === "172.17.0.1"
+        ? "host.docker.internal"
+        : proxy.host;
+    const scheme = proxy.protocol === "socks" ? "socks5" : "http";
+    const auth =
+      proxy.username || proxy.password
+        ? `${encodeURIComponent(proxy.username ?? "")}:${encodeURIComponent(
+            proxy.password ?? ""
+          )}@`
+        : "";
+    upstreamProxy = `${scheme}://${auth}${host}:${proxy.port}`;
+  }
+  const nodes = await prisma.node.findMany();
+  const results: Array<{ node: string; ok: boolean; error?: string }> = [];
+  for (const n of nodes) {
+    try {
+      const client = await NodeClient.forId(n.id);
+      await client.call("POST", "/maven-cache/recreate", { upstreamProxy });
+      log.info({ node: n.name, upstreamProxy: upstreamProxy || "(direct)" },
+        "maven-cache upstream applied");
+      results.push({ node: n.name, ok: true });
+    } catch (err: any) {
+      const msg = String(err?.message ?? err);
+      log.warn({ node: n.name, err: msg }, "maven-cache upstream apply failed");
+      results.push({ node: n.name, ok: false, error: msg });
+    }
+  }
+  return results;
+}
 
 export async function integrationsRoutes(app: FastifyInstance): Promise<void> {
   app.get("/", async () => {
@@ -256,6 +308,12 @@ export async function integrationsRoutes(app: FastifyInstance): Promise<void> {
         resource: "download.proxy",
         metadata: { enabled: body.enabled, host: body.host, port: body.port },
       });
+      // Push the same upstream to every node's maven-cache so the
+      // cache routes through the right chain. Best-effort — we don't
+      // fail the save if one node's agent is offline.
+      await applyDownloadProxyToMavenCaches(req.log).catch((err) =>
+        req.log.warn({ err }, "maven-cache apply failed")
+      );
       return { ok: true };
     }
   );
@@ -269,7 +327,46 @@ export async function integrationsRoutes(app: FastifyInstance): Promise<void> {
         action: "integration.download-proxy.clear",
         resource: "download.proxy",
       });
+      // Push empty upstream so cache goes direct.
+      await applyDownloadProxyToMavenCaches(req.log).catch((err) =>
+        req.log.warn({ err }, "maven-cache apply failed")
+      );
       return { ok: true };
+    }
+  );
+
+  app.get("/maven-cache/status", async () => {
+    const nodes = await prisma.node.findMany({ orderBy: { name: "asc" } });
+    const out = await Promise.all(
+      nodes.map(async (n) => {
+        try {
+          const client = await NodeClient.forId(n.id);
+          const s = await client.call<{
+            running: boolean;
+            upstreamProxy: string | null;
+            startedAt: string | null;
+            image: string | null;
+          }>("GET", "/maven-cache/status");
+          return { node: n.name, ok: true, ...s };
+        } catch (err: any) {
+          return { node: n.name, ok: false, error: String(err?.message ?? err) };
+        }
+      })
+    );
+    return { nodes: out };
+  });
+
+  app.post(
+    "/maven-cache/apply",
+    { preHandler: requireGlobalPermission("integration.manage") },
+    async (req) => {
+      const results = await applyDownloadProxyToMavenCaches(req.log);
+      await writeAudit(req, {
+        action: "integration.maven-cache.apply",
+        resource: "maven-cache",
+        metadata: { results: results.length },
+      });
+      return { ok: true, results };
     }
   );
 
