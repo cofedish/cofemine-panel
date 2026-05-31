@@ -5,7 +5,7 @@ import { serversAgentRoutes } from "./routes/servers.js";
 import { backupsAgentRoutes } from "./routes/backups.js";
 import { installAgentRoutes } from "./routes/install.js";
 import { proxyAgentRoutes } from "./routes/proxy.js";
-import { mavenCacheRoutes } from "./routes/maven-cache.js";
+import { mavenCacheRoutes, reseedCaWrapper } from "./routes/maven-cache.js";
 import { consoleAgentWs } from "./ws/console.js";
 import { ensureNetwork } from "./docker.js";
 import { ensureDir } from "./paths.js";
@@ -48,6 +48,14 @@ async function bootstrap(): Promise<void> {
   await ensureDir(config.AGENT_BACKUP_ROOT);
   await ensureNetwork(config.AGENT_DOCKER_NETWORK).catch((err) =>
     app.log.warn({ err }, "ensureNetwork failed at startup")
+  );
+  // Refresh the import.sh wrapper inside the shared CA volume to
+  // whatever version this agent ships. Without this, an agent upgrade
+  // (new wrapper logic) only reaches MC containers after the operator
+  // hits CA-generate or Re-apply, and freshly-recreated MC containers
+  // crashloop on the old script in the meantime.
+  await reseedCaWrapper().catch((err) =>
+    app.log.warn({ err }, "reseedCaWrapper failed at startup")
   );
 
   await app.listen({ host: config.AGENT_HOST, port: config.AGENT_PORT });

@@ -45,6 +45,24 @@ export const CA_VOLUME_NAME = "cofemine_maven_cache_ca";
 export const CA_MOUNT_PATH = "/cofemine-ca";
 
 /**
+ * Idempotently rewrite the wrapper script into the CA volume on agent
+ * startup. The script is the entrypoint for every MC container, so a
+ * stale version (e.g. from before the operator ran an agent upgrade)
+ * means freshly-recreated MC containers crashloop with the OLD script
+ * until they hit a /maven-cache/recreate via CA-generate or Re-apply.
+ *
+ * We only touch import.sh — ca.crt / ca.key / .ready are owned by the
+ * API and only seeded on /maven-cache/recreate. Safe to call at boot
+ * even on a fresh agent: ensureVolume creates the volume if missing.
+ */
+export async function reseedCaWrapper(): Promise<void> {
+  await ensureVolume(CA_VOLUME_NAME);
+  await writeFilesToVolume(CA_VOLUME_NAME, [
+    { path: "/dst/import.sh", content: CA_IMPORT_SCRIPT, mode: 0o755 },
+  ]);
+}
+
+/**
  * Wrapper entrypoint seeded into the CA volume alongside the cert.
  * The agent overrides each MC container's `Entrypoint` to this script
  * (NOT itzg's `STARTUP_SCRIPT` env — that helper isn't universal
@@ -65,7 +83,11 @@ export const CA_MOUNT_PATH = "/cofemine-ca";
  * the wrapper still execs /start — we never want a CA hiccup to
  * brick the MC server's boot.
  */
+const CA_IMPORT_SCRIPT_VERSION = "3";
 const CA_IMPORT_SCRIPT = `#!/bin/sh
+# import.sh version ${CA_IMPORT_SCRIPT_VERSION} — bump this when the script
+# body changes so a stale volume is obvious in the container log.
+echo '[cofemine-ca] wrapper v${CA_IMPORT_SCRIPT_VERSION} starting'
 # NOTE: no \`set -e\` — failures here must not block /start.
 CA_FILE='${CA_MOUNT_PATH}/ca.crt'
 READY='${CA_MOUNT_PATH}/.ready'
