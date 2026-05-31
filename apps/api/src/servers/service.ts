@@ -247,7 +247,7 @@ export async function createServerRecord(input: CreateServerInput) {
       version: input.version ?? "LATEST",
       memoryMb: input.memoryMb,
       cpuLimit: input.cpuLimit ?? null,
-      ports: input.ports as unknown as object,
+      ports: mirrorUdpForMcPorts(input.ports) as unknown as object,
       env: env as unknown as object,
       eulaAccepted: input.eulaAccepted,
       templateId: input.templateId ?? null,
@@ -256,6 +256,45 @@ export async function createServerRecord(input: CreateServerInput) {
       cfPackFileId,
     },
   });
+}
+
+/**
+ * Auto-add a UDP mirror for every TCP port the user mapped onto MC's
+ * game port (default 25565). Simple Voice Chat — the most popular MC
+ * voice-comms mod — listens on UDP at the same port as the game by
+ * default. Without an explicit UDP PortBinding the docker bridge
+ * blocks the packets and clients show "UDP port not open" no matter
+ * how the operator sets up routing.
+ *
+ * Heuristic: only mirror ports that look like MC's game port (25565
+ * or the operator's `server.properties` override surfaced via the
+ * container side). Skip RCON (25575), query, anything below 1024.
+ * Idempotent: if an equivalent UDP entry already exists, leave the
+ * input untouched.
+ */
+function mirrorUdpForMcPorts(
+  ports: Array<{ host: number; container: number; protocol: "tcp" | "udp" }>
+): Array<{ host: number; container: number; protocol: "tcp" | "udp" }> {
+  const out = [...ports];
+  for (const p of ports) {
+    if (p.protocol !== "tcp") continue;
+    // RCON is TCP-only — never mirror it.
+    if (p.container === 25575) continue;
+    // Mirror every other TCP entry. Covers the default MC port (25565),
+    // operator-renumbered game ports, and any future SVC-style mod that
+    // expects UDP on the same number. Idempotent — skip when a matching
+    // UDP entry is already present (operator added one manually).
+    const exists = ports.some(
+      (q) =>
+        q.protocol === "udp" &&
+        q.container === p.container &&
+        q.host === p.host
+    );
+    if (!exists) {
+      out.push({ host: p.host, container: p.container, protocol: "udp" });
+    }
+  }
+  return out;
 }
 
 /**
@@ -300,14 +339,31 @@ export async function reconcileAndReprovision(
     );
   }
 
-  const changed =
+  // Also patch the ports column for old servers created before the
+  // UDP-mirror existed — Simple Voice Chat / similar UDP-on-game-port
+  // mods otherwise stay broken until the operator deletes and recreates
+  // the server. mirrorUdpForMcPorts is idempotent, so this is a no-op
+  // when the mirror is already there.
+  const currentPorts =
+    (server.ports as Array<{
+      host: number;
+      container: number;
+      protocol: "tcp" | "udp";
+    }>) ?? [];
+  const mirroredPorts = mirrorUdpForMcPorts(currentPorts);
+  const portsChanged = mirroredPorts.length !== currentPorts.length;
+  const envChanged =
     JSON.stringify(refreshedEnv) !== JSON.stringify(currentEnv);
-  if (changed) {
+  if (envChanged || portsChanged) {
     await prisma.server.update({
       where: { id: server.id },
-      data: { env: refreshedEnv as unknown as object },
+      data: {
+        ...(envChanged && { env: refreshedEnv as unknown as object }),
+        ...(portsChanged && { ports: mirroredPorts as unknown as object }),
+      },
     });
   }
+  const changed = envChanged || portsChanged;
 
   const client = await NodeClient.forId(server.nodeId);
   const containerName =
@@ -321,7 +377,7 @@ export async function reconcileAndReprovision(
     version: server.version,
     memoryMb: server.memoryMb,
     cpuLimit: server.cpuLimit,
-    ports: server.ports,
+    ports: mirroredPorts,
     env: materialized,
     eulaAccepted: server.eulaAccepted,
   };
