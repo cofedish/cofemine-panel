@@ -4,6 +4,7 @@ import type {
   MinecraftRuntimeProvider,
   ServerSpec,
 } from "./runtime-provider.js";
+import { CA_MOUNT_PATH, CA_VOLUME_NAME } from "../routes/maven-cache.js";
 
 const IMAGE = process.env.AGENT_MC_IMAGE ?? "itzg/minecraft-server:latest";
 
@@ -130,6 +131,14 @@ export class ItzgRuntimeProvider implements MinecraftRuntimeProvider {
       cacheDefaults.https_proxy = proxyUrl;
       cacheDefaults.NO_PROXY = noProxy;
       cacheDefaults.no_proxy = noProxy;
+
+      // Tell itzg to run our CA-import hook before mc-image-helper
+      // starts. The script lives on the shared CA volume mounted at
+      // /cofemine-ca (added to HostConfig.Binds below). It's a no-op
+      // when no CA is generated yet — squid then runs in pure splice
+      // mode and tunnels TLS without inspection, which still works
+      // for the operator, just without per-jar caching.
+      cacheDefaults.STARTUP_SCRIPT = `${CA_MOUNT_PATH}/import.sh`;
     }
 
     const envMap: Record<string, string> = {
@@ -181,8 +190,19 @@ export class ItzgRuntimeProvider implements MinecraftRuntimeProvider {
       Math.min(4096, Math.floor(spec.memoryMb * 0.25))
     );
     const containerMemoryMb = spec.memoryMb + headroomMb;
+    // Mount the maven-cache CA bundle read-only. The volume always
+    // exists by the time we get here — the API only injects the cache
+    // env block (above) on nodes that already have a maven-cache
+    // sidecar, and the agent recreates the volume on every
+    // /maven-cache/recreate. We bind unconditionally so an MC restart
+    // after the operator generates a CA picks it up without needing
+    // a re-create of the MC container itself.
+    const binds: string[] = [`${dataPath}:/data`];
+    if (config.AGENT_MAVEN_CACHE_HOST) {
+      binds.push(`${CA_VOLUME_NAME}:${CA_MOUNT_PATH}:ro`);
+    }
     const hostConfig: ContainerCreateOptions["HostConfig"] = {
-      Binds: [`${dataPath}:/data`],
+      Binds: binds,
       PortBindings: portBindings,
       RestartPolicy: { Name: "unless-stopped" },
       Memory: containerMemoryMb * 1024 * 1024,

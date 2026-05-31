@@ -38,6 +38,8 @@ services:
       - "host.docker.internal:host-gateway"
     volumes:
       - maven_cache_data:/var/cache/nginx/maven
+      - maven_cache_squid:/var/spool/squid
+      - cofemine_maven_cache_ca:/etc/cofemine/ca:ro
     networks: [cofemine_mcnet]
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1/healthz"]
@@ -186,6 +188,9 @@ services:
 volumes:
   db_data:
   maven_cache_data:
+  maven_cache_squid:
+  cofemine_maven_cache_ca:
+    name: cofemine_maven_cache_ca
   # mc_data / mc_backups are now bind-mounts to DATA_ROOT / BACKUP_ROOT,
   # not named volumes, so the agent and MC containers see the same host
   # paths. See the agent service definition.

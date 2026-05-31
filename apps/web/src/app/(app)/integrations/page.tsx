@@ -462,7 +462,113 @@ function DownloadProxyDetails(): JSX.Element {
         {t("proxy.helperNote")}
       </p>
 
+      <MavenCacheCa />
       <MavenCacheStatus />
+    </div>
+  );
+}
+
+type CaDisplay = {
+  exists: boolean;
+  fingerprint: string | null;
+  notAfter: string | null;
+};
+
+function MavenCacheCa(): JSX.Element {
+  const { t } = useT();
+  const { data, mutate: refresh } = useSWR<CaDisplay>(
+    "/integrations/maven-cache/ca",
+    fetcher
+  );
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+
+  async function generate(): Promise<void> {
+    setBusy(true);
+    setMsg(null);
+    try {
+      await api.post("/integrations/maven-cache/ca/generate", {});
+      setMsg(t("common.success"));
+      await refresh();
+    } catch (err) {
+      setMsg(err instanceof ApiError ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function clear(): Promise<void> {
+    if (!confirm(t("proxy.caClearConfirm"))) return;
+    setBusy(true);
+    setMsg(null);
+    try {
+      await api.del("/integrations/maven-cache/ca");
+      await refresh();
+    } catch (err) {
+      setMsg(err instanceof ApiError ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="space-y-3 rounded-lg border border-border/60 bg-surface-1/40 p-4">
+      <div>
+        <div className="text-sm font-medium">{t("proxy.caTitle")}</div>
+        <p className="text-xs text-ink-secondary leading-relaxed mt-1">
+          {t("proxy.caDesc")}
+        </p>
+      </div>
+      {data?.exists ? (
+        <>
+          <div className="text-xs font-mono break-all">
+            <div className="text-ink-muted">{t("proxy.caFingerprint")}</div>
+            <div className="text-ink-secondary">{data.fingerprint}</div>
+          </div>
+          {data.notAfter && (
+            <div className="text-xs">
+              <span className="text-ink-muted">{t("proxy.caValidUntil")}: </span>
+              <span className="text-ink-secondary font-mono">
+                {new Date(data.notAfter).toLocaleString()}
+              </span>
+            </div>
+          )}
+          <div className="flex flex-wrap gap-2">
+            <a
+              className="btn btn-secondary"
+              href="/api/integrations/maven-cache/ca/cert.pem"
+              download="cofemine-maven-cache-ca.pem"
+            >
+              {t("proxy.caDownload")}
+            </a>
+            <button
+              className="btn btn-ghost"
+              onClick={generate}
+              disabled={busy}
+            >
+              {busy ? t("integrations.saving") : t("proxy.caRegenerate")}
+            </button>
+            <button
+              className="btn btn-ghost text-rose-400"
+              onClick={clear}
+              disabled={busy}
+            >
+              {t("integrations.remove")}
+            </button>
+          </div>
+        </>
+      ) : (
+        <div>
+          <button
+            className="btn btn-primary"
+            onClick={generate}
+            disabled={busy}
+          >
+            {busy ? t("integrations.saving") : t("proxy.caGenerate")}
+          </button>
+        </div>
+      )}
+      {msg && <div className="text-xs text-ink-secondary">{msg}</div>}
     </div>
   );
 }

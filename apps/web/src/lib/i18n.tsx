@@ -692,6 +692,17 @@ const en: Dict = {
   "proxy.cacheRefresh": "Refresh",
   "proxy.cacheApplying": "Applying…",
 
+  "proxy.caTitle": "TLS-intercept CA for mod jar caching",
+  "proxy.caDesc":
+    "Squid inside maven-cache uses this CA to mint per-host leaf certs on the fly, vary-cache CurseForge / Modrinth / loader jar bodies on disk (40 GB). The cert is auto-imported into every MC container's JVM cacerts on next provision. Mojang auth + skins are NOT routed through here — they stay direct. Generate once.",
+  "proxy.caFingerprint": "SHA-256 fingerprint",
+  "proxy.caValidUntil": "Valid until",
+  "proxy.caGenerate": "Generate CA",
+  "proxy.caRegenerate": "Regenerate",
+  "proxy.caDownload": "Download .pem",
+  "proxy.caClearConfirm":
+    "Remove the CA? Squid will fall back to splice-only (no jar caching) until you generate a new one.",
+
   "smtp.title": "Outgoing email (SMTP)",
   "smtp.tagline": "Used by password reset and future invites",
   "smtp.subtitle":
@@ -1452,6 +1463,17 @@ const ru: Dict = {
   "proxy.cacheReapply": "Применить заново",
   "proxy.cacheRefresh": "Обновить",
   "proxy.cacheApplying": "Применяю…",
+
+  "proxy.caTitle": "CA для перехвата TLS и кеширования jar'ов",
+  "proxy.caDesc":
+    "Squid внутри maven-cache использует этот CA, чтобы на лету подписывать leaf-сертификаты для CDN и кешировать тела jar'ов CurseForge / Modrinth / лоадеров на диск (40 ГБ). Сертификат автоматически импортируется в JVM cacerts каждого MC-контейнера при следующем provision. Mojang auth и скины НЕ идут через этот канал — они напрямую. Сгенерировать один раз.",
+  "proxy.caFingerprint": "Отпечаток SHA-256",
+  "proxy.caValidUntil": "Действителен до",
+  "proxy.caGenerate": "Сгенерировать CA",
+  "proxy.caRegenerate": "Перегенерировать",
+  "proxy.caDownload": "Скачать .pem",
+  "proxy.caClearConfirm":
+    "Удалить CA? Squid вернётся в splice-only режим (без кеша jar'ов) пока не сгенерируешь новый.",
 
   "smtp.title": "Исходящая почта (SMTP)",
   "smtp.tagline": "Используется для сброса пароля и приглашений",

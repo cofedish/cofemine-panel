@@ -1,0 +1,90 @@
+# squid 5/6 config for transparent caching MITM. Rendered at
+# container start by entrypoint.sh — env vars expanded with envsubst.
+#
+# Layers:
+#   - Listen :8081 as an HTTP forward proxy with ssl_bump.
+#   - For whitelisted CDN hosts → ssl_bump bump (decrypt + cache).
+#     Everything else → ssl_bump splice (pass through, no MITM, no
+#     cache). Mojang auth/skin domains aren't even routed here
+#     (NO_PROXY on the MC container), so we never see them — but
+#     the splice rule is the safety net if a future MC container
+#     forgets to set NO_PROXY.
+#   - Cache 40 GB on disk, 500 MB max object size (CF mod jars are
+#     typically <100 MB but some bundled modpack files cross that).
+#   - When UPSTREAM_PROXY is set, send everything through gost on
+#     127.0.0.1:8082 (HTTP forward), which gost chains via
+#     UPSTREAM_PROXY (xray on host). When unset, squid goes direct.
+
+visible_hostname maven-cache
+
+# Listening port: ssl_bump enabled, cert= points at the CA seeded
+# into the shared volume by the panel. generate-host-certificates=on
+# tells squid to mint a leaf for each MITM'd host on the fly.
+http_port 8081 ssl-bump \
+    cert=/etc/cofemine/ca/ca.crt \
+    key=/etc/cofemine/ca/ca.key \
+    generate-host-certificates=on \
+    dynamic_cert_mem_cache_size=8MB \
+    tls-dh=prime256v1:/etc/ssl/dhparam.pem
+
+# Dynamic certificate generator — squid's helper that signs leaf
+# certs at request time. The on-disk db caches them so we don't
+# regenerate the same google.com leaf 1000 times.
+sslcrtd_program /usr/lib/squid/security_file_certgen -s /var/spool/squid/ssl_db -M 8MB
+sslcrtd_children 5
+
+# Trust the CA chain coming in from the upstream (chain through gost
+# → xray → CDN). We MUST validate the real CDN's cert, otherwise we
+# happily MITM a man-in-the-middle. Default CA bundle is fine.
+tls_outgoing_options cafile=/etc/ssl/certs/ca-certificates.crt
+
+# Domains we WANT to MITM (so we can cache jar bodies). Everything
+# else is spliced. Pattern is dstdomain because ssl_bump uses SNI.
+acl mitm_domains ssl::server_name .forgecdn.net
+acl mitm_domains ssl::server_name .curseforge.com
+acl mitm_domains ssl::server_name .modrinth.com
+acl mitm_domains ssl::server_name .neoforged.net
+acl mitm_domains ssl::server_name .minecraftforge.net
+acl mitm_domains ssl::server_name .fabricmc.net
+acl mitm_domains ssl::server_name .quiltmc.org
+acl mitm_domains ssl::server_name .mojang.com
+acl mitm_domains ssl::server_name .minecraft.net
+
+# Peek at TLS ClientHello → decide bump vs splice per SNI.
+ssl_bump peek step1
+ssl_bump bump step2 mitm_domains
+ssl_bump splice step3 all
+ssl_bump splice all
+
+# Allow everything by default — the panel network (cofemine_mcnet)
+# is the only thing that can reach :8081 anyway.
+http_access allow all
+
+# On-disk cache: 40 GB across 16 L1 / 256 L2 dirs.
+cache_dir aufs /var/spool/squid 40000 16 256
+maximum_object_size 500 MB
+maximum_object_size_in_memory 4 MB
+cache_mem 256 MB
+coredump_dir /var/spool/squid
+
+# Aggressive cache for jar/zip/pack — they're immutable by URL once
+# published. Long TTL, refresh only on explicit no-cache.
+refresh_pattern -i \.(jar|zip|tar\.gz|tgz|pack)(\?|$)  10080 100% 525600 override-expire ignore-no-cache ignore-private
+refresh_pattern -i \.(json|xml|sha1|sha256|md5)(\?|$)    30  50%   1440
+refresh_pattern .                                         0  20%    4320
+
+# Disable the via header to reduce CDN edge fingerprinting.
+via off
+forwarded_for delete
+httpd_suppress_version_string on
+
+# Logging — minimal to keep the container compact. squid still
+# rotates them itself.
+access_log stdio:/dev/stdout squid
+cache_log stdio:/dev/stderr
+
+# Upstream chain. When UPSTREAM_PROXY is set, entrypoint.sh launches
+# gost as an HTTP forward proxy on 127.0.0.1:8082 and appends the
+# cache_peer + never_direct stanza below at render time. When
+# unset, this section is empty and squid goes direct.
+${SQUID_PEER_BLOCK}

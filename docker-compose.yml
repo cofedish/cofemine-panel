@@ -44,6 +44,14 @@ services:
       - "host.docker.internal:host-gateway"
     volumes:
       - maven_cache_data:/var/cache/nginx/maven
+      # squid's on-disk cache (40 GB jar bodies) + dynamic per-host
+      # leaf cert db. Persists across container restarts so a panel
+      # restart doesn't blow away cached content.
+      - maven_cache_squid:/var/spool/squid
+      # Read-only CA bundle seeded by the agent (cofemine_maven_cache_ca
+      # is the same named volume mounted into every MC container, so
+      # squid + JVM trust the same root).
+      - cofemine_maven_cache_ca:/etc/cofemine/ca:ro
     networks:
       - cofemine_mcnet
     healthcheck:
@@ -190,6 +198,14 @@ services:
 volumes:
   db_data:
   maven_cache_data:
+  maven_cache_squid:
+  # CA bundle (ca.crt, ca.key, .ready, import.sh) seeded by the agent.
+  # The `name:` override pins the on-disk volume name to a stable
+  # identifier so MC containers — which mount it by name, not via
+  # compose service reference — find it regardless of which compose
+  # project owns this stack.
+  cofemine_maven_cache_ca:
+    name: cofemine_maven_cache_ca
   # Server data lives on bind-mounted host paths (DATA_ROOT, BACKUP_ROOT)
   # rather than named volumes, so the agent and MC containers see the
   # same filesystem. See the agent service for the bind spec.

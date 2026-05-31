@@ -23,6 +23,13 @@ import {
   writeDownloadProxy,
 } from "./download-proxy.js";
 import {
+  clearMavenCa,
+  generateMavenCa,
+  readMavenCa,
+  readMavenCaCertPem,
+  readMavenCaForDisplay,
+} from "./maven-ca.js";
+import {
   clearSmtp,
   readSmtpForDisplay,
   sendMail,
@@ -73,12 +80,21 @@ async function applyDownloadProxyToMavenCaches(
         : "";
     upstreamProxy = `${scheme}://${auth}${host}:${proxy.port}`;
   }
+  // CA material is sent on every apply so squid + every MC container
+  // trust the same root. The agent treats missing CA as "MITM off,
+  // run squid in pure CONNECT-passthrough mode" — fine for an
+  // operator who hasn't generated one yet.
+  const ca = await readMavenCa();
   const nodes = await prisma.node.findMany();
   const results: Array<{ node: string; ok: boolean; error?: string }> = [];
   for (const n of nodes) {
     try {
       const client = await NodeClient.forId(n.id);
-      await client.call("POST", "/maven-cache/recreate", { upstreamProxy });
+      await client.call("POST", "/maven-cache/recreate", {
+        upstreamProxy,
+        caCertPem: ca?.certPem ?? null,
+        caKeyPem: ca?.keyPem ?? null,
+      });
       log.info({ node: n.name, upstreamProxy: upstreamProxy || "(direct)" },
         "maven-cache upstream applied");
       results.push({ node: n.name, ok: true });
@@ -369,6 +385,68 @@ export async function integrationsRoutes(app: FastifyInstance): Promise<void> {
       return { ok: true, results };
     }
   );
+
+  // CA for the MITM-caching squid inside maven-cache. The cert is
+  // distributed to every MC container (and to squid itself) on every
+  // /maven-cache/apply, so jars cached on disk can be served decrypted.
+  app.get("/maven-cache/ca", async () => {
+    return readMavenCaForDisplay();
+  });
+
+  app.post(
+    "/maven-cache/ca/generate",
+    { preHandler: requireGlobalPermission("integration.manage") },
+    async (req) => {
+      const result = await generateMavenCa();
+      await writeAudit(req, {
+        action: "integration.maven-cache.ca.generate",
+        resource: "maven-cache.ca",
+        metadata: { fingerprint: result.fingerprint },
+      });
+      // Push the new CA to every node so any already-running MC
+      // container that gets recreated picks it up next time. Existing
+      // running containers still trust the old CA until restart —
+      // that's fine, we don't tear them down mid-game.
+      await applyDownloadProxyToMavenCaches(req.log).catch((err) =>
+        req.log.warn({ err }, "maven-cache apply after CA generate failed")
+      );
+      return result;
+    }
+  );
+
+  app.delete(
+    "/maven-cache/ca",
+    { preHandler: requireGlobalPermission("integration.manage") },
+    async (req) => {
+      await clearMavenCa();
+      await writeAudit(req, {
+        action: "integration.maven-cache.ca.clear",
+        resource: "maven-cache.ca",
+      });
+      await applyDownloadProxyToMavenCaches(req.log).catch((err) =>
+        req.log.warn({ err }, "maven-cache apply after CA clear failed")
+      );
+      return { ok: true };
+    }
+  );
+
+  // Public cert download — the operator can install this in their own
+  // browser / OS truststore if they want to inspect squid traffic
+  // manually, but the panel auto-imports it into every MC container.
+  app.get("/maven-cache/ca/cert.pem", async (_req, reply) => {
+    const pem = await readMavenCaCertPem();
+    if (!pem) {
+      reply.code(404);
+      return { error: "CA not generated yet" };
+    }
+    reply
+      .header("content-type", "application/x-pem-file")
+      .header(
+        "content-disposition",
+        'attachment; filename="cofemine-maven-cache-ca.pem"'
+      );
+    return pem;
+  });
 
   // SMTP — outgoing email server used by the password-reset flow and
   // future invite/notification flows. Stored encrypted; password is
