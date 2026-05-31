@@ -160,6 +160,20 @@ export async function createServerRecord(input: CreateServerInput) {
   }
   const env = await mergeModpackEnv(input);
 
+  // Auto-opt new servers into install-time proxying when the global
+  // download-proxy is configured AND the user didn't already pin a
+  // value. Reasoning: the proxy is set up panel-wide because the
+  // operator's egress can't reach maven.neoforged.net / forgecdn /
+  // Modrinth directly. Forcing a manual `__COFEMINE_INSTALL_PROXY=1`
+  // toggle per server was always a footgun — every new pack server
+  // would fail on first start until the operator remembered to add
+  // it. Default ON if proxy is configured; the operator can still
+  // disable on a per-server basis by setting the flag to "0".
+  if (env[INSTALL_PROXY_ENV_FLAG] === undefined) {
+    const proxy = await readDownloadProxy().catch(() => null);
+    if (proxy) env[INSTALL_PROXY_ENV_FLAG] = "1";
+  }
+
   // For CurseForge servers — resolve the slug to a numeric projectId
   // and persist it (with the file id) on the row. Done here once at
   // create-time so the .mrpack export can rebuild from the canonical
