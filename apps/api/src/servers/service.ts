@@ -24,6 +24,20 @@ async function materializeEnv(
   const useProxy = out[INSTALL_PROXY_ENV_FLAG] === "1";
   // Always strip our sentinel so it never reaches the container.
   delete out[INSTALL_PROXY_ENV_FLAG];
+
+  // Force IPv4 resolution UNIVERSALLY (not just when proxy is on).
+  // The cofemine_mcnet docker network is IPv4-only — when a hostname's
+  // DNS answer only contains AAAA records (e.g. maven.neoforged.net
+  // through CDN77, which we hit constantly during NeoForge install),
+  // Java's JDK resolver picks the IPv6 address, opens a TCP connect
+  // that has nowhere to route, and hangs for ~30s before TLS times
+  // out. `preferIPv4Stack=true` makes the JVM never even attempt
+  // IPv6, dodging the issue regardless of proxy state.
+  const ipv4Opt = "-Djava.net.preferIPv4Stack=true";
+  out.JAVA_TOOL_OPTIONS = out.JAVA_TOOL_OPTIONS
+    ? `${out.JAVA_TOOL_OPTIONS} ${ipv4Opt}`
+    : ipv4Opt;
+
   if (!useProxy) return out;
   const proxy = await readDownloadProxy();
   if (!proxy) return out;
