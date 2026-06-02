@@ -40,7 +40,10 @@ services:
       - maven_cache_data:/var/cache/nginx/maven
       - maven_cache_squid:/var/spool/squid
       - cofemine_maven_cache_ca:/etc/cofemine/ca:ro
-    networks: [cofemine_mcnet]
+    # caddy_net so the user's external Caddy can reverse-proxy the
+    # public /mirror/* paths into nginx:80 here. cofemine_mcnet keeps
+    # MC containers reaching the cache as http://maven-cache:8081.
+    networks: [cofemine_mcnet, caddy_net]
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1/healthz"]
       interval: 30s

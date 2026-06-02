@@ -3,7 +3,7 @@
 # is dash which crashes with "Illegal option -n", silently exiting
 # the entrypoint and putting the container into a restart loop.
 # Boot order:
-#   1. gost (TCP relays 8001..8012 for nginx; HTTP forward :8082 for
+#   1. gost (TCP relays 8001..8013 for nginx; HTTP forward :8082 for
 #      squid cache_peer when UPSTREAM_PROXY is set).
 #   2. Render squid.conf from template, conditionally including a
 #      cache_peer parent block.
@@ -23,6 +23,7 @@
 #   8004 meta.fabricmc.net        8010 libraries.minecraft.net
 #   8005 maven.fabricmc.net       8011 edge.forgecdn.net
 #   8006 meta.quiltmc.org         8012 cdn.modrinth.com
+#   8013 resources.download.minecraft.net (vanilla assets — client launcher use)
 
 set -eu
 
@@ -70,6 +71,7 @@ gost \
   -L="tcp://127.0.0.1:8010/libraries.minecraft.net:443" \
   -L="tcp://127.0.0.1:8011/edge.forgecdn.net:443" \
   -L="tcp://127.0.0.1:8012/cdn.modrinth.com:443" \
+  -L="tcp://127.0.0.1:8013/resources.download.minecraft.net:443" \
   -L="http://127.0.0.1:8082" \
   ${FORWARD_FLAG} &
 GOST_PID=$!
