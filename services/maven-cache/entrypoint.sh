@@ -24,6 +24,7 @@
 #   8005 maven.fabricmc.net       8011 edge.forgecdn.net
 #   8006 meta.quiltmc.org         8012 cdn.modrinth.com
 #   8013 resources.download.minecraft.net (vanilla assets — client launcher use)
+#   8014 bmclapi2.bangbang93.com              (API-mimic catch-all for loader list endpoints)
 
 set -eu
 
@@ -72,6 +73,7 @@ gost \
   -L="tcp://127.0.0.1:8011/edge.forgecdn.net:443" \
   -L="tcp://127.0.0.1:8012/cdn.modrinth.com:443" \
   -L="tcp://127.0.0.1:8013/resources.download.minecraft.net:443" \
+  -L="tcp://127.0.0.1:8014/bmclapi2.bangbang93.com:443" \
   -L="http://127.0.0.1:8082" \
   ${FORWARD_FLAG} &
 GOST_PID=$!
