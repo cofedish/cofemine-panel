@@ -40,7 +40,16 @@ const restoreFromSchema = z.object({
 
 const writeFileSchema = z.object({
   path: z.string().min(1),
-  content: z.string(),
+  // Text path (utf-8). Used by the inline editor.
+  content: z.string().optional(),
+  // Binary path (base64 chunks). Used by the Upload button.
+  // contentBase64 + chunkIndex + totalChunks: same protocol as
+  // /client-mods upload — client splits the file into ≤8 MB pieces,
+  // POSTs each sequentially, agent appends until last chunk lands
+  // then promotes the .part file.
+  contentBase64: z.string().optional(),
+  chunkIndex: z.coerce.number().int().min(0).default(0),
+  totalChunks: z.coerce.number().int().min(1).default(1),
 });
 
 type HealthState = "healthy" | "unhealthy" | "starting" | null;
@@ -1361,14 +1370,41 @@ export async function serversAgentRoutes(app: FastifyInstance): Promise<void> {
     return { kind: "file", path: rel, size: stat.size, content };
   });
 
-  app.put("/servers/:id/files", async (req) => {
+  app.put("/servers/:id/files", async (req, reply) => {
     const { id } = req.params as { id: string };
     const body = writeFileSchema.parse(req.body);
     const base = dataDirFor(id);
     const abs = safeResolve(base, body.path);
     await ensureDir(path.dirname(abs));
-    await fs.writeFile(abs, body.content, "utf8");
-    return { ok: true };
+    // Text path — single shot. Used by the editor save button.
+    if (typeof body.content === "string") {
+      await fs.writeFile(abs, body.content, "utf8");
+      return { ok: true };
+    }
+    // Binary chunked path. Append base64-decoded bytes to <name>.part
+    // and rename → <name> when the last chunk lands. Per-chunk limit
+    // matches the JSON body limit configured on Fastify init.
+    if (typeof body.contentBase64 !== "string") {
+      reply.code(400);
+      return { error: "content or contentBase64 required" };
+    }
+    if (body.chunkIndex >= body.totalChunks) {
+      reply.code(400);
+      return {
+        error: `chunkIndex ${body.chunkIndex} >= totalChunks ${body.totalChunks}`,
+      };
+    }
+    const part = `${abs}.part`;
+    const buf = Buffer.from(body.contentBase64, "base64");
+    if (body.chunkIndex === 0) {
+      await fs.writeFile(part, buf);
+    } else {
+      await fs.appendFile(part, buf);
+    }
+    if (body.chunkIndex === body.totalChunks - 1) {
+      await fs.rename(part, abs);
+    }
+    return { ok: true, chunk: body.chunkIndex, of: body.totalChunks };
   });
 
   app.delete("/servers/:id/files", async (req) => {

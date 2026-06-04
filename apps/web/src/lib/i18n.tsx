@@ -765,6 +765,13 @@ const en: Dict = {
   "files.truncated":
     "File is too large to preview in the browser. Use SSH or the agent API to edit.",
   "files.back": "Back",
+  "files.upload": "Upload",
+  "files.create.button": "New file",
+  "files.create.title": "New file",
+  "files.create.body":
+    "Name for the new file in this folder. It will open in the editor empty.",
+  "files.create.invalidName":
+    "Name can't contain '/' or '\\\\'. Just the file name, please.",
 
   "console.title": "Console",
   "console.connected": "connected",
@@ -1536,6 +1543,13 @@ const ru: Dict = {
   "files.truncated":
     "Файл слишком большой, чтобы показать в браузере. Используйте SSH или API агента.",
   "files.back": "Назад",
+  "files.upload": "Загрузить",
+  "files.create.button": "Новый файл",
+  "files.create.title": "Новый файл",
+  "files.create.body":
+    "Имя нового файла в этой папке. Откроется пустым в редакторе.",
+  "files.create.invalidName":
+    "В имени не должно быть '/' или '\\\\'. Только само имя файла.",
 
   "console.title": "Консоль",
   "console.connected": "подключено",
