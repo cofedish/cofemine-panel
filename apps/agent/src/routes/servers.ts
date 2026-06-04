@@ -3802,14 +3802,94 @@ async function exportMrpackFromCfPack(
   archive.pipe(reply.raw);
 
   // 8. Inline pack zip's overrides/ into our overrides/
+  //
+  // Track every path we've already added — both for stats and so the
+  // server-side dump in step 8b can skip duplicates instead of
+  // emitting two entries for the same path (some extractors take the
+  // first, some the last, behaviour is platform-dependent).
   const packEntries = packZip.getEntries();
   let inlinedFromPack = 0;
+  const inlinedPaths = new Set<string>();
   for (const e of packEntries) {
     if (e.isDirectory) continue;
     if (!e.entryName.startsWith("overrides/")) continue;
     archive.append(e.getData(), { name: e.entryName });
+    inlinedPaths.add(e.entryName);
     inlinedFromPack++;
   }
+
+  // 8b. Inline server-side modifications on top of the canonical pack
+  // overrides. Without this, anything the operator edits AFTER install
+  // (added FTB Quests translations like config/ftbquests/quests/lang/
+  // ru_ru.snbt, custom kubejs scripts, shaderpack drop-ins) silently
+  // never makes it into the client pack — the rebuild only sees the
+  // original CF zip and the mod jars. dedup against inlinedPaths so
+  // an unchanged file doesn't get written twice.
+  let inlinedFromServer = 0;
+  async function inlineServerDir(sub: string): Promise<void> {
+    const src = path.join(base, sub);
+    let stat;
+    try {
+      stat = await fs.stat(src);
+    } catch {
+      return;
+    }
+    if (!stat.isDirectory()) return;
+    async function walk(dirAbs: string, relUnder: string): Promise<void> {
+      const ents = await fs.readdir(dirAbs, { withFileTypes: true });
+      for (const ent of ents) {
+        const childAbs = path.join(dirAbs, ent.name);
+        const childRel = relUnder ? `${relUnder}/${ent.name}` : ent.name;
+        if (ent.isDirectory()) {
+          await walk(childAbs, childRel);
+          continue;
+        }
+        if (!ent.isFile()) continue;
+        const archiveName = `overrides/${sub}/${childRel}`;
+        if (inlinedPaths.has(archiveName)) continue; // already from CF zip
+        archive.file(childAbs, { name: archiveName });
+        inlinedPaths.add(archiveName);
+        inlinedFromServer++;
+      }
+    }
+    await walk(src, "");
+  }
+  for (const sub of [
+    "config",
+    "kubejs",
+    "defaultconfigs",
+    "scripts",
+    "openloader",
+  ]) {
+    await inlineServerDir(sub);
+  }
+  // Shaderpacks / resourcepacks: same logic but pull both server-side
+  // and client-staging copies (operator's manual drops under
+  // .cofemine-client/ live separately from CF-pack-shipped ones).
+  for (const sub of ["shaderpacks", "resourcepacks"]) {
+    await inlineServerDir(sub);
+    const clientSrc = path.join(base, ".cofemine-client", sub);
+    let stat;
+    try {
+      stat = await fs.stat(clientSrc);
+    } catch {
+      continue;
+    }
+    if (!stat.isDirectory()) continue;
+    const ents = await fs.readdir(clientSrc, { withFileTypes: true });
+    for (const ent of ents) {
+      if (!ent.isFile()) continue;
+      const archiveName = `overrides/${sub}/${ent.name}`;
+      if (inlinedPaths.has(archiveName)) continue;
+      archive.file(path.join(clientSrc, ent.name), { name: archiveName });
+      inlinedPaths.add(archiveName);
+      inlinedFromServer++;
+    }
+  }
+  req.log.info(
+    { inlinedFromPack, inlinedFromServer },
+    "mrpack export (CF rebuild): overrides layered"
+  );
 
   // Per-server exclusion list — filenames the owner explicitly wants
   // dropped from the client pack (for conflicts: e.g., sodium-dynamic
