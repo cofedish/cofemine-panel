@@ -779,6 +779,7 @@ const en: Dict = {
   "console.waiting": "Waiting for output…",
   "console.send": "Send",
   "console.placeholder": "say Hello, world",
+  "console.hint": "Tab — autocomplete · ↑/↓ — history",
 
   "activity.title": "Activity log",
   "activity.empty": "No events yet.",
@@ -1557,6 +1558,7 @@ const ru: Dict = {
   "console.waiting": "Жду вывод…",
   "console.send": "Отправить",
   "console.placeholder": "say Hello, world",
+  "console.hint": "Tab — автодополнение · ↑/↓ — история",
 
   "activity.title": "Лог действий",
   "activity.empty": "Событий пока нет.",
