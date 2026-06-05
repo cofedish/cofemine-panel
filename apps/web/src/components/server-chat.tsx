@@ -401,7 +401,7 @@ export function ServerChat({
                   alt=""
                   width={24}
                   height={24}
-                  className="w-6 h-6 rounded shrink-0"
+                  className="w-6 h-6 shrink-0 [image-rendering:pixelated]"
                   loading="lazy"
                 />
                 <span className="font-mono text-xs truncate">{p}</span>
@@ -445,7 +445,7 @@ function ChatRow({ m }: { m: ChatMsg }): JSX.Element {
         alt=""
         width={20}
         height={20}
-        className="w-5 h-5 rounded shrink-0 mt-0.5"
+        className="w-5 h-5 shrink-0 mt-0.5 [image-rendering:pixelated]"
         loading="lazy"
       />
       <div className="flex-1 min-w-0">

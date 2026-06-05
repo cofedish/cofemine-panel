@@ -465,7 +465,7 @@ export function ServerConsole({
                           alt=""
                           width={18}
                           height={18}
-                          className="w-[18px] h-[18px] rounded shrink-0"
+                          className="w-[18px] h-[18px] shrink-0 [image-rendering:pixelated]"
                           loading="lazy"
                         />
                       )}

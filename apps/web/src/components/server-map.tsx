@@ -402,7 +402,7 @@ function MapView({
                   alt=""
                   width={28}
                   height={28}
-                  className="rounded-md shrink-0"
+                  className="shrink-0"
                   style={{ imageRendering: "pixelated" }}
                 />
                 <div className="flex-1 min-w-0">
@@ -709,7 +709,7 @@ function BlueMapView({
                   alt=""
                   width={28}
                   height={28}
-                  className="rounded-md shrink-0"
+                  className="shrink-0"
                   style={{ imageRendering: "pixelated" }}
                 />
                 <div className="flex-1 min-w-0">

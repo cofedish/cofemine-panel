@@ -532,7 +532,7 @@ function Overview({
                       alt=""
                       width={28}
                       height={28}
-                      className="w-7 h-7 rounded shrink-0"
+                      className="w-7 h-7 shrink-0 [image-rendering:pixelated]"
                       loading="lazy"
                     />
                     <span className="font-mono text-xs truncate">{p}</span>
