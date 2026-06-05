@@ -2768,19 +2768,33 @@ function parseListOutput(raw: string): {
   max: number;
   players: string[];
 } {
+  // rcon-cli sometimes returns the server's coloured stdout straight
+  // through with ANSI escapes intact (e.g. on Paper / Forge with the
+  // log appender that wraps INFO in colour). Without stripping those,
+  // a "0 players online" line tails with "\x1b[m" which trim() doesn't
+  // drop (\x1b isn't whitespace), and that bytes-as-name shows up in
+  // the panel as a fake online player.
+  const cleaned = raw.replace(/\x1b\[[0-9;]*m/g, "");
   // Typical vanilla output: "There are 2 of a max of 20 players online: Alice, Bob"
-  const m = raw.match(
+  const m = cleaned.match(
     /There are (\d+) ?(?:of a max of|\/) ?(\d+) players online:?\s*(.*)/i
   );
   if (!m) return { online: 0, max: 0, players: [] };
   const onlineStr = m[1] ?? "0";
   const maxStr = m[2] ?? "0";
   const rest = (m[3] ?? "").trim();
+  // Belt-and-braces: only count entries that look like a real MC
+  // username. Anything containing weird bytes or longer than 16 chars
+  // is almost certainly noise from a broken parse.
+  const NAME_RE = /^[A-Za-z0-9_]{2,16}$/;
   return {
     online: Number(onlineStr),
     max: Number(maxStr),
     players: rest
-      ? rest.split(",").map((s) => s.trim()).filter(Boolean)
+      ? rest
+          .split(",")
+          .map((s) => s.trim())
+          .filter((s) => NAME_RE.test(s))
       : [],
   };
 }
