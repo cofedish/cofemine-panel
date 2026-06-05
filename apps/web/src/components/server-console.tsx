@@ -41,6 +41,151 @@ function historyKey(serverId: string): string {
 const HISTORY_MAX = 100;
 
 /**
+ * Per-command argument grammar. Position 0 = command name itself
+ * (already handled by KNOWN_COMMANDS), position 1 = first arg, etc.
+ *
+ * Each cell is either a fixed list of literals or a placeholder
+ * symbol resolved at runtime against the live player list. Args
+ * beyond the last entry get no suggestions (operator typed past
+ * what we know about, falls through).
+ *
+ * Kept small on purpose — covers the common ones an operator
+ * actually wants to autocomplete, not every Brigadier branch.
+ */
+type ArgSpec = readonly string[] | "$players";
+const COMMAND_ARGS: Record<string, readonly ArgSpec[]> = {
+  gamemode: [["survival", "creative", "adventure", "spectator"], "$players"],
+  difficulty: [["peaceful", "easy", "normal", "hard"]],
+  weather: [["clear", "rain", "thunder"]],
+  time: [["set", "add", "query"], ["day", "night", "noon", "midnight"]],
+  gamerule: [
+    [
+      "doDaylightCycle",
+      "doWeatherCycle",
+      "keepInventory",
+      "doMobSpawning",
+      "doMobLoot",
+      "mobGriefing",
+      "doFireTick",
+      "doTileDrops",
+      "showDeathMessages",
+      "naturalRegeneration",
+      "randomTickSpeed",
+      "spawnRadius",
+      "announceAdvancements",
+      "commandBlockOutput",
+      "logAdminCommands",
+      "reducedDebugInfo",
+      "sendCommandFeedback",
+      "spectatorsGenerateChunks",
+      "fallDamage",
+      "fireDamage",
+      "drowningDamage",
+      "doInsomnia",
+      "doImmediateRespawn",
+      "doPatrolSpawning",
+      "doTraderSpawning",
+      "maxEntityCramming",
+      "playersSleepingPercentage",
+    ],
+    ["true", "false"],
+  ],
+  op: ["$players"],
+  deop: ["$players"],
+  kick: ["$players"],
+  ban: ["$players"],
+  pardon: ["$players"],
+  tp: ["$players", "$players"],
+  teleport: ["$players", "$players"],
+  tell: ["$players"],
+  msg: ["$players"],
+  whisper: ["$players"],
+  give: ["$players"],
+  kill: ["$players"],
+  clear: ["$players"],
+  spectate: ["$players"],
+  enchant: ["$players"],
+  effect: [["give", "clear"], "$players"],
+  experience: [["add", "set", "query"], "$players"],
+  xp: [["add", "set", "query"], "$players"],
+  advancement: [["grant", "revoke"], "$players"],
+  defaultgamemode: [["survival", "creative", "adventure", "spectator"]],
+  spawnpoint: ["$players"],
+  whitelist: [
+    ["add", "remove", "list", "on", "off", "reload"],
+    "$players",
+  ],
+  // FTB & Bluemap subcommands
+  ftbquests: [["reload", "import", "export", "edit", "change_progress"]],
+  ftbteams: [["msg", "info", "list", "settings"]],
+  bluemap: [
+    [
+      "render",
+      "purge",
+      "freeze",
+      "unfreeze",
+      "stop",
+      "start",
+      "reload",
+      "version",
+      "worlds",
+    ],
+  ],
+  voicechat: [["test", "reset"]],
+};
+
+/**
+ * Resolve an ArgSpec into a concrete suggestion list. `$players` is
+ * expanded against the live player list passed into the component.
+ */
+function resolveArgs(spec: ArgSpec, onlinePlayers: string[]): string[] {
+  if (spec === "$players") return onlinePlayers;
+  return [...spec];
+}
+
+/**
+ * Decide what to autocomplete for the current input. Returns either
+ * the command-name suggestion list (when typing the first token) or
+ * an argument list (when past the first space). Tracks which token
+ * the cursor is on by counting spaces.
+ */
+function computeSuggestions(
+  raw: string,
+  onlinePlayers: string[]
+): { mode: "command" | "arg"; current: string; options: string[] } {
+  const leading = raw.startsWith("/");
+  const text = leading ? raw.slice(1) : raw;
+  const tokens = text.split(/ +/);
+  const tokenIdx = tokens.length - 1;
+  const current = tokens[tokenIdx] ?? "";
+
+  if (tokenIdx === 0) {
+    const lower = current.toLowerCase();
+    if (!lower) return { mode: "command", current, options: [] };
+    const hits = KNOWN_COMMANDS.filter((c) => c.startsWith(lower)).slice(0, 8);
+    if (hits.length === 1 && hits[0] === lower) {
+      return { mode: "command", current, options: [] };
+    }
+    return { mode: "command", current, options: hits };
+  }
+
+  const cmd = tokens[0]!.toLowerCase();
+  const spec = COMMAND_ARGS[cmd];
+  if (!spec) return { mode: "arg", current, options: [] };
+  const argSpec = spec[tokenIdx - 1];
+  if (!argSpec) return { mode: "arg", current, options: [] };
+  const all = resolveArgs(argSpec, onlinePlayers);
+  const lower = current.toLowerCase();
+  const filtered = all
+    .filter((s) => s.toLowerCase().startsWith(lower))
+    .slice(0, 10);
+  if (filtered.length === 1 && filtered[0]!.toLowerCase() === lower) {
+    return { mode: "arg", current, options: [] };
+  }
+  return { mode: "arg", current, options: filtered };
+}
+
+/**
  * Live console. Opens a WebSocket to the panel-api, which proxies to the
  * agent. Supports both log streaming and sending commands.
  *
@@ -49,7 +194,13 @@ const HISTORY_MAX = 100;
  * old buffer — otherwise yesterday's crash would still be sitting on
  * screen above a freshly booted "Starting server…" which is confusing.
  */
-export function ServerConsole({ serverId }: { serverId: string }): JSX.Element {
+export function ServerConsole({
+  serverId,
+  onlinePlayers = [],
+}: {
+  serverId: string;
+  onlinePlayers?: string[];
+}): JSX.Element {
   const { t } = useT();
   const [lines, setLines] = useState<string[]>([]);
   const [cmd, setCmd] = useState("");
@@ -83,21 +234,15 @@ export function ServerConsole({ serverId }: { serverId: string }): JSX.Element {
     }
   }, [serverId]);
 
-  // Suggestions: filter KNOWN_COMMANDS by the typed prefix, but only
-  // when the user is typing the FIRST token. Subsequent args don't
-  // get suggestions yet — that'd need per-command arg specs.
-  const suggestions = useMemo<string[]>(() => {
-    const trimmed = cmd.trimStart();
-    if (!trimmed) return [];
-    if (trimmed.includes(" ")) return [];
-    const head = trimmed.startsWith("/") ? trimmed.slice(1) : trimmed;
-    if (!head) return [];
-    const lower = head.toLowerCase();
-    // Exact match → nothing to suggest. Prefix match → top 6.
-    const hits = KNOWN_COMMANDS.filter((c) => c.startsWith(lower));
-    if (hits.length === 1 && hits[0] === lower) return [];
-    return hits.slice(0, 6);
-  }, [cmd]);
+  // Suggestion engine — knows about both command names (first token)
+  // and per-command arg grammars (subsequent tokens, including the
+  // dynamic `$players` list).
+  const suggestionState = useMemo(
+    () => computeSuggestions(cmd, onlinePlayers),
+    [cmd, onlinePlayers]
+  );
+  const suggestions = suggestionState.options;
+  const suggestionMode = suggestionState.mode;
 
   // Keep the suggest highlight in range when the list shrinks.
   useEffect(() => {
@@ -182,14 +327,22 @@ export function ServerConsole({ serverId }: { serverId: string }): JSX.Element {
   }
 
   /**
-   * Replace the first token (the command) with `name`, preserving any
-   * args the operator already typed (rare, since suggestions only show
-   * with no space yet — but defensive). Slash prefix is kept if the
-   * operator typed one.
+   * Replace whichever token the cursor is on with `name`, preserving
+   * the rest. For command-name mode (first token), also kills the rest
+   * of the line — args almost certainly need re-thinking after picking
+   * a different command. For arg mode, replaces the current word and
+   * trails a space so the operator can keep typing the next arg.
    */
   function applyCompletion(name: string): void {
     const leading = cmd.startsWith("/") ? "/" : "";
-    setCmd(`${leading}${name} `);
+    const text = leading ? cmd.slice(1) : cmd;
+    const tokens = text.split(/ +/);
+    if (suggestionMode === "command") {
+      setCmd(`${leading}${name} `);
+    } else {
+      tokens[tokens.length - 1] = name;
+      setCmd(`${leading}${tokens.join(" ")} `);
+    }
     setSuggestIdx(0);
     inputRef.current?.focus();
   }
@@ -236,10 +389,11 @@ export function ServerConsole({ serverId }: { serverId: string }): JSX.Element {
       return;
     }
     if (e.key === "Enter") {
-      // If a suggestion is highlighted AND the user hasn't typed a
-      // space yet, Enter completes the suggestion instead of sending —
-      // matches what every shell does.
-      if (suggestions.length > 0 && !cmd.trim().includes(" ")) {
+      // Enter in command-name mode completes; in arg mode it sends.
+      // (Arg mode typically means the operator picked a player from
+      // the popup with arrows and pressed Enter — they want to fire
+      // the command, not break out of the picker.)
+      if (suggestions.length > 0 && suggestionMode === "command") {
         e.preventDefault();
         applyCompletion(suggestions[suggestIdx] ?? suggestions[0]!);
         return;
@@ -287,7 +441,7 @@ export function ServerConsole({ serverId }: { serverId: string }): JSX.Element {
                   <button
                     type="button"
                     className={
-                      "w-full text-left px-3 py-1.5 hover:bg-surface-2 " +
+                      "w-full text-left px-3 py-1.5 hover:bg-surface-2 flex items-center gap-2 " +
                       (i === suggestIdx
                         ? "bg-[rgb(var(--accent-soft))] text-[rgb(var(--accent))]"
                         : "")
@@ -299,7 +453,23 @@ export function ServerConsole({ serverId }: { serverId: string }): JSX.Element {
                       applyCompletion(s);
                     }}
                   >
-                    /{s}
+                    {/* For player-arg suggestions, render the head
+                        next to the name — instant visual confirmation
+                        the operator is about to /kick the right one. */}
+                    {suggestionMode === "arg" &&
+                      onlinePlayers.includes(s) && (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img
+                          src={`https://mc-heads.net/avatar/${encodeURIComponent(s)}/24`}
+                          srcSet={`https://mc-heads.net/avatar/${encodeURIComponent(s)}/48 2x`}
+                          alt=""
+                          width={18}
+                          height={18}
+                          className="w-[18px] h-[18px] rounded shrink-0"
+                          loading="lazy"
+                        />
+                      )}
+                    <span>{suggestionMode === "command" ? `/${s}` : s}</span>
                   </button>
                 </li>
               ))}

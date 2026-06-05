@@ -5,6 +5,7 @@ import useSWR, { mutate } from "swr";
 import { motion } from "framer-motion";
 import { api, ApiError, fetcher } from "@/lib/api";
 import { ServerConsole } from "@/components/server-console";
+import { ServerChat } from "@/components/server-chat";
 import { ServerFiles } from "@/components/server-files";
 import { ServerBackups } from "@/components/server-backups";
 import { ServerProperties } from "@/components/server-properties";
@@ -64,6 +65,7 @@ type Player = { online: number; max: number; players: string[] };
 const TABS = [
   { key: "overview", i18n: "server.tabs.overview" },
   { key: "console", i18n: "server.tabs.console" },
+  { key: "chat", i18n: "server.tabs.chat" },
   { key: "files", i18n: "server.tabs.files" },
   { key: "properties", i18n: "server.tabs.properties" },
   { key: "env", i18n: "server.tabs.env" },
@@ -399,7 +401,18 @@ export default function ServerDetailPage(): JSX.Element {
         {tab === "overview" && (
           <Overview data={data} players={players ?? null} />
         )}
-        {tab === "console" && <ServerConsole serverId={id} />}
+        {tab === "console" && (
+          <ServerConsole
+            serverId={id}
+            onlinePlayers={players?.players ?? []}
+          />
+        )}
+        {tab === "chat" && (
+          <ServerChat
+            serverId={id}
+            onlinePlayers={players?.players ?? []}
+          />
+        )}
         {tab === "files" && <ServerFiles serverId={id} />}
         {tab === "properties" && <ServerProperties serverId={id} />}
         {tab === "env" && <ServerEnvTab serverId={id} />}
@@ -503,13 +516,29 @@ function Overview({
             </div>
             <div className="divider" />
             {players.players.length > 0 ? (
-              <div className="flex flex-wrap gap-1.5">
+              <ul className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
                 {players.players.map((p) => (
-                  <span key={p} className="chip chip-accent">
-                    {p}
-                  </span>
+                  <li
+                    key={p}
+                    className="flex items-center gap-2 rounded-md bg-surface-2/60 px-2 py-1.5 text-sm"
+                  >
+                    {/* mc-heads renders an 8x8 minecraft head; 2x scale
+                        for retina. URL only depends on the username so
+                        the browser caches it efficiently across pages. */}
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={`https://mc-heads.net/avatar/${encodeURIComponent(p)}/32`}
+                      srcSet={`https://mc-heads.net/avatar/${encodeURIComponent(p)}/64 2x`}
+                      alt=""
+                      width={28}
+                      height={28}
+                      className="w-7 h-7 rounded shrink-0"
+                      loading="lazy"
+                    />
+                    <span className="font-mono text-xs truncate">{p}</span>
+                  </li>
                 ))}
-              </div>
+              </ul>
             ) : (
               <p className="text-sm text-ink-muted">
                 {t("server.overview.noPlayers")}
