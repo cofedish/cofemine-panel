@@ -11,14 +11,19 @@ import { useT } from "@/lib/i18n";
  *
  * Pattern-matched against the vanilla server log format:
  *
- *   [HH:MM:SS] [Server thread/INFO]: <PlayerName> the chat text
- *   [HH:MM:SS] [Server thread/INFO]: [PlayerName: Set the time to 1000]   ← command echo, dropped
- *   [HH:MM:SS] [Server thread/INFO]: PlayerName joined the game
- *   [HH:MM:SS] [Server thread/INFO]: PlayerName left the game
- *   [HH:MM:SS] [Server thread/INFO]: PlayerName was slain by Zombie
+ * Real log lines we have to handle (paper, forge, neoforge all
+ * have slight variations — and itzg's stdout is decorated with
+ * ANSI colour escapes that we have to strip first):
  *
- * Forge/NeoForge wrap the same pattern with extra mod prefix, so the
- * regex is lenient about what comes before the `<Name>` / `Name `.
+ *   [16:39:50] [Server thread/INFO]: <Player> hi                       (vanilla / paper)
+ *   [16:39:50] [Server thread/INFO] [minecraft/PlayerList]: <Player> hi (forge / neoforge)
+ *   [16:39:50] [Server thread/INFO] [minecraft/DedicatedServer]: Player joined the game
+ *   [16:39:50] [Server thread/INFO] [minecraft/DedicatedServer]: Player was slain by Zombie
+ *
+ * The regexes here don't anchor on `[Server thread/INFO]:` directly —
+ * instead they peel ANSI off, then look for `:` followed by `<Name>`
+ * or `Name <verb>`. That tolerates any number of mod-decorated
+ * `[logger/name]` brackets between the thread tag and the colon.
  */
 
 type ChatMsg =
@@ -28,12 +33,33 @@ type ChatMsg =
   | { kind: "death"; ts: number; player: string; text: string }
   | { kind: "system"; ts: number; text: string };
 
-const CHAT_SAY = /\[(?:Server thread|Server)\/INFO\]:?\s*<([^>]+)>\s*(.+)$/i;
-const CHAT_JOIN = /\[(?:Server thread|Server)\/INFO\]:?\s*([A-Za-z0-9_]{2,16})\s+joined the game\s*$/i;
-const CHAT_LEAVE = /\[(?:Server thread|Server)\/INFO\]:?\s*([A-Za-z0-9_]{2,16})\s+left the game\s*$/i;
-const CHAT_DEATH = /\[(?:Server thread|Server)\/INFO\]:?\s*([A-Za-z0-9_]{2,16})\s+((?:was|fell|drowned|hit|tried|burned|got|went|withered|froze|starved|suffocated|walked|blew|experienced|didn|swim).+)$/i;
+// ANSI/colour escapes (itzg's runner pipes minecraft's coloured
+// stdout through with the escapes intact). Strip before regex
+// matching so [33m doesn't break the <Name> capture.
+const ANSI_RE = /\x1b\[[0-9;]*m/g;
 
-function parseChat(line: string): ChatMsg | null {
+// All of these match anywhere AFTER a `]:` so leading mod loggers
+// don't break us. (?:^|]:\s*) — line start or any `]:` followed by
+// whitespace — lets us catch both vanilla single-bracket and
+// forge multi-bracket lines.
+const CHAT_SAY = /(?:^|]:\s*)<([A-Za-z0-9_]{2,16})>\s+(.+?)\s*$/;
+const CHAT_JOIN = /(?:^|]:\s*)([A-Za-z0-9_]{2,16})\s+joined the game\s*$/;
+const CHAT_LEAVE = /(?:^|]:\s*)([A-Za-z0-9_]{2,16})\s+left the game\s*$/;
+// Death verb list per the vanilla DeathMessages table — the first
+// word that immediately follows the player's name in 99% of death
+// messages. Catches enough for the panel; missing edge cases just
+// fall through to console.
+const DEATH_VERBS =
+  "was|fell|drowned|hit|tried|burned|got|went|withered|froze|starved|suffocated|walked|blew|experienced|didn|swam|fired|drove|impaled|squashed|discovered|stepped|hugged|pummeled|slipped|died";
+const CHAT_DEATH = new RegExp(
+  `(?:^|]:\\s*)([A-Za-z0-9_]{2,16})\\s+((?:${DEATH_VERBS})\\b.+?)\\s*$`
+);
+
+function parseChat(raw: string): ChatMsg | null {
+  const line = raw.replace(ANSI_RE, "");
+  // Drop the "[Player: did something]" echo lines — those are the
+  // server's confirmation of an op's command, not real chat.
+  if (/]:\s*\[[A-Za-z0-9_]+:\s/.test(line)) return null;
   const now = Date.now();
   const m1 = CHAT_SAY.exec(line);
   if (m1) {
@@ -58,7 +84,31 @@ function fmtTime(ts: number): string {
   });
 }
 
-const MAX_MSGS = 500;
+const MAX_MSGS = 2000;
+const HISTORY_FLUSH_INTERVAL_MS = 5000;
+
+function historyKey(serverId: string): string {
+  return `cofemine.chat.history.${serverId}`;
+}
+
+function loadHistory(serverId: string): ChatMsg[] {
+  try {
+    const raw = localStorage.getItem(historyKey(serverId));
+    if (!raw) return [];
+    const arr = JSON.parse(raw);
+    if (!Array.isArray(arr)) return [];
+    // Defensive: filter anything that doesn't look like a ChatMsg.
+    return arr.filter(
+      (x: unknown): x is ChatMsg =>
+        !!x &&
+        typeof x === "object" &&
+        typeof (x as { kind?: unknown }).kind === "string" &&
+        typeof (x as { ts?: unknown }).ts === "number"
+    );
+  } catch {
+    return [];
+  }
+}
 
 export function ServerChat({
   serverId,
@@ -68,11 +118,45 @@ export function ServerChat({
   onlinePlayers: string[];
 }): JSX.Element {
   const { t } = useT();
-  const [msgs, setMsgs] = useState<ChatMsg[]>([]);
+  // Seed from localStorage on first render so the operator sees
+  // yesterday's chat the moment they open the tab, no flicker.
+  const [msgs, setMsgs] = useState<ChatMsg[]>(() =>
+    typeof window === "undefined" ? [] : loadHistory(serverId)
+  );
   const [draft, setDraft] = useState("");
   const [connected, setConnected] = useState(false);
   const wsRef = useRef<WebSocket | null>(null);
   const viewRef = useRef<HTMLDivElement>(null);
+  // Debounced flush: localStorage.setItem on every incoming chat
+  // line would be wasteful when there's a flurry; instead schedule
+  // one flush per HISTORY_FLUSH_INTERVAL_MS as long as we have
+  // dirty state. The ref-shadow of `msgs` is so the flush always
+  // sees the latest array without re-creating the interval.
+  const msgsRef = useRef<ChatMsg[]>(msgs);
+  msgsRef.current = msgs;
+  useEffect(() => {
+    const t = setInterval(() => {
+      try {
+        localStorage.setItem(
+          historyKey(serverId),
+          JSON.stringify(msgsRef.current)
+        );
+      } catch {
+        /* quota — give up silently, in-memory still works */
+      }
+    }, HISTORY_FLUSH_INTERVAL_MS);
+    return () => {
+      clearInterval(t);
+      // Final flush on unmount so a tab switch doesn't lose the
+      // last few seconds of chat.
+      try {
+        localStorage.setItem(
+          historyKey(serverId),
+          JSON.stringify(msgsRef.current)
+        );
+      } catch {}
+    };
+  }, [serverId]);
 
   // Same WS the console uses — single connection, browser will reuse
   // any open one if the operator is on both tabs. Reconnect logic
@@ -155,9 +239,25 @@ export function ServerChat({
       <div className="card overflow-hidden flex flex-col h-[600px]">
         <div className="px-4 py-2 border-b border-line flex items-center justify-between text-xs">
           <span>{t("chat.title")}</span>
-          <span className={connected ? "text-accent" : "text-ink-muted"}>
-            {connected ? t("console.connected") : t("console.disconnected")}
-          </span>
+          <div className="flex items-center gap-3">
+            {msgs.length > 0 && (
+              <button
+                className="text-ink-muted hover:text-ink-secondary text-[11px]"
+                onClick={() => {
+                  setMsgs([]);
+                  try {
+                    localStorage.removeItem(historyKey(serverId));
+                  } catch {}
+                }}
+                title={t("chat.clear")}
+              >
+                {t("chat.clear")} ({msgs.length})
+              </button>
+            )}
+            <span className={connected ? "text-accent" : "text-ink-muted"}>
+              {connected ? t("console.connected") : t("console.disconnected")}
+            </span>
+          </div>
         </div>
         <div
           ref={viewRef}
