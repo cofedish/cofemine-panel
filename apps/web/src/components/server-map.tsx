@@ -3,7 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import useSWR from "swr";
-import { fetcher } from "@/lib/api";
+import { api, fetcher } from "@/lib/api";
 import { cn } from "@/lib/cn";
 import {
   Map as MapIcon,
@@ -599,26 +599,67 @@ function BlueMapView({
   serverId: string;
   fullHeight: boolean;
 }): JSX.Element {
+  // BlueMap's settings.json has shipped in two shapes across versions:
+  // newer releases use [{id, name}], older ones use a plain string[].
+  // Accept both — we only need the id.
   const { data: settings } = useSWR<{
-    maps: Array<{ id: string; name: string }>;
+    maps: Array<{ id: string; name?: string } | string>;
   }>(`/servers/${serverId}/map/bluemap/settings.json`, fetcher, {
     revalidateOnFocus: false,
     shouldRetryOnError: false,
   });
 
-  const firstMapId = settings?.maps?.[0]?.id;
-  const { data: live } = useSWR<{
-    players: Array<{
-      uuid: string;
-      name: string;
-      foreign?: boolean;
-      position?: { x: number; y: number; z: number };
-    }>;
-  }>(
-    firstMapId
-      ? `/servers/${serverId}/map/bluemap/maps/${encodeURIComponent(firstMapId)}/live/players.json`
-      : null,
-    fetcher,
+  const mapIds = useMemo<string[]>(() => {
+    const raw = settings?.maps ?? [];
+    return raw
+      .map((m) => (typeof m === "string" ? m : m?.id))
+      .filter((s): s is string => typeof s === "string" && s.length > 0);
+  }, [settings]);
+
+  // Poll EVERY map's live/players.json — each map is per-dimension,
+  // so an online player only shows up in the entry for the dimension
+  // they're currently in. Polling just `maps[0]` is why the sidebar
+  // counted 0 while the map itself was rendering an icon for the
+  // player (the iframe loads every map's live feed internally). We
+  // build a comma-joined cache key that includes every id so SWR
+  // refetches when the map set changes.
+  const liveKey =
+    mapIds.length > 0
+      ? `/servers/${serverId}/map/bluemap/_live_all:${mapIds.join(",")}`
+      : null;
+  type BluemapPlayer = {
+    uuid: string;
+    name: string;
+    foreign?: boolean;
+    position?: { x: number; y: number; z: number };
+  };
+  type LiveAll = { players: BluemapPlayer[] };
+  const { data: live } = useSWR<LiveAll>(
+    liveKey,
+    async (): Promise<LiveAll> => {
+      const results = await Promise.all(
+        mapIds.map((id) =>
+          api
+            .get<{ players?: BluemapPlayer[] }>(
+              `/servers/${serverId}/map/bluemap/maps/${encodeURIComponent(id)}/live/players.json`
+            )
+            .then((r) => r.players ?? [])
+            .catch(() => []),
+        )
+      );
+      // Flatten + dedup by uuid (a player crossing dimensions in the
+      // 1s between polls can briefly show up in two maps).
+      const seen = new Set<string>();
+      const all: BluemapPlayer[] = [];
+      for (const arr of results) {
+        for (const p of arr) {
+          if (seen.has(p.uuid)) continue;
+          seen.add(p.uuid);
+          all.push(p);
+        }
+      }
+      return { players: all };
+    },
     {
       refreshInterval: POLL_INTERVAL,
       revalidateOnFocus: false,
@@ -698,7 +739,7 @@ function BlueMapView({
           </p>
         ) : (
           <ul className="space-y-1.5">
-            {onlinePlayers.map((p) => (
+            {onlinePlayers.map((p: BluemapPlayer) => (
               <li
                 key={p.uuid}
                 className="flex items-center gap-2.5 rounded-md p-2 text-sm bg-surface-2 hover:bg-surface-3 transition-colors"
