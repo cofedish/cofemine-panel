@@ -26,17 +26,30 @@ import { useT } from "@/lib/i18n";
  * `[logger/name]` brackets between the thread tag and the colon.
  */
 
-type ChatMsg =
-  | { kind: "say"; ts: number; player: string; text: string }
-  | { kind: "join"; ts: number; player: string }
-  | { kind: "leave"; ts: number; player: string }
-  | { kind: "death"; ts: number; player: string; text: string }
-  | { kind: "system"; ts: number; text: string };
+type ChatMsg = (
+  | { kind: "say"; player: string; text: string }
+  | { kind: "join"; player: string }
+  | { kind: "leave"; player: string }
+  | { kind: "death"; player: string; text: string }
+  | { kind: "system"; text: string }
+) & {
+  /** Wall-clock ms when WE saw the line — used for display. */
+  ts: number;
+  /** HH:MM:SS string parsed from the log line itself. The same chat
+   *  event replayed by the WS on reconnect has the same logTime, so
+   *  this is what we hash for dedup. Optional because some sources
+   *  (operator-typed `say`) don't have a log timestamp yet. */
+  logTime?: string;
+};
 
 // ANSI/colour escapes (itzg's runner pipes minecraft's coloured
 // stdout through with the escapes intact). Strip before regex
 // matching so [33m doesn't break the <Name> capture.
 const ANSI_RE = /\x1b\[[0-9;]*m/g;
+// Leading [HH:MM:SS] (with optional milliseconds) — used both for
+// dedup keying and to recover the original send-time after a
+// localStorage reload.
+const TIMESTAMP_RE = /^\[(\d{2}:\d{2}:\d{2}(?:\.\d+)?)\]/;
 
 // All of these match anywhere AFTER a `]:` so leading mod loggers
 // don't break us. (?:^|]:\s*) — line start or any `]:` followed by
@@ -60,18 +73,32 @@ function parseChat(raw: string): ChatMsg | null {
   // Drop the "[Player: did something]" echo lines — those are the
   // server's confirmation of an op's command, not real chat.
   if (/]:\s*\[[A-Za-z0-9_]+:\s/.test(line)) return null;
+  const tsMatch = TIMESTAMP_RE.exec(line);
+  const logTime = tsMatch?.[1];
   const now = Date.now();
   const m1 = CHAT_SAY.exec(line);
   if (m1) {
-    return { kind: "say", ts: now, player: m1[1]!, text: m1[2]!.trim() };
+    return {
+      kind: "say",
+      ts: now,
+      logTime,
+      player: m1[1]!,
+      text: m1[2]!.trim(),
+    };
   }
   const m2 = CHAT_JOIN.exec(line);
-  if (m2) return { kind: "join", ts: now, player: m2[1]! };
+  if (m2) return { kind: "join", ts: now, logTime, player: m2[1]! };
   const m3 = CHAT_LEAVE.exec(line);
-  if (m3) return { kind: "leave", ts: now, player: m3[1]! };
+  if (m3) return { kind: "leave", ts: now, logTime, player: m3[1]! };
   const m4 = CHAT_DEATH.exec(line);
   if (m4) {
-    return { kind: "death", ts: now, player: m4[1]!, text: m4[2]!.trim() };
+    return {
+      kind: "death",
+      ts: now,
+      logTime,
+      player: m4[1]!,
+      text: m4[2]!.trim(),
+    };
   }
   return null;
 }
@@ -85,7 +112,44 @@ function fmtTime(ts: number): string {
 }
 
 const MAX_MSGS = 2000;
-const HISTORY_FLUSH_INTERVAL_MS = 5000;
+const HISTORY_FLUSH_DEBOUNCE_MS = 750;
+/** How many recent messages to scan for content-equality when
+ *  deduping incoming lines. The WS replays the last ~100 lines of
+ *  docker logs on every connect/reconnect (which fires on full page
+ *  reload too); without dedup, those re-arrive on top of what we
+ *  already loaded from localStorage. Scanning 200 covers a typical
+ *  replay window. */
+const DEDUP_WINDOW = 200;
+
+/**
+ * Stable hash key for dedup. Keyed on the log-line timestamp instead
+ * of wall-clock ts — the same chat event replayed by the WS on
+ * reconnect produces the same logTime, so the match works across
+ * mounts. Player who genuinely flooded the same word in different
+ * seconds gets different keys → not deduped. Replayed history with
+ * identical logTime → deduped.
+ *
+ * Optimistic `system` lines from operator-typed `say` don't have a
+ * logTime, so they include wall-clock ts in the key — that prevents
+ * two clicks on Say from collapsing into one, while still allowing
+ * dedup against future replays of themselves (they were never in
+ * the log to begin with, so replay isn't a concern).
+ */
+function msgKey(m: ChatMsg): string {
+  const t = m.logTime ?? `wall:${m.ts}`;
+  switch (m.kind) {
+    case "say":
+      return `say:${t}:${m.player}:${m.text}`;
+    case "join":
+      return `join:${t}:${m.player}`;
+    case "leave":
+      return `leave:${t}:${m.player}`;
+    case "death":
+      return `death:${t}:${m.player}:${m.text}`;
+    case "system":
+      return `sys:${t}:${m.text}`;
+  }
+}
 
 function historyKey(serverId: string): string {
   return `cofemine.chat.history.${serverId}`;
@@ -127,15 +191,16 @@ export function ServerChat({
   const [connected, setConnected] = useState(false);
   const wsRef = useRef<WebSocket | null>(null);
   const viewRef = useRef<HTMLDivElement>(null);
-  // Debounced flush: localStorage.setItem on every incoming chat
-  // line would be wasteful when there's a flurry; instead schedule
-  // one flush per HISTORY_FLUSH_INTERVAL_MS as long as we have
-  // dirty state. The ref-shadow of `msgs` is so the flush always
-  // sees the latest array without re-creating the interval.
+  // Debounced flush: every state change schedules one save 750ms
+  // later, with the timer reset on each new change. Captures all the
+  // chat events from a single second-long flurry into one localStorage
+  // write, but still saves fast enough that a refresh moments after
+  // an op types `say something` doesn't lose it (the previous 5s
+  // interval did). Unmount flushes synchronously regardless.
   const msgsRef = useRef<ChatMsg[]>(msgs);
   msgsRef.current = msgs;
   useEffect(() => {
-    const t = setInterval(() => {
+    const t = setTimeout(() => {
       try {
         localStorage.setItem(
           historyKey(serverId),
@@ -144,9 +209,11 @@ export function ServerChat({
       } catch {
         /* quota — give up silently, in-memory still works */
       }
-    }, HISTORY_FLUSH_INTERVAL_MS);
+    }, HISTORY_FLUSH_DEBOUNCE_MS);
+    return () => clearTimeout(t);
+  }, [msgs, serverId]);
+  useEffect(() => {
     return () => {
-      clearInterval(t);
       // Final flush on unmount so a tab switch doesn't lose the
       // last few seconds of chat.
       try {
@@ -186,14 +253,24 @@ export function ServerChat({
             for (const line of text.split(/\r?\n/)) {
               if (!line.trim()) continue;
               const parsed = parseChat(line);
-              if (parsed) {
-                setMsgs((old) => {
-                  const next = [...old, parsed];
-                  return next.length > MAX_MSGS
-                    ? next.slice(next.length - MAX_MSGS)
-                    : next;
-                });
-              }
+              if (!parsed) continue;
+              setMsgs((old) => {
+                // Dedup against the last DEDUP_WINDOW entries. On
+                // page reload the WS replays the recent log buffer
+                // — without this every refresh would tile the same
+                // chat lines on top of what we restored from
+                // localStorage. Optimistic `say` we appended below
+                // also collides with the server's own echo of the
+                // command, which we want — keeps the local entry,
+                // drops the duplicate.
+                const k = msgKey(parsed);
+                const tail = old.slice(Math.max(0, old.length - DEDUP_WINDOW));
+                if (tail.some((x) => msgKey(x) === k)) return old;
+                const next = [...old, parsed];
+                return next.length > MAX_MSGS
+                  ? next.slice(next.length - MAX_MSGS)
+                  : next;
+              });
             }
           }
         } catch {
@@ -227,11 +304,23 @@ export function ServerChat({
     );
     setDraft("");
     // Echo our own message immediately so the operator gets feedback
-    // before the log streams back.
-    setMsgs((old) => [
-      ...old,
-      { kind: "system", ts: Date.now(), text: `[Server] ${text}` },
-    ]);
+    // before the log streams back. Flush synchronously after — the
+    // debounce timer might not fire if the operator refreshes 200ms
+    // later, and losing the line they just sent would be confusing.
+    setMsgs((old) => {
+      const next = [
+        ...old,
+        {
+          kind: "system" as const,
+          ts: Date.now(),
+          text: `[Server] ${text}`,
+        },
+      ];
+      try {
+        localStorage.setItem(historyKey(serverId), JSON.stringify(next));
+      } catch {}
+      return next;
+    });
   }
 
   return (
