@@ -30,11 +30,20 @@ export function ServerSchedules({
     "backup"
   );
   const [payload, setPayload] = useState("");
+  // Backup retention — number of recent scheduled archives to keep on
+  // disk. The scheduler reads this from payload.keep on each run and
+  // deletes anything older. Empty / 0 → falls back to env var or
+  // hard-coded default (24 = one day at hourly cadence).
+  const [backupKeep, setBackupKeep] = useState("24");
 
   async function create(): Promise<void> {
     const body: any = { name, cron, action, enabled: true };
     if (action === "command") body.payload = { command: payload };
     if (action === "announce") body.payload = { message: payload };
+    if (action === "backup") {
+      const n = parseInt(backupKeep, 10);
+      if (Number.isFinite(n) && n > 0) body.payload = { keep: n };
+    }
     await api.post(`/servers/${serverId}/schedules`, body);
     mutate(`/servers/${serverId}/schedules`);
   }
@@ -71,20 +80,38 @@ export function ServerSchedules({
             <option value="command">command</option>
             <option value="announce">announce</option>
           </select>
-          <input
-            className="input"
-            placeholder={
-              action === "command"
-                ? "say hi"
-                : action === "announce"
-                ? "Server restart in 5 min"
-                : ""
-            }
-            value={payload}
-            onChange={(e) => setPayload(e.target.value)}
-            disabled={action !== "command" && action !== "announce"}
-          />
+          {action === "backup" ? (
+            <input
+              className="input"
+              type="number"
+              min={1}
+              max={1000}
+              placeholder={t("schedules.backupKeepPlaceholder")}
+              value={backupKeep}
+              onChange={(e) => setBackupKeep(e.target.value)}
+              title={t("schedules.backupKeepHelp")}
+            />
+          ) : (
+            <input
+              className="input"
+              placeholder={
+                action === "command"
+                  ? "say hi"
+                  : action === "announce"
+                  ? "Server restart in 5 min"
+                  : ""
+              }
+              value={payload}
+              onChange={(e) => setPayload(e.target.value)}
+              disabled={action !== "command" && action !== "announce"}
+            />
+          )}
         </div>
+        {action === "backup" && (
+          <p className="text-xs text-ink-muted">
+            {t("schedules.backupKeepHelp")}
+          </p>
+        )}
         <button className="btn-primary" onClick={create}>
           {t("schedules.add")}
         </button>

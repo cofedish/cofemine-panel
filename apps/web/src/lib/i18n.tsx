@@ -754,6 +754,9 @@ const en: Dict = {
   "schedules.nextRun": "Next run",
   "schedules.enabled": "Enabled",
   "schedules.empty": "No schedules yet.",
+  "schedules.backupKeepPlaceholder": "Keep last N (default 24)",
+  "schedules.backupKeepHelp":
+    "Keep last N successful scheduled backups; older ones are auto-deleted. Manual backups are never touched.",
 
   "properties.title": "server.properties",
   "properties.subtitle":
@@ -1540,6 +1543,9 @@ const ru: Dict = {
   "schedules.nextRun": "Следующий запуск",
   "schedules.enabled": "Включено",
   "schedules.empty": "Расписаний пока нет.",
+  "schedules.backupKeepPlaceholder": "Хранить последних N (по умолч. 24)",
+  "schedules.backupKeepHelp":
+    "Сколько последних успешных бэкапов по расписанию хранить — старые удаляются автоматически. Ручные бэкапы не трогаются.",
 
   "properties.title": "server.properties",
   "properties.subtitle":
