@@ -1,5 +1,6 @@
 "use client";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { api } from "@/lib/api";
 import { useT } from "@/lib/i18n";
 
 /**
@@ -108,6 +109,30 @@ function fmtTime(ts: number): string {
   return d.toLocaleTimeString(undefined, {
     hour: "2-digit",
     minute: "2-digit",
+  });
+}
+
+/**
+ * Day label for the separator row between messages from different
+ * dates. "Today" / "Yesterday" stay close to home; older dates get a
+ * locale-specific short form (e.g. "5 Jun 2026"). Compared by local
+ * Y-M-D, so a midnight-crossing message lands in the right bucket
+ * for the operator's wall clock.
+ */
+function dayKey(ts: number): string {
+  const d = new Date(ts);
+  return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+}
+
+function dayLabel(ts: number, todayKey: string, yesterdayKey: string): string {
+  const k = dayKey(ts);
+  if (k === todayKey) return "Сегодня";
+  if (k === yesterdayKey) return "Вчера";
+  const d = new Date(ts);
+  return d.toLocaleDateString(undefined, {
+    day: "numeric",
+    month: "short",
+    year: d.getFullYear() === new Date().getFullYear() ? undefined : "numeric",
   });
 }
 
@@ -222,6 +247,72 @@ export function ServerChat({
           JSON.stringify(msgsRef.current)
         );
       } catch {}
+    };
+  }, [serverId]);
+
+  // Pull server-side chat history once on mount. Uses the most recent
+  // ts in localStorage as the `since` cursor, so we only re-fetch
+  // events that arrived while the panel was closed. Important: the WS
+  // only streams while the tab is open, and a tab that's been closed
+  // for a day misses everything in between — this fills that gap.
+  useEffect(() => {
+    let cancelled = false;
+    const since =
+      msgsRef.current.length > 0
+        ? Math.max(...msgsRef.current.map((m) => m.ts))
+        : 0;
+    (async () => {
+      try {
+        const res = await api.get<{
+          messages: Array<{
+            kind: ChatMsg["kind"];
+            ts: number;
+            logTime?: string;
+            player?: string;
+            text?: string;
+          }>;
+        }>(`/servers/${serverId}/chat?since=${since}`);
+        if (cancelled || !Array.isArray(res.messages)) return;
+        setMsgs((old) => {
+          const seen = new Set(
+            old.slice(Math.max(0, old.length - 500)).map((x) => msgKey(x))
+          );
+          const additions: ChatMsg[] = [];
+          for (const m of res.messages) {
+            // Narrow back to the discriminated union — the wire
+            // shape mirrors the discriminator field.
+            const reconstructed: ChatMsg | null =
+              m.kind === "say" && m.player && typeof m.text === "string"
+                ? { kind: "say", ts: m.ts, logTime: m.logTime, player: m.player, text: m.text }
+                : m.kind === "join" && m.player
+                  ? { kind: "join", ts: m.ts, logTime: m.logTime, player: m.player }
+                  : m.kind === "leave" && m.player
+                    ? { kind: "leave", ts: m.ts, logTime: m.logTime, player: m.player }
+                    : m.kind === "death" && m.player && typeof m.text === "string"
+                      ? { kind: "death", ts: m.ts, logTime: m.logTime, player: m.player, text: m.text }
+                      : null;
+            if (!reconstructed) continue;
+            const k = msgKey(reconstructed);
+            if (seen.has(k)) continue;
+            seen.add(k);
+            additions.push(reconstructed);
+          }
+          if (additions.length === 0) return old;
+          // Merge + sort + cap. Sort because catch-up additions can
+          // interleave with system messages the operator typed while
+          // the fetch was in flight.
+          const merged = [...old, ...additions].sort((a, b) => a.ts - b.ts);
+          return merged.length > MAX_MSGS
+            ? merged.slice(merged.length - MAX_MSGS)
+            : merged;
+        });
+      } catch {
+        /* Server-side fetch failed (server stopped, agent off) — UI
+           still works via the WS once it reconnects. */
+      }
+    })();
+    return () => {
+      cancelled = true;
     };
   }, [serverId]);
 
@@ -355,7 +446,7 @@ export function ServerChat({
           {msgs.length === 0 ? (
             <div className="text-sm text-ink-muted">{t("chat.empty")}</div>
           ) : (
-            msgs.map((m, i) => <ChatRow key={i} m={m} />)
+            <RenderedMessages msgs={msgs} />
           )}
         </div>
         <div className="p-3 border-t border-line flex gap-2">
@@ -412,6 +503,38 @@ export function ServerChat({
       </aside>
     </div>
   );
+}
+
+function RenderedMessages({ msgs }: { msgs: ChatMsg[] }): JSX.Element {
+  // Compute today / yesterday once per render — the labels are stable
+  // for the operator's local timezone, and the loop below only does
+  // string compares against them.
+  const { todayKey, yesterdayKey } = useMemo(() => {
+    const now = Date.now();
+    return {
+      todayKey: dayKey(now),
+      yesterdayKey: dayKey(now - 86_400_000),
+    };
+  }, []);
+  const items: JSX.Element[] = [];
+  let lastDay = "";
+  for (let i = 0; i < msgs.length; i++) {
+    const m = msgs[i]!;
+    const k = dayKey(m.ts);
+    if (k !== lastDay) {
+      items.push(
+        <div
+          key={`d-${k}-${i}`}
+          className="text-[10px] uppercase tracking-wider text-ink-muted text-center py-1.5 select-none"
+        >
+          {dayLabel(m.ts, todayKey, yesterdayKey)}
+        </div>
+      );
+      lastDay = k;
+    }
+    items.push(<ChatRow key={i} m={m} />);
+  }
+  return <>{items}</>;
 }
 
 function ChatRow({ m }: { m: ChatMsg }): JSX.Element {

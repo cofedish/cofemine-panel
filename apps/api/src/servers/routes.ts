@@ -1419,6 +1419,19 @@ export async function serversRoutes(app: FastifyInstance): Promise<void> {
     return client.call("GET", `/servers/${id}/install-failures`);
   });
 
+  app.get("/:id/chat", async (req) => {
+    const { id } = req.params as { id: string };
+    await assertServerPermission(req, id, "server.view");
+    const q = req.query as { since?: string; limit?: string };
+    const server = await prisma.server.findUniqueOrThrow({ where: { id } });
+    const client = await NodeClient.forId(server.nodeId);
+    const qp = new URLSearchParams();
+    if (q.since) qp.set("since", q.since);
+    if (q.limit) qp.set("limit", q.limit);
+    const suffix = qp.toString() ? `?${qp.toString()}` : "";
+    return client.call("GET", `/servers/${id}/chat${suffix}`);
+  });
+
   app.get("/:id/icon", async (req, reply) => {
     const { id } = req.params as { id: string };
     await assertServerPermission(req, id, "server.view");

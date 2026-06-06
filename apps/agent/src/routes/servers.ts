@@ -1768,6 +1768,44 @@ export async function serversAgentRoutes(app: FastifyInstance): Promise<void> {
   });
 
   /**
+   * Server-side chat history. Returns parsed chat / join / leave /
+   * death events from the container's log, optionally since a given
+   * unix-ms timestamp. The UI calls this on tab mount with `since=
+   * <last-seen-ts-from-localStorage>` so messages that arrived while
+   * the panel was closed still show up after re-opening.
+   *
+   * Docker's logs API only takes a unix-second `since`; we round down
+   * one second to make sure we don't miss anything that landed in the
+   * partial second after the client's last-seen ts.
+   */
+  app.get("/servers/:id/chat", async (req) => {
+    const { id } = req.params as { id: string };
+    const q = req.query as { since?: string; limit?: string };
+    const container = await findContainer(id);
+    if (!container) return { messages: [] };
+    const sinceMs = q.since ? Number(q.since) : NaN;
+    const sinceUnix =
+      Number.isFinite(sinceMs) && sinceMs > 0
+        ? Math.max(0, Math.floor(sinceMs / 1000) - 1)
+        : undefined;
+    // Cap at 5000 lines when there's no `since` cursor — a server
+    // running for weeks could return MBs of logs otherwise. With a
+    // cursor we read everything since that point (typically tiny).
+    const tail = sinceUnix ? 50000 : 5000;
+    const rawLogs = (await container.logs({
+      follow: false,
+      stdout: true,
+      stderr: true,
+      tail,
+      timestamps: true,
+      ...(sinceUnix ? { since: sinceUnix } : {}),
+    } as unknown as { follow: false })) as unknown as Buffer;
+    const text = demuxLogBuffer(rawLogs);
+    const limit = Math.min(Number(q.limit) || 2000, 5000);
+    return { messages: parseChatLog(text, sinceMs, limit) };
+  });
+
+  /**
    * List crash reports written by the MC server into /data/crash-reports.
    * Each entry carries a parsed summary (time, exception, suspect mods)
    * so the UI can show the important bits without downloading the whole
@@ -2450,6 +2488,97 @@ function demuxLogBuffer(buf: Buffer): string {
     offset += 8 + size;
   }
   return parts.join("");
+}
+
+/**
+ * Parse chat events out of a container log block. The log here was
+ * fetched with `timestamps: true`, so every line starts with a real
+ * RFC3339 timestamp the daemon stamped at write time — that's what
+ * we use as the message ts (so a message that arrived an hour ago
+ * still says "an hour ago" instead of "just now" after the panel
+ * pulls it on tab open).
+ *
+ * Patterns mirror what server-chat.tsx does on the client side, but
+ * since we have the daemon timestamp we don't need the log-line
+ * [HH:MM:SS] header for dedup. We still extract it as `logTime` so
+ * the UI shows the same friendly format the operator sees in-game.
+ *
+ * `sinceMs` filters anything older than that (the API caller's
+ * "give me history since I last saw the chat" cursor).
+ */
+type ChatLogMsg =
+  | { kind: "say"; ts: number; logTime?: string; player: string; text: string }
+  | { kind: "join"; ts: number; logTime?: string; player: string }
+  | { kind: "leave"; ts: number; logTime?: string; player: string }
+  | { kind: "death"; ts: number; logTime?: string; player: string; text: string };
+
+const CHAT_ANSI_RE = /\x1b\[[0-9;]*m/g;
+const CHAT_LOGTIME_RE = /\[(\d{2}:\d{2}:\d{2}(?:\.\d+)?)\]/;
+const CHAT_SAY_RE = /(?:^|]:\s*)<([A-Za-z0-9_]{2,16})>\s+(.+?)\s*$/;
+const CHAT_JOIN_RE = /(?:^|]:\s*)([A-Za-z0-9_]{2,16})\s+joined the game\s*$/;
+const CHAT_LEAVE_RE = /(?:^|]:\s*)([A-Za-z0-9_]{2,16})\s+left the game\s*$/;
+const CHAT_DEATH_VERBS =
+  "was|fell|drowned|hit|tried|burned|got|went|withered|froze|starved|suffocated|walked|blew|experienced|didn|swam|fired|drove|impaled|squashed|discovered|stepped|hugged|pummeled|slipped|died";
+const CHAT_DEATH_RE = new RegExp(
+  `(?:^|]:\\s*)([A-Za-z0-9_]{2,16})\\s+((?:${CHAT_DEATH_VERBS})\\b.+?)\\s*$`
+);
+const CHAT_OP_ECHO_RE = /]:\s*\[[A-Za-z0-9_]+:\s/;
+
+function parseChatLog(
+  text: string,
+  sinceMs: number,
+  limit: number
+): ChatLogMsg[] {
+  const out: ChatLogMsg[] = [];
+  const minTs = Number.isFinite(sinceMs) && sinceMs > 0 ? sinceMs : 0;
+  for (const rawLine of text.split(/\r?\n/)) {
+    const line = rawLine.replace(CHAT_ANSI_RE, "");
+    if (!line) continue;
+    // First token is the docker daemon timestamp because we asked for
+    // timestamps:true. Format: 2026-06-06T12:34:56.789012345Z body
+    const spaceIdx = line.indexOf(" ");
+    if (spaceIdx < 20) continue; // too short to be a timestamped line
+    const tsToken = line.slice(0, spaceIdx);
+    const body = line.slice(spaceIdx + 1);
+    const dtMs = Date.parse(tsToken);
+    if (!Number.isFinite(dtMs)) continue;
+    if (minTs && dtMs <= minTs) continue;
+    if (CHAT_OP_ECHO_RE.test(body)) continue;
+    const lt = CHAT_LOGTIME_RE.exec(body)?.[1];
+    const m1 = CHAT_SAY_RE.exec(body);
+    if (m1) {
+      out.push({
+        kind: "say",
+        ts: dtMs,
+        logTime: lt,
+        player: m1[1]!,
+        text: m1[2]!.trim(),
+      });
+      continue;
+    }
+    const m2 = CHAT_JOIN_RE.exec(body);
+    if (m2) {
+      out.push({ kind: "join", ts: dtMs, logTime: lt, player: m2[1]! });
+      continue;
+    }
+    const m3 = CHAT_LEAVE_RE.exec(body);
+    if (m3) {
+      out.push({ kind: "leave", ts: dtMs, logTime: lt, player: m3[1]! });
+      continue;
+    }
+    const m4 = CHAT_DEATH_RE.exec(body);
+    if (m4) {
+      out.push({
+        kind: "death",
+        ts: dtMs,
+        logTime: lt,
+        player: m4[1]!,
+        text: m4[2]!.trim(),
+      });
+    }
+  }
+  // If we overshot the limit, prefer the most-recent messages.
+  return out.length <= limit ? out : out.slice(out.length - limit);
 }
 
 /**
