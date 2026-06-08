@@ -738,6 +738,13 @@ const en: Dict = {
   "backups.restore": "Restore",
   "backups.delete": "Delete",
   "backups.empty": "No backups yet. Click Create backup to snapshot /data.",
+  "backups.prune.button": "Prune scheduled",
+  "backups.prune.title": "Prune old scheduled backups",
+  "backups.prune.body":
+    "Currently {n} successful scheduled backups on disk. Keep the most recent N — older ones will be deleted from disk AND the panel. Manual backups are never touched.",
+  "backups.prune.invalid": "Must be a non-negative integer.",
+  "backups.prune.done":
+    "Pruned {n} backup(s), freed ~{mb} MB.",
   "backups.name": "Name",
   "backups.size": "Size",
   "backups.status": "Status",
@@ -1525,6 +1532,13 @@ const ru: Dict = {
   "backups.creating": "Создаю…",
   "backups.restore": "Восстановить",
   "backups.delete": "Удалить",
+  "backups.prune.button": "Очистить старые",
+  "backups.prune.title": "Очистить старые scheduled-бэкапы",
+  "backups.prune.body":
+    "Сейчас {n} успешных scheduled-бэкапов на диске. Оставить последние N — остальные будут удалены с диска И из панели. Ручные бэкапы не трогаются.",
+  "backups.prune.invalid": "Должно быть целое неотрицательное число.",
+  "backups.prune.done":
+    "Удалено {n} бэкапов, освобождено ~{mb} МБ.",
   "backups.empty":
     "Бэкапов пока нет. Нажмите «Создать бэкап», чтобы сделать снимок /data.",
   "backups.name": "Имя",

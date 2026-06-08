@@ -65,13 +65,74 @@ export function ServerBackups({ serverId }: { serverId: string }): JSX.Element {
     mutate(`/servers/${serverId}/backups`);
   }
 
+  // Count what a manual prune would actually touch — only scheduled-*
+  // success backups, since manual backups are pinned by contract.
+  const scheduledCount =
+    data?.filter(
+      (b) => b.status === "success" && b.name.startsWith("scheduled-")
+    ).length ?? 0;
+
+  async function prune(): Promise<void> {
+    const keepStr = await dialog.prompt({
+      title: t("backups.prune.title"),
+      message: t("backups.prune.body", { n: scheduledCount }),
+      defaultValue: "24",
+      placeholder: "24",
+    });
+    if (keepStr === null) return;
+    const keep = parseInt(keepStr.trim(), 10);
+    if (!Number.isFinite(keep) || keep < 0) {
+      dialog.alert({
+        tone: "danger",
+        title: t("common.error"),
+        message: t("backups.prune.invalid"),
+      });
+      return;
+    }
+    setBusy(true);
+    try {
+      const res = await api.post<{ pruned: number; freedBytes: number }>(
+        `/servers/${serverId}/backups/prune`,
+        { keep }
+      );
+      mutate(`/servers/${serverId}/backups`);
+      dialog.toast({
+        tone: "success",
+        message: t("backups.prune.done", {
+          n: res.pruned,
+          mb: Math.round(res.freedBytes / 1024 / 1024),
+        }),
+      });
+    } catch (err) {
+      dialog.alert({
+        tone: "danger",
+        title: t("common.error"),
+        message: err instanceof ApiError ? err.message : String(err),
+      });
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <div className="card">
       <div className="flex items-center justify-between px-4 py-3 border-b border-line">
         <h3 className="font-medium">{t("server.tabs.backups")}</h3>
-        <button className="btn-primary" onClick={create} disabled={busy}>
-          {busy ? t("backups.creating") : t("backups.create")}
-        </button>
+        <div className="flex items-center gap-2">
+          {scheduledCount > 0 && (
+            <button
+              className="btn-ghost"
+              onClick={prune}
+              disabled={busy}
+              title={t("backups.prune.title")}
+            >
+              {t("backups.prune.button")} ({scheduledCount})
+            </button>
+          )}
+          <button className="btn-primary" onClick={create} disabled={busy}>
+            {busy ? t("backups.creating") : t("backups.create")}
+          </button>
+        </div>
       </div>
       {data && data.length > 0 ? (
         <ul className="divide-y divide-line">
