@@ -17,5 +17,15 @@
   "engines": {
     "node": ">=20.10.0",
     "pnpm": ">=9"
+  },
+  "pnpm": {
+    "//": "Transitive-dependency security pins. These are all patch/minor bumps of packages we don't depend on directly (they arrive via dockerode, prisma, next, fastify), so they cannot be fixed by touching our own manifests. protobufjs matters most: it carries a code-injection advisory and rides into the agent — the container that holds docker.sock. Re-check with `pnpm audit` when bumping direct deps; drop an entry once the parent ships the fixed version itself.",
+    "overrides": {
+      "protobufjs": ">=7.6.1",
+      "@grpc/grpc-js": ">=1.14.4",
+      "fast-uri": ">=3.1.4",
+      "postcss": ">=8.5.18",
+      "brace-expansion@>=2.0.0": ">=2.1.2"
+    }
   }
 }
