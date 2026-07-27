@@ -21,6 +21,44 @@ export const loginSchema = z.object({
   password: passwordSchema,
 });
 
+/**
+ * Container env keys the panel refuses to set.
+ *
+ * itzg honours all of these: `UID`/`GID` choose the uid the JVM runs
+ * as (0 = root), `RUN_AS_ROOT`/`SKIP_SUDO` skip the privilege drop
+ * entirely. Anyone with `server.edit` could otherwise turn their own
+ * Minecraft server into a root process inside the container, which
+ * voids every other in-container hardening measure.
+ *
+ * The agent strips these again when it builds the container spec — this
+ * schema exists so the operator gets a clear error instead of a silent
+ * no-op. Both layers are load-bearing; don't drop either.
+ */
+export const FORBIDDEN_SERVER_ENV_KEYS = [
+  "UID",
+  "GID",
+  "RUN_AS_ROOT",
+  "SKIP_SUDO",
+] as const;
+
+export const serverEnvSchema = z
+  .record(z.string(), z.string())
+  .superRefine((env, ctx) => {
+    for (const key of Object.keys(env)) {
+      if (
+        (FORBIDDEN_SERVER_ENV_KEYS as readonly string[]).includes(
+          key.toUpperCase()
+        )
+      ) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: [key],
+          message: `${key} cannot be set: it would run the server process as root inside the container`,
+        });
+      }
+    }
+  });
+
 export const portMappingSchema = z.object({
   host: z.number().int().min(1).max(65535),
   container: z.number().int().min(1).max(65535),
@@ -53,7 +91,7 @@ const createServerShape = z.object({
   memoryMb: z.number().int().min(512).max(65536).default(2048),
   cpuLimit: z.number().min(0.1).max(64).optional(),
   ports: z.array(portMappingSchema).min(1).max(8),
-  env: z.record(z.string(), z.string()).default({}),
+  env: serverEnvSchema.default({}),
   eulaAccepted: z.literal(true, {
     errorMap: () => ({ message: "You must accept the Minecraft EULA" }),
   }),
@@ -106,6 +144,10 @@ export const updateServerSchema = createServerShape
     /** Display name for the auto-generated servers.dat entry. `null`
      *  falls back to the server's `name`. */
     clientServerName: z.string().max(80).nullable().optional(),
+    /** List this server's pack in the public /p/index.json directory.
+     *  Off by default — that listing publishes the raw pack token, so
+     *  it is a separate decision from having a public link at all. */
+    publicPackListed: z.boolean().optional(),
   });
 
 export const createNodeSchema = z.object({
@@ -124,7 +166,7 @@ export const createTemplateSchema = z.object({
   type: z.enum(SERVER_TYPES),
   version: z.string().min(1).max(32),
   memoryMb: z.number().int().min(512).max(65536),
-  env: z.record(z.string(), z.string()).default({}),
+  env: serverEnvSchema.default({}),
 });
 
 export const consoleCommandSchema = z.object({
@@ -143,11 +185,76 @@ export const writeFileSchema = z.object({
   content: z.string().max(5 * 1024 * 1024), // 5 MiB cap for text edits
 });
 
+/**
+ * Cron expression for a schedule: exactly five fields.
+ *
+ * croner also accepts a six-field form where the first field is
+ * *seconds*. Nothing in the panel needs sub-minute scheduling, and
+ * `* * * * * *` + a `backup` action means the node tars a multi-gigabyte
+ * world once a second — a self-service DoS for anyone with
+ * `server.edit`. Five fields caps the cadence at one run per minute;
+ * the scheduler additionally refuses to start a run while the previous
+ * one is still going.
+ *
+ * Field *semantics* are validated API-side by croner itself — this
+ * package stays dependency-free apart from zod.
+ */
+/**
+ * croner's named shortcuts. All of them are daily-or-longer, so they
+ * carry no sub-minute risk and stay allowed — rejecting them would
+ * break any existing schedule that used one.
+ */
+export const CRON_NICKNAMES = [
+  "@yearly",
+  "@annually",
+  "@monthly",
+  "@weekly",
+  "@daily",
+  "@hourly",
+] as const;
+
+export function isValidCronShape(value: string): boolean {
+  const v = value.trim();
+  if ((CRON_NICKNAMES as readonly string[]).includes(v.toLowerCase())) {
+    return true;
+  }
+  return v.split(/\s+/).length === 5;
+}
+
+export const cronExpressionSchema = z
+  .string()
+  .min(5)
+  .max(128)
+  .refine(
+    isValidCronShape,
+    "Cron must have exactly 5 fields (minute hour day month weekday), or be one of @hourly/@daily/@weekly/@monthly/@yearly — second-level schedules are not supported"
+  );
+
+/**
+ * Typed payload per action, replacing a free-form `Record<string, any>`.
+ *
+ * `keep` was the dangerous one: it drives backup retention, and the
+ * scheduler's `Math.floor` turned `{keep: 0.5}` into 0, which made
+ * `candidates.slice(0)` select *every* successful scheduled backup for
+ * deletion — from disk and the DB. An integer floor of 1 makes that
+ * unrepresentable.
+ */
+export const schedulePayloadSchema = z
+  .object({
+    /** backup: how many successful scheduled backups to retain. */
+    keep: z.number().int().min(1).max(1000).optional(),
+    /** command: the console command to run. */
+    command: z.string().min(1).max(1000).optional(),
+    /** announce: text passed to `say`. */
+    message: z.string().min(1).max(500).optional(),
+  })
+  .strict();
+
 export const scheduleSchema = z.object({
   name: z.string().min(1).max(64),
-  cron: z.string().min(5).max(128),
+  cron: cronExpressionSchema,
   action: z.enum(["restart", "backup", "command", "announce"]),
-  payload: z.record(z.string(), z.any()).optional(),
+  payload: schedulePayloadSchema.optional(),
   enabled: z.boolean().default(true),
 });
 
