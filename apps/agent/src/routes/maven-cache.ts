@@ -1,6 +1,12 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
-import { docker, ensureVolume, writeFilesToVolume } from "../docker.js";
+import {
+  docker,
+  ensureVolume,
+  runInVolumes,
+  writeFilesToVolume,
+  writeFileScript,
+} from "../docker.js";
 
 /**
  * Maintenance endpoints for the maven-cache sidecar container.
@@ -15,13 +21,30 @@ import { docker, ensureVolume, writeFilesToVolume } from "../docker.js";
  * into squid is to make a new container from the same image and
  * restart it.
  *
- * CA distribution: the cert + key (when present) are written into the
- * shared named volume `cofemine_maven_cache_ca` before the cache
- * sidecar is recreated. The cache itself mounts that volume read-only
- * at /etc/cofemine/ca/; every MC container mounts the same volume
- * read-only and a STARTUP_SCRIPT inside the MC container imports
- * the cert into the JVM cacerts so squid's MITM leaves valid for the
- * loader installer + mc-image-helper.
+ * CA distribution uses THREE volumes, and the split is the whole point:
+ *
+ *   cofemine_maven_cache_ca_key  ca.crt + ca.key   → maven-cache ONLY
+ *   cofemine_maven_cache_ca_pub  ca.crt + .ready
+ *                                + import.sh       → new MC containers
+ *   cofemine_maven_cache_ca      ca.crt + .ready   → MC containers created
+ *                                + import.sh         before the split
+ *                                (ca.key TRUNCATED)
+ *
+ * Originally cert and key shared one volume that every MC container
+ * mounted, which handed the CA's *private key* to every modpack the
+ * panel runs — arbitrary third-party code holding a signing key for a
+ * root the JVM trusts.
+ *
+ * Why three and not two: a container's binds are immutable, so every MC
+ * container created before the split still mounts
+ * `cofemine_maven_cache_ca`. Simply moving new containers to a new
+ * volume would leave the key exposed to all of them — and the *next*
+ * CA rotation would drop a fresh key right back into their view. So the
+ * key moved to its own volume, the sidecar follows it there, and the
+ * legacy volume is kept alive as public-only material with `ca.key`
+ * truncated on every seed. Legacy containers keep booting (import.sh
+ * reads only ca.crt and .ready) and stop seeing key material without
+ * being recreated.
  */
 const RECREATE_BODY = z.object({
   /** New UPSTREAM_PROXY value. Empty / null → cache goes direct. */
@@ -29,16 +52,31 @@ const RECREATE_BODY = z.object({
   /** PEM. When null, MITM is disabled — squid runs in pure splice
    *  mode and tunnels TLS through without caching jar bodies. */
   caCertPem: z.string().nullable().optional(),
-  /** PEM, private key for the CA. Only used by squid; never given
-   *  to MC containers. */
+  /** PEM, private key for the CA. Written only to the private volume
+   *  that the maven-cache sidecar mounts — never into the volume MC
+   *  containers see. */
   caKeyPem: z.string().nullable().optional(),
 });
 
 const COMPOSE_CONTAINER_NAME = "cofemine-maven-cache-1";
 
-/** Named docker volume that the cache sidecar and every MC container
- *  mount read-only. Owned by the agent — created on first use. */
-export const CA_VOLUME_NAME = "cofemine_maven_cache_ca";
+/** Private CA volume: holds ca.crt AND ca.key. Mounted read-only by the
+ *  maven-cache sidecar at /etc/cofemine/ca and by nothing else. Declared
+ *  in both compose files with an explicit literal `name:`. */
+export const CA_KEY_VOLUME_NAME = "cofemine_maven_cache_ca_key";
+
+/** Public CA volume: ca.crt + .ready + import.sh, i.e. exactly what an
+ *  MC container needs to trust squid's leaf certs and nothing more.
+ *  Created by the agent on first use (not declared in compose — no
+ *  compose service mounts it; only agent-created MC containers do). */
+export const CA_PUB_VOLUME_NAME = "cofemine_maven_cache_ca_pub";
+
+/** The original single volume. MC containers created before the split
+ *  still mount it and cannot be re-bound without a recreate, so it is
+ *  maintained as public-only material: same cert/.ready/import.sh as the
+ *  pub volume, with `ca.key` truncated to empty on every seed. Nothing
+ *  writes key material here — ever. */
+export const CA_LEGACY_VOLUME_NAME = "cofemine_maven_cache_ca";
 
 /** Mount point inside MC containers. itzg-provider references the
  *  same constant so the STARTUP_SCRIPT env path matches. */
@@ -51,15 +89,62 @@ export const CA_MOUNT_PATH = "/cofemine-ca";
  * means freshly-recreated MC containers crashloop with the OLD script
  * until they hit a /maven-cache/recreate via CA-generate or Re-apply.
  *
- * We only touch import.sh — ca.crt / ca.key / .ready are owned by the
- * API and only seeded on /maven-cache/recreate. Safe to call at boot
- * even on a fresh agent: ensureVolume creates the volume if missing.
+ * We only touch import.sh — ca.crt / .ready are owned by the API and
+ * only seeded on /maven-cache/recreate. Safe to call at boot even on a
+ * fresh agent: ensureVolume creates the volume if missing.
+ *
+ * Writes to the PUBLIC volume only. The private volume holds key
+ * material for squid and must not gain an executable that MC containers
+ * could ever be pointed at.
  */
-export async function reseedCaWrapper(): Promise<void> {
-  await ensureVolume(CA_VOLUME_NAME);
-  await writeFilesToVolume(CA_VOLUME_NAME, [
-    { path: "/dst/import.sh", content: CA_IMPORT_SCRIPT, mode: 0o755 },
+export async function seedCaVolumes(): Promise<void> {
+  await Promise.all([
+    ensureVolume(CA_KEY_VOLUME_NAME),
+    ensureVolume(CA_PUB_VOLUME_NAME),
+    ensureVolume(CA_LEGACY_VOLUME_NAME),
   ]);
+  // One throwaway container mounting all three volumes, so the three
+  // stay consistent even if the API never gets around to calling
+  // /maven-cache/recreate.
+  //
+  //   1. refresh import.sh in both MC-facing volumes;
+  //   2. truncate ca.key in the legacy volume — this is what actually
+  //      removes the key from every MC container created before the
+  //      volume split, without recreating them;
+  //   3. mirror ca.crt/.ready from the private volume so a server
+  //      created before the API's first apply still gets a trustable
+  //      cert. Without this the container mounts an empty pub volume,
+  //      import.sh no-ops, and squid bumps with a leaf the JVM doesn't
+  //      trust — an SSLHandshakeException with no obvious cause.
+  const importSh = writeFileScript({
+    path: "/pub/import.sh",
+    content: CA_IMPORT_SCRIPT,
+    mode: 0o755,
+  });
+  const importShLegacy = writeFileScript({
+    path: "/legacy/import.sh",
+    content: CA_IMPORT_SCRIPT,
+    mode: 0o755,
+  });
+  const script = [
+    importSh,
+    importShLegacy,
+    // Truncate rather than delete: squid's entrypoint and import.sh both
+    // test with `-s`, so an empty file reads as "no CA" everywhere.
+    ": > /legacy/ca.key",
+    "chmod 600 /legacy/ca.key",
+    // Mirror public material outward from the private volume.
+    'if [ -s /key/ca.crt ]; then cp /key/ca.crt /pub/ca.crt && cp /key/ca.crt /legacy/ca.crt && chmod 644 /pub/ca.crt /legacy/ca.crt; fi',
+    'if [ -f /key/.ready ]; then cp /key/.ready /pub/.ready && cp /key/.ready /legacy/.ready && chmod 644 /pub/.ready /legacy/.ready; fi',
+  ].join(" ; ");
+  await runInVolumes(
+    [
+      `${CA_KEY_VOLUME_NAME}:/key`,
+      `${CA_PUB_VOLUME_NAME}:/pub`,
+      `${CA_LEGACY_VOLUME_NAME}:/legacy`,
+    ],
+    script
+  );
 }
 
 /**
@@ -150,31 +235,46 @@ export async function mavenCacheRoutes(app: FastifyInstance): Promise<void> {
     const body = RECREATE_BODY.parse(req.body ?? {});
     const target = body.upstreamProxy?.trim() ?? "";
 
-    // Step 1: seed the shared CA volume. We always do this — even when
+    // Step 1: seed both CA volumes. We always do this — even when
     // there's no CA — so a stale CA from a previous generate cycle
     // doesn't linger inside MC containers. The marker file lets squid
     // tell "no CA configured" apart from "volume not initialised".
-    await ensureVolume(CA_VOLUME_NAME);
+    //
+    // The private key goes to CA_KEY_VOLUME_NAME only. Never add ca.key
+    // to the pub or legacy lists below: those volumes are mounted into
+    // Minecraft containers, i.e. into arbitrary third-party mod code.
+    await Promise.all([
+      ensureVolume(CA_KEY_VOLUME_NAME),
+      ensureVolume(CA_PUB_VOLUME_NAME),
+      ensureVolume(CA_LEGACY_VOLUME_NAME),
+    ]);
     const certPem = body.caCertPem?.trim() ?? "";
     const keyPem = body.caKeyPem?.trim() ?? "";
-    if (certPem && keyPem) {
-      await writeFilesToVolume(CA_VOLUME_NAME, [
-        { path: "/dst/ca.crt", content: certPem, mode: 0o644 },
-        { path: "/dst/ca.key", content: keyPem, mode: 0o600 },
-        { path: "/dst/.ready", content: "1\n", mode: 0o644 },
-        { path: "/dst/import.sh", content: CA_IMPORT_SCRIPT, mode: 0o755 },
-      ]);
-    } else {
-      // Wipe the CA files when MITM is disabled. We use a sentinel
-      // empty cert to keep the volume in a known shape; the MC-side
-      // import script no-ops on empty cert files.
-      await writeFilesToVolume(CA_VOLUME_NAME, [
-        { path: "/dst/ca.crt", content: "", mode: 0o644 },
-        { path: "/dst/ca.key", content: "", mode: 0o600 },
-        { path: "/dst/.ready", content: "0\n", mode: 0o644 },
-        { path: "/dst/import.sh", content: CA_IMPORT_SCRIPT, mode: 0o755 },
-      ]);
-    }
+    const configured = Boolean(certPem && keyPem);
+    const cert = configured ? certPem : "";
+    const ready = configured ? "1\n" : "0\n";
+    // Empty sentinel files (rather than deletions) keep the volumes in a
+    // known shape; the MC-side import script no-ops on an empty cert.
+    await writeFilesToVolume(CA_KEY_VOLUME_NAME, [
+      { path: "/dst/ca.crt", content: cert, mode: 0o644 },
+      { path: "/dst/ca.key", content: configured ? keyPem : "", mode: 0o600 },
+      { path: "/dst/.ready", content: ready, mode: 0o644 },
+    ]);
+    const publicMaterial = [
+      { path: "/dst/ca.crt", content: cert, mode: 0o644 },
+      { path: "/dst/.ready", content: ready, mode: 0o644 },
+      { path: "/dst/import.sh", content: CA_IMPORT_SCRIPT, mode: 0o755 },
+    ];
+    await writeFilesToVolume(CA_PUB_VOLUME_NAME, publicMaterial);
+    // Legacy volume: same public material, plus an explicit truncation
+    // of any ca.key left there by a pre-split deploy. MC containers
+    // created before the split mount this volume and cannot be re-bound
+    // without a recreate, so this is the only way the key stops being
+    // visible to them.
+    await writeFilesToVolume(CA_LEGACY_VOLUME_NAME, [
+      ...publicMaterial,
+      { path: "/dst/ca.key", content: "", mode: 0o600 },
+    ]);
 
     // Step 2: find current container. Try the compose name first,
     // fall back to any container with the
@@ -226,9 +326,14 @@ export async function mavenCacheRoutes(app: FastifyInstance): Promise<void> {
     // here so squid finds the cert without the operator editing
     // compose.
     const hostConfig = inspect.HostConfig ?? {};
-    const binds = [...(hostConfig.Binds ?? [])];
-    if (!binds.some((b) => b.startsWith(`${CA_VOLUME_NAME}:`))) {
-      binds.push(`${CA_VOLUME_NAME}:/etc/cofemine/ca:ro`);
+    // Drop a pre-split bind of the legacy volume if it's still there:
+    // that volume no longer carries a key, so leaving it mounted at
+    // /etc/cofemine/ca would silently put squid into splice-only mode.
+    const binds = (hostConfig.Binds ?? []).filter(
+      (b) => !b.startsWith(`${CA_LEGACY_VOLUME_NAME}:`)
+    );
+    if (!binds.some((b) => b.startsWith(`${CA_KEY_VOLUME_NAME}:`))) {
+      binds.push(`${CA_KEY_VOLUME_NAME}:/etc/cofemine/ca:ro`);
     }
     hostConfig.Binds = binds;
 
@@ -295,7 +400,7 @@ export async function mavenCacheRoutes(app: FastifyInstance): Promise<void> {
       env.find((e) => e.startsWith("UPSTREAM_PROXY="))?.slice("UPSTREAM_PROXY=".length) ??
       null;
     const caMounted = (inspect.HostConfig?.Binds ?? []).some((b) =>
-      b.startsWith(`${CA_VOLUME_NAME}:`)
+      b.startsWith(`${CA_KEY_VOLUME_NAME}:`)
     );
     return {
       running: inspect.State?.Running ?? false,

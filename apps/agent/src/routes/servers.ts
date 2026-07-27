@@ -10,6 +10,7 @@ import { getRuntime } from "../runtime/registry.js";
 import { config } from "../config.js";
 import { execInContainer, streamExecOutput } from "../utils/exec.js";
 import { ensureImagePulled } from "../docker-pull.js";
+import { assertSafeDownloadUrl } from "../security.js";
 
 const specSchema = z.object({
   id: z.string(),
@@ -579,6 +580,37 @@ export async function serversAgentRoutes(app: FastifyInstance): Promise<void> {
   function clientStagingDir(serverId: string, kind: ClientKind): string {
     return path.join(dataDirFor(serverId), ".cofemine-client", kind);
   }
+  /**
+   * The filename rules the client-pack routes share: a bare name (no
+   * separators, no `..`, no leading dot) with an allowed extension.
+   *
+   * Every route that turns a caller-supplied filename into a write path
+   * must call this. `path.join` does not sanitise — it happily resolves
+   * `../../..`, and these writes run as root in the container that holds
+   * docker.sock.
+   */
+  function assertBareClientFilename(name: string, kind: ClientKind): void {
+    const bad = (msg: string): never => {
+      throw Object.assign(new Error(msg), { statusCode: 400 });
+    };
+    if (
+      name.includes("/") ||
+      name.includes("\\") ||
+      name === "." ||
+      name === ".." ||
+      name.startsWith(".")
+    ) {
+      bad("Bare filename only");
+    }
+    const allowed = kind === "mods" ? /\.(jar|zip)$/i : /\.zip$/i;
+    if (!allowed.test(name)) {
+      bad(
+        kind === "mods"
+          ? "Only .jar / .zip files allowed for mods"
+          : `Only .zip files allowed for ${kind}`
+      );
+    }
+  }
 
   app.get("/servers/:id/client-mods", async (req) => {
     const { id } = req.params as { id: string };
@@ -711,8 +743,23 @@ export async function serversAgentRoutes(app: FastifyInstance): Promise<void> {
     await ensureDir(dir);
     const results: Array<{ filename: string; ok: boolean; error?: string }> = [];
     for (const f of body.files) {
-      const dest = path.join(dir, f.filename);
       try {
+        // Both halves of this pair are caller-controlled, and the write
+        // below is `fs.open(dest, "w")` running as root inside the agent
+        // container — the one container with docker.sock. Without these
+        // checks, `filename: "../../../../app/apps/agent/dist/main.js"`
+        // plus an attacker-chosen URL is arbitrary code execution next
+        // to the socket on the agent's next restart.
+        //
+        // The sibling upload route (/client-mods) has always applied the
+        // same two rules; this route was the one that skipped them.
+        assertBareClientFilename(f.filename, kind);
+        // downloadInstallerJar itself stays unguarded on purpose — the
+        // loader-install path legitimately fetches from the internal
+        // maven-cache over http. The guard belongs on call sites that
+        // take a URL from the request body, which is this one.
+        await assertSafeDownloadUrl(f.downloadUrl);
+        const dest = path.join(dir, f.filename);
         await downloadInstallerJar(
           f.downloadUrl,
           dest,
@@ -746,19 +793,9 @@ export async function serversAgentRoutes(app: FastifyInstance): Promise<void> {
         totalChunks: z.coerce.number().int().min(1).default(1),
       })
       .parse(req.body);
-    const allowed =
-      kind === "mods" ? /\.(jar|zip)$/i : /\.zip$/i;
-    if (!allowed.test(body.filename)) {
-      return reply.code(400).send({
-        error:
-          kind === "mods"
-            ? "Only .jar / .zip files allowed for mods"
-            : `Only .zip files allowed for ${kind}`,
-      });
-    }
-    if (body.filename.includes("/") || body.filename.includes("\\")) {
-      return reply.code(400).send({ error: "Bare filename only" });
-    }
+    // Same rules as the bulk-download route — one helper so the two
+    // can't drift apart again.
+    assertBareClientFilename(body.filename, kind);
     if (body.chunkIndex >= body.totalChunks) {
       return reply.code(400).send({
         error: `chunkIndex ${body.chunkIndex} >= totalChunks ${body.totalChunks}`,
@@ -1367,6 +1404,17 @@ export async function serversAgentRoutes(app: FastifyInstance): Promise<void> {
       return { kind: "file", path: rel, size: stat.size, truncated: true };
     }
     const content = await fs.readFile(abs, "utf8");
+    // The file manager is a second read path onto server.properties, and
+    // it only needs `server.view` — mask the same values the dedicated
+    // properties route masks, or the redaction there is theatre.
+    if (path.basename(abs) === "server.properties") {
+      return {
+        kind: "file",
+        path: rel,
+        size: stat.size,
+        content: redactPropertiesText(content),
+      };
+    }
     return { kind: "file", path: rel, size: stat.size, content };
   });
 
@@ -1378,7 +1426,17 @@ export async function serversAgentRoutes(app: FastifyInstance): Promise<void> {
     await ensureDir(path.dirname(abs));
     // Text path — single shot. Used by the editor save button.
     if (typeof body.content === "string") {
-      await fs.writeFile(abs, body.content, "utf8");
+      // The read path masks rcon.password in server.properties, and the
+      // editor sends the whole buffer back. Restore masked values from
+      // what's on disk so a save doesn't write the placeholder over the
+      // real password. (itzg regenerates the file from env on the next
+      // boot either way, but a broken RCON until then is a bad trade
+      // for an edit the user didn't make.)
+      const content =
+        path.basename(abs) === "server.properties"
+          ? await restoreRedactedProperties(abs, body.content)
+          : body.content;
+      await fs.writeFile(abs, content, "utf8");
       return { ok: true };
     }
     // Binary chunked path. Append base64-decoded bytes to <name>.part
@@ -1852,7 +1910,10 @@ export async function serversAgentRoutes(app: FastifyInstance): Promise<void> {
     const base = dataDirFor(id);
     const abs = safeResolve(base, "server.properties");
     const content = await fs.readFile(abs, "utf8").catch(() => "");
-    return { raw: content, parsed: parseProperties(content) };
+    return {
+      raw: redactPropertiesText(content),
+      parsed: redactPropertiesMap(parseProperties(content)),
+    };
   });
 
   app.put("/servers/:id/properties", async (req) => {
@@ -1863,7 +1924,15 @@ export async function serversAgentRoutes(app: FastifyInstance): Promise<void> {
     const base = dataDirFor(id);
     const abs = safeResolve(base, "server.properties");
     const current = await fs.readFile(abs, "utf8").catch(() => "");
-    const next = mergeProperties(current, body.properties);
+    // Drop values the read path masked: the editor sends the whole map
+    // back, so without this a save would write the mask text over the
+    // real RCON password.
+    const updates: Record<string, string> = {};
+    for (const [k, v] of Object.entries(body.properties)) {
+      if (v === REDACTED_PROPERTY_VALUE) continue;
+      updates[k] = v;
+    }
+    const next = mergeProperties(current, updates);
     await fs.writeFile(abs, next, "utf8");
     return { ok: true };
   });
@@ -2854,6 +2923,74 @@ function parseInstallInterrupt(text: string): InstallInterrupt | null {
     };
   }
   return null;
+}
+
+/**
+ * Keys in server.properties whose value must never leave the node.
+ *
+ * `rcon.password` is written there by itzg from the container env. Every
+ * MC container sits on the shared `cofemine_mcnet`, so handing that
+ * value to a user is handing them console execution on this server from
+ * any container on that network — and reading server.properties only
+ * needs `server.view`. Randomising the password (see itzg-provider)
+ * removes the *guessing* attack; this removes the *reading* one.
+ */
+const SECRET_PROPERTY_KEYS = new Set(["rcon.password"]);
+const REDACTED_PROPERTY_VALUE = "__COFEMINE_REDACTED__";
+
+/**
+ * Mask secret values in a raw server.properties body, preserving line
+ * order and comments so the file still round-trips through the editor.
+ */
+export function redactPropertiesText(raw: string): string {
+  return raw
+    .split(/\r?\n/)
+    .map((line) => {
+      if (!line || line.startsWith("#")) return line;
+      const eq = line.indexOf("=");
+      if (eq < 1) return line;
+      const key = line.slice(0, eq).trim().toLowerCase();
+      if (!SECRET_PROPERTY_KEYS.has(key)) return line;
+      return `${line.slice(0, eq)}=${REDACTED_PROPERTY_VALUE}`;
+    })
+    .join("\n");
+}
+
+/**
+ * Inverse of {@link redactPropertiesText} for the file-manager write
+ * path: any masked value is replaced with what is currently on disk.
+ */
+async function restoreRedactedProperties(
+  absPath: string,
+  incoming: string
+): Promise<string> {
+  if (!incoming.includes(REDACTED_PROPERTY_VALUE)) return incoming;
+  const current = parseProperties(
+    await fs.readFile(absPath, "utf8").catch(() => "")
+  );
+  return incoming
+    .split(/\r?\n/)
+    .map((line) => {
+      const eq = line.indexOf("=");
+      if (eq < 1) return line;
+      if (line.slice(eq + 1).trim() !== REDACTED_PROPERTY_VALUE) return line;
+      const key = line.slice(0, eq).trim();
+      const previous = current[key];
+      return previous === undefined ? line : `${line.slice(0, eq)}=${previous}`;
+    })
+    .join("\n");
+}
+
+function redactPropertiesMap(
+  parsed: Record<string, string>
+): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(parsed)) {
+    out[k] = SECRET_PROPERTY_KEYS.has(k.toLowerCase())
+      ? REDACTED_PROPERTY_VALUE
+      : v;
+  }
+  return out;
 }
 
 function parseProperties(raw: string): Record<string, string> {
@@ -4261,11 +4398,18 @@ async function exportMrpackFromCfPack(
  * SOCKS5 proxy (xray etc.). Returns a Readable that emits the
  * response body chunks. Used by the .mrpack exporter to inline
  * CDN-hosted client mods into the ZIP without a temp-disk hop.
+ *
+ * `url` always originates from a Modrinth / CurseForge file record, so
+ * it is a public CDN URL — enforced rather than assumed, because the
+ * agent can reach the panel's internal network and the host's metadata
+ * service. Deliberately NOT applied to downloadInstallerJar(), which
+ * legitimately targets the internal maven-cache over plain http.
  */
 async function openHttpStream(
   url: string,
   proxyUrl: string | null
 ): Promise<NodeJS.ReadableStream> {
+  await assertSafeDownloadUrl(url);
   if (proxyUrl?.startsWith("socks")) {
     const [{ SocksProxyAgent }, https] = await Promise.all([
       import("socks-proxy-agent"),

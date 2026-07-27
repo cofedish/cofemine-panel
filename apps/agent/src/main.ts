@@ -5,10 +5,11 @@ import { serversAgentRoutes } from "./routes/servers.js";
 import { backupsAgentRoutes } from "./routes/backups.js";
 import { installAgentRoutes } from "./routes/install.js";
 import { proxyAgentRoutes } from "./routes/proxy.js";
-import { mavenCacheRoutes, reseedCaWrapper } from "./routes/maven-cache.js";
+import { mavenCacheRoutes, seedCaVolumes } from "./routes/maven-cache.js";
 import { consoleAgentWs } from "./ws/console.js";
 import { ensureNetwork } from "./docker.js";
 import { ensureDir } from "./paths.js";
+import { timingSafeEqualStrings } from "./security.js";
 
 async function bootstrap(): Promise<void> {
   const app = Fastify({
@@ -30,7 +31,7 @@ async function bootstrap(): Promise<void> {
     if (!auth?.startsWith("Bearer ")) {
       return reply.code(401).send({ error: "Unauthorized" });
     }
-    if (auth.slice(7) !== config.AGENT_TOKEN) {
+    if (!timingSafeEqualStrings(auth.slice(7), config.AGENT_TOKEN)) {
       return reply.code(401).send({ error: "Invalid agent token" });
     }
   });
@@ -49,13 +50,17 @@ async function bootstrap(): Promise<void> {
   await ensureNetwork(config.AGENT_DOCKER_NETWORK).catch((err) =>
     app.log.warn({ err }, "ensureNetwork failed at startup")
   );
-  // Refresh the import.sh wrapper inside the shared CA volume to
-  // whatever version this agent ships. Without this, an agent upgrade
-  // (new wrapper logic) only reaches MC containers after the operator
-  // hits CA-generate or Re-apply, and freshly-recreated MC containers
-  // crashloop on the old script in the meantime.
-  await reseedCaWrapper().catch((err) =>
-    app.log.warn({ err }, "reseedCaWrapper failed at startup")
+  // Refresh the import.sh wrapper inside the MC-facing CA volumes to
+  // whatever version this agent ships, mirror the public CA material
+  // outward, and truncate the private key left in the legacy volume by
+  // pre-split deploys. Without the first part, an agent upgrade only
+  // reaches MC containers after the operator hits CA-generate or
+  // Re-apply, and freshly-recreated MC containers crashloop on the old
+  // script in the meantime; without the last part, every MC container
+  // created before the CA volume split keeps a readable copy of the
+  // CA's private key.
+  await seedCaVolumes().catch((err) =>
+    app.log.warn({ err }, "seedCaVolumes failed at startup")
   );
 
   await app.listen({ host: config.AGENT_HOST, port: config.AGENT_PORT });

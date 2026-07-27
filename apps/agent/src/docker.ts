@@ -34,17 +34,18 @@ export async function ensureVolume(name: string): Promise<void> {
 }
 
 /**
- * Write a small set of text files into a named Docker volume by
- * spinning up a throwaway alpine container that mounts the volume
- * and `sh -c`-s out the writes. This is the standard pattern for
- * seeding a volume when the agent has no host-side mount path of
- * its own. Files are written with mode 0644; the keyfile is then
- * chmod'd to 0600 because squid refuses to read world-readable
- * private keys.
+ * Run a shell script in a throwaway alpine container with the given
+ * volume binds. This is the standard pattern for touching a named
+ * volume when the agent has no host-side mount path of its own.
+ *
+ * Callers pass binds as `<volume>:<mountpoint>` so a single run can
+ * work across several volumes at once — which is how the CA material
+ * is kept consistent between the private, public and legacy volumes
+ * without three separate container launches.
  */
-export async function writeFilesToVolume(
-  volumeName: string,
-  files: Array<{ path: string; content: string; mode?: number }>
+export async function runInVolumes(
+  binds: string[],
+  script: string
 ): Promise<void> {
   // Make sure the helper image is available — pull only when missing,
   // so offline / air-gapped setups that pre-loaded it still work.
@@ -58,9 +59,50 @@ export async function writeFilesToVolume(
     });
   }
 
-  // Build a `mkdir -p <dirs>` then a sequence of base64-decoded writes
-  // so we don't have to deal with shell-escaping arbitrary file
-  // contents (PEM has newlines, but no NULs).
+  const c = await docker.createContainer({
+    Image: "alpine:3",
+    Cmd: ["sh", "-c", script],
+    HostConfig: {
+      Binds: binds,
+      AutoRemove: true,
+    },
+  });
+  await c.start();
+  // Wait so the container has time to finish; AutoRemove fires on exit.
+  try {
+    await c.wait();
+  } catch {
+    // AutoRemove may race with wait — that's fine, the write happened.
+  }
+}
+
+/**
+ * Build the shell fragment that writes one text file. Content is
+ * base64-encoded so we never have to shell-escape arbitrary bytes
+ * (PEM has newlines, but no NULs).
+ */
+export function writeFileScript(file: {
+  path: string;
+  content: string;
+  mode?: number;
+}): string {
+  const b64 = Buffer.from(file.content, "utf8").toString("base64");
+  return [
+    `echo '${b64}' | base64 -d > '${file.path}'`,
+    `chmod ${(file.mode ?? 0o644).toString(8)} '${file.path}'`,
+  ].join(" && ");
+}
+
+/**
+ * Write a small set of text files into a single named Docker volume.
+ * Files are written with mode 0644 unless overridden; the CA keyfile
+ * asks for 0600 because squid refuses to read a world-readable private
+ * key.
+ */
+export async function writeFilesToVolume(
+  volumeName: string,
+  files: Array<{ path: string; content: string; mode?: number }>
+): Promise<void> {
   const dirs = new Set<string>();
   for (const f of files) {
     const lastSlash = f.path.lastIndexOf("/");
@@ -70,29 +112,6 @@ export async function writeFilesToVolume(
   if (dirs.size > 0) {
     parts.push(`mkdir -p ${[...dirs].map((d) => `'${d}'`).join(" ")}`);
   }
-  for (const f of files) {
-    const b64 = Buffer.from(f.content, "utf8").toString("base64");
-    parts.push(`echo '${b64}' | base64 -d > '${f.path}'`);
-    parts.push(`chmod ${(f.mode ?? 0o644).toString(8)} '${f.path}'`);
-  }
-  const script = parts.join(" && ");
-
-  const c = await docker.createContainer({
-    Image: "alpine:3",
-    Cmd: ["sh", "-c", script],
-    HostConfig: {
-      Binds: [`${volumeName}:/dst`],
-      AutoRemove: true,
-    },
-    WorkingDir: "/dst",
-  });
-  await c.start();
-  // Wait so the container has time to finish AutoRemove will fire on
-  // exit. If the script failed we surface it via inspect → ExitCode
-  // before the container disappears.
-  try {
-    await c.wait();
-  } catch {
-    // AutoRemove may race with wait — that's fine, the write happened.
-  }
+  for (const f of files) parts.push(writeFileScript(f));
+  await runInVolumes([`${volumeName}:/dst`], parts.join(" && "));
 }

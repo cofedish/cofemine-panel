@@ -1,11 +1,11 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
-import path from "node:path";
 import { promises as fs } from "node:fs";
 import { request } from "undici";
 import { dataDirFor, ensureDir, safeResolve } from "../paths.js";
 import { docker } from "../docker.js";
 import { config } from "../config.js";
+import { assertSafeDownloadUrl } from "../security.js";
 
 const planSchema = z.object({
   provider: z.enum(["modrinth", "curseforge"]),
@@ -44,7 +44,9 @@ export async function installAgentRoutes(app: FastifyInstance): Promise<void> {
     await ensureDir(targetDir);
     const downloaded: string[] = [];
     for (const file of body.plan.files) {
-      const dest = path.join(targetDir, file.filename);
+      // The filename comes from the provider's file record and lands on
+      // disk — `path.join` would happily interpret `../../` in it.
+      const dest = safeResolve(targetDir, file.filename);
       await downloadTo(file.url, dest);
       downloaded.push(file.filename);
     }
@@ -52,13 +54,42 @@ export async function installAgentRoutes(app: FastifyInstance): Promise<void> {
   });
 }
 
+/** Redirect hops to follow before giving up. */
+const MAX_REDIRECTS = 5;
+
+/**
+ * Fetch `url` to `dest`, refusing anything that isn't public HTTPS.
+ *
+ * Redirects are followed manually rather than via undici's
+ * `maxRedirections`: the guard has to run on every hop, and undici
+ * would follow a 302 into `http://169.254.169.254/` or into the panel's
+ * own internal network without us ever seeing the target. The agent
+ * holds the Docker socket, so "fetch a URL and write the body to disk"
+ * is a primitive worth keeping narrow.
+ */
 async function downloadTo(url: string, dest: string): Promise<void> {
-  const res = await request(url, { maxRedirections: 5 });
-  if (res.statusCode >= 400) {
-    throw new Error(`Download failed: ${res.statusCode} for ${url}`);
+  let target = await assertSafeDownloadUrl(url);
+  for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
+    const res = await request(target, { maxRedirections: 0 });
+    if (res.statusCode >= 300 && res.statusCode < 400) {
+      const location = res.headers["location"];
+      await res.body.dump().catch(() => {});
+      const raw = Array.isArray(location) ? location[0] : location;
+      if (!raw) {
+        throw new Error(`Download failed: ${res.statusCode} with no Location`);
+      }
+      target = await assertSafeDownloadUrl(new URL(raw, target).toString());
+      continue;
+    }
+    if (res.statusCode >= 400) {
+      await res.body.dump().catch(() => {});
+      throw new Error(`Download failed: ${res.statusCode} for ${target.host}`);
+    }
+    const ab = await res.body.arrayBuffer();
+    await fs.writeFile(dest, Buffer.from(ab));
+    return;
   }
-  const ab = await res.body.arrayBuffer();
-  await fs.writeFile(dest, Buffer.from(ab));
+  throw new Error(`Download failed: more than ${MAX_REDIRECTS} redirects`);
 }
 
 /**

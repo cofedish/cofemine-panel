@@ -1,12 +1,33 @@
+import { randomBytes } from "node:crypto";
 import type { ContainerCreateOptions } from "dockerode";
 import { config } from "../config.js";
 import type {
   MinecraftRuntimeProvider,
   ServerSpec,
 } from "./runtime-provider.js";
-import { CA_MOUNT_PATH, CA_VOLUME_NAME } from "../routes/maven-cache.js";
+import { CA_MOUNT_PATH, CA_PUB_VOLUME_NAME } from "../routes/maven-cache.js";
 
 const IMAGE = process.env.AGENT_MC_IMAGE ?? "itzg/minecraft-server:latest";
+
+/**
+ * env keys that let the container escape its own privilege drop. itzg
+ * reads all four: UID/GID pick the uid the JVM runs as (0 = root),
+ * RUN_AS_ROOT / SKIP_SUDO skip the drop outright. Anyone with
+ * `server.edit` could otherwise make their Minecraft process root inside
+ * the container — which nullifies `no-new-privileges`, the dropped
+ * capabilities, and the 0600 on any mounted key material.
+ *
+ * The API rejects these at the schema layer (`serverEnvSchema` in
+ * @cofemine/shared) so the operator sees an error; this is the
+ * enforcement copy. Keep both — the agent must not depend on its
+ * callers having validated anything.
+ */
+const FORBIDDEN_ENV_KEYS = new Set([
+  "UID",
+  "GID",
+  "RUN_AS_ROOT",
+  "SKIP_SUDO",
+]);
 
 /**
  * Resolve the itzg image tag for a given Java major version. itzg
@@ -175,7 +196,19 @@ export class ItzgRuntimeProvider implements MinecraftRuntimeProvider {
       VERSION: spec.version,
       MEMORY: `${spec.memoryMb}M`,
       ENABLE_RCON: "true",
-      RCON_PASSWORD: `rcon-${spec.id}`,
+      // Random per container, not `rcon-<serverId>`. Every MC container
+      // shares cofemine_mcnet and server ids are visible in API
+      // responses, so a derivable password meant one compromised server
+      // could open an RCON session on every other one and run console
+      // commands there.
+      //
+      // Nothing outside the container ever needs this value: the panel
+      // reaches RCON by exec'ing `rcon-cli` *inside* the container,
+      // which picks the password up from this env. So it can be
+      // regenerated freely on every recreate and never has to be stored
+      // anywhere. An operator who wants a fixed password can still set
+      // RCON_PASSWORD in the env tab — spec.env is spread last.
+      RCON_PASSWORD: randomBytes(24).toString("base64url"),
       ...installRetryDefaults,
       ...cacheDefaults,
       ...spec.env,
@@ -207,8 +240,13 @@ export class ItzgRuntimeProvider implements MinecraftRuntimeProvider {
     // Panel-internal state flags that should never leak into the itzg
     // container. Used for bookkeeping (e.g. "use install proxy") and
     // consumed by the API before hitting the agent.
+    //
+    // Same pass drops the privilege-escalation keys — see
+    // FORBIDDEN_ENV_KEYS. This runs after `...spec.env` is spread, so a
+    // caller-supplied UID=0 is removed rather than honoured.
     for (const k of Object.keys(envMap)) {
       if (k.startsWith("__COFEMINE_")) delete envMap[k];
+      else if (FORBIDDEN_ENV_KEYS.has(k.toUpperCase())) delete envMap[k];
     }
     const env = Object.entries(envMap).map(([k, v]) => `${k}=${v}`);
 
@@ -245,14 +283,33 @@ export class ItzgRuntimeProvider implements MinecraftRuntimeProvider {
     // /maven-cache/recreate. We bind unconditionally so an MC restart
     // after the operator generates a CA picks it up without needing
     // a re-create of the MC container itself.
+    //
+    // Note the *pub* volume: it carries ca.crt + .ready + import.sh and
+    // deliberately not ca.key. See routes/maven-cache.ts — mounting the
+    // key-bearing volume here handed the CA's private key to every
+    // modpack the panel runs.
     const binds: string[] = [`${dataPath}:/data`];
     if (config.AGENT_MAVEN_CACHE_HOST) {
-      binds.push(`${CA_VOLUME_NAME}:${CA_MOUNT_PATH}:ro`);
+      binds.push(`${CA_PUB_VOLUME_NAME}:${CA_MOUNT_PATH}:ro`);
     }
     const hostConfig: ContainerCreateOptions["HostConfig"] = {
       Binds: binds,
       PortBindings: portBindings,
       RestartPolicy: { Name: "unless-stopped" },
+      // A Minecraft server runs whatever mod jars the owner installed —
+      // untrusted third-party code by default. These are the cheap
+      // container-level bounds on what that code can do to the host.
+      //
+      // no-new-privileges: no setuid binary inside the image can raise
+      // privileges. It does not interfere with itzg's `gosu`, which
+      // *drops* from root to uid 1000 (dropping is always allowed).
+      //
+      // PidsLimit: a fork bomb in a mod (or a runaway thread pool)
+      // otherwise exhausts the host's pid space and takes every other
+      // server on the node down with it. 512 is far above what a modded
+      // server needs — big packs sit around 120 threads.
+      SecurityOpt: ["no-new-privileges"],
+      PidsLimit: 512,
       Memory: containerMemoryMb * 1024 * 1024,
       // Pin swap to memory so the kernel can't swap-thrash the JVM
       // — disk-backed swap would tank tick rate before OOM-killing.
@@ -271,6 +328,56 @@ export class ItzgRuntimeProvider implements MinecraftRuntimeProvider {
     };
     if (spec.cpuLimit) {
       hostConfig.NanoCpus = Math.floor(spec.cpuLimit * 1e9);
+    }
+
+    // Bound the container's log growth. Without this the container
+    // inherits the daemon default, which for json-file is unbounded, and
+    // a crash-looping server fills the host partition — taking Postgres
+    // and the agent with it. See AGENT_MC_LOG_MAX_SIZE in config.ts.
+    if (config.AGENT_MC_LOG_MAX_SIZE) {
+      hostConfig.LogConfig = {
+        Type: "json-file",
+        Config: {
+          "max-size": config.AGENT_MC_LOG_MAX_SIZE,
+          "max-file": config.AGENT_MC_LOG_MAX_FILE,
+        },
+      };
+    }
+
+    // Sandboxed runtime (Kata / gVisor) for MC containers only. Empty =
+    // daemon default. This is the one measure that puts a kernel
+    // boundary between untrusted mod code and the host.
+    if (config.AGENT_MC_RUNTIME) {
+      hostConfig.Runtime = config.AGENT_MC_RUNTIME;
+    }
+
+    // Capability floor. itzg starts as root to fix ownership of /data and
+    // then `gosu`s down to uid 1000, so it needs the file-ownership set
+    // plus SETUID/SETGID; everything else (NET_ADMIN, NET_RAW, SYS_*,
+    // MKNOD, SYS_PTRACE …) is dead weight a mod could otherwise reach
+    // for. Verified against itzg/minecraft-server:java21 (vanilla 1.20.4):
+    // the server reaches "Done", the JVM ends up as uid 1000, and RCON
+    // starts — with CapDrop ALL and exactly this add-back set.
+    if (config.AGENT_MC_CAP_DROP) {
+      hostConfig.CapDrop = ["ALL"];
+      hostConfig.CapAdd = [
+        "CHOWN", // chown /data to uid 1000 on first boot
+        "DAC_OVERRIDE", // touch files owned by another uid
+        "FOWNER", // chmod/utime files it does not own
+        "FSETID", // keep setgid bits through chmod
+        "SETGID", // gosu: drop group
+        "SETUID", // gosu: drop user
+        "KILL", // signal the JVM on shutdown
+      ];
+    }
+
+    if (config.AGENT_MC_NOFILE) {
+      const nofile = Number(config.AGENT_MC_NOFILE);
+      if (Number.isFinite(nofile) && nofile > 0) {
+        hostConfig.Ulimits = [
+          { Name: "nofile", Soft: Math.floor(nofile), Hard: Math.floor(nofile) },
+        ];
+      }
     }
 
     const labels: Record<string, string> = {
