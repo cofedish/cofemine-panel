@@ -15,6 +15,11 @@ services:
       POSTGRES_DB: ${POSTGRES_DB}
     volumes:
       - db_data:/var/lib/postgresql/data
+    # No cap_drop here: postgres' entrypoint drops from root to the
+    # postgres user, which needs SETUID/SETGID/CHOWN. no-new-privileges
+    # doesn't interfere with dropping privileges.
+    security_opt:
+      - no-new-privileges:true
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER}"]
       interval: 10s
@@ -34,15 +39,35 @@ services:
     restart: always
     environment:
       UPSTREAM_PROXY: ${MAVEN_CACHE_UPSTREAM:-}
+      # Optional: restrict who may use squid as a forward proxy. This
+      # service also sits on the shared external Caddy network, so
+      # without it a container from any other stack there can proxy
+      # through us. Find the value with
+      # `docker network inspect cofemine_mcnet`.
+      MCNET_CIDR: ${MCNET_CIDR:-}
+      # CIDR of the reverse proxy in front of the public mirror (the
+      # Caddy network). Lets nginx key its rate limits on the real
+      # client instead of Caddy's container IP. Never 0.0.0.0/0.
+      TRUSTED_PROXY_CIDR: ${TRUSTED_PROXY_CIDR:-}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
       - maven_cache_data:/var/cache/nginx/maven
       - maven_cache_squid:/var/spool/squid
-      - cofemine_maven_cache_ca:/etc/cofemine/ca:ro
+      # The private CA volume (cert + key). NOT `cofemine_maven_cache_ca`
+      # — that one is mounted by every MC container created before the
+      # volume split and is now kept key-free. See
+      # apps/agent/src/routes/maven-cache.ts.
+      - cofemine_maven_cache_ca_key:/etc/cofemine/ca:ro
     # caddy_net so the user's external Caddy can reverse-proxy the
     # public /mirror/* paths into nginx:80 here. cofemine_mcnet keeps
     # MC containers reaching the cache as http://maven-cache:8081.
+    #
+    # No cap_drop: squid and nginx start as root and drop to
+    # `proxy`/`www-data`, which needs SETUID/SETGID/CHOWN.
+    # no-new-privileges doesn't interfere — dropping is always allowed.
+    security_opt:
+      - no-new-privileges:true
     networks: [cofemine_mcnet, caddy_net]
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1/healthz"]
@@ -65,6 +90,15 @@ services:
       AGENT_MAVEN_CACHE_HOST: "maven-cache"
       AGENT_MC_MAX_RETRIES: ${AGENT_MC_MAX_RETRIES:-10}
       AGENT_MC_RETRY_BACKOFF: ${AGENT_MC_RETRY_BACKOFF:-10}
+      # Host-protection knobs for the MC containers the agent creates.
+      # These containers are NOT described in this file, so compose's own
+      # `logging:` / `cap_drop:` never reach them — the agent has to set
+      # them at create time. See .env.example for what each one buys.
+      AGENT_MC_LOG_MAX_SIZE: ${AGENT_MC_LOG_MAX_SIZE:-10m}
+      AGENT_MC_LOG_MAX_FILE: ${AGENT_MC_LOG_MAX_FILE:-3}
+      AGENT_MC_RUNTIME: ${AGENT_MC_RUNTIME:-}
+      AGENT_MC_CAP_DROP: ${AGENT_MC_CAP_DROP:-true}
+      AGENT_MC_NOFILE: ${AGENT_MC_NOFILE:-}
     # The agent itself needs host.docker.internal resolvable so it
     # can reach a host-side download proxy (xray on the host's
     # 2080 port). On Docker Desktop this is automatic; on Linux
@@ -83,6 +117,29 @@ services:
       # mods/plugins/icons written by itzg.
       - ${DATA_ROOT:-/var/lib/cofemine/servers}:${DATA_ROOT:-/var/lib/cofemine/servers}
       - ${BACKUP_ROOT:-/var/lib/cofemine/backups}:${BACKUP_ROOT:-/var/lib/cofemine/backups}
+    # Privilege reduction for the one container that holds docker.sock.
+    #
+    # It deliberately still runs as root. The agent chowns files that
+    # root-running installer containers left in /data (see
+    # /servers/:id/fix-permissions), and Docker cannot grant a
+    # capability to a non-root USER — capabilities are dropped on the
+    # setuid unless ambient caps are set, which compose has no way to
+    # request. `user: node` + `cap_add: CHOWN` therefore *looks* safer
+    # while silently breaking loader installs. And with docker.sock
+    # mounted the uid is not a trust boundary anyway: anything that can
+    # talk to the socket can start a privileged container as root.
+    #
+    # What this does buy: everything outside the small set below is
+    # gone (NET_ADMIN, SYS_*, MKNOD, SYS_PTRACE …), and no setuid binary
+    # in the image can raise privileges.
+    security_opt:
+      - no-new-privileges:true
+    cap_drop: [ALL]
+    cap_add:
+      - CHOWN          # chown /data trees to itzg's uid 1000
+      - DAC_OVERRIDE   # write into dirs owned by other uids
+      - FOWNER         # chmod/utimes during tar extract
+      - FSETID
     networks: [cofemine_internal, cofemine_mcnet]
     logging:
       driver: json-file
@@ -98,6 +155,17 @@ services:
       SECRETS_KEY: ${SECRETS_KEY}
       WEB_ORIGIN: ${WEB_ORIGIN:-http://localhost:3000}
       API_PUBLIC_URL: ${API_PUBLIC_URL:-http://localhost:4000}
+      # Public origin used to build the /p/* client-pack links. Unset =
+      # they are derived from the request's Host header, which the
+      # client controls.
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-}
+      # Which peers may set X-Forwarded-For (drives req.ip → rate limit
+      # + audit log). Default covers Caddy → web → api on the private
+      # docker networks.
+      TRUST_PROXY: ${TRUST_PROXY:-loopback,linklocal,uniquelocal}
+      # When set, POST /auth/setup requires this token — closes the
+      # first-run window where whoever calls first becomes OWNER.
+      SETUP_TOKEN: ${SETUP_TOKEN:-}
       AGENT_TOKEN: ${AGENT_TOKEN}
       AGENT_PUBLIC_URL: http://agent:4100
       BOOTSTRAP_OWNER_EMAIL: ${BOOTSTRAP_OWNER_EMAIL:-}
@@ -112,6 +180,11 @@ services:
     depends_on:
       db: { condition: service_healthy }
       agent: { condition: service_started }
+    # Plain node processes: they need no Linux capabilities at all, and
+    # nothing in the image should ever be able to gain privileges.
+    security_opt:
+      - no-new-privileges:true
+    cap_drop: [ALL]
     networks: [cofemine_internal]
     logging:
       driver: json-file
@@ -141,6 +214,7 @@ services:
       JWT_SECRET: ${JWT_SECRET}
       SECRETS_KEY: ${SECRETS_KEY}
       WEB_ORIGIN: ${WEB_ORIGIN:-http://localhost:3000}
+      TRUST_PROXY: ${TRUST_PROXY:-loopback,linklocal,uniquelocal}
       AGENT_TOKEN: ${AGENT_TOKEN}
       AGENT_PUBLIC_URL: http://agent:4100
       MAP_PROXY_PORT: 4500
@@ -153,6 +227,11 @@ services:
     depends_on:
       db: { condition: service_healthy }
       agent: { condition: service_started }
+    # Plain node processes: they need no Linux capabilities at all, and
+    # nothing in the image should ever be able to gain privileges.
+    security_opt:
+      - no-new-privileges:true
+    cap_drop: [ALL]
     networks: [cofemine_internal]
     logging:
       driver: json-file
@@ -166,6 +245,9 @@ services:
       API_INTERNAL_URL: http://api:4000
       MAP_PROXY_INTERNAL_URL: http://map-proxy:4500
     depends_on: [api, map-proxy]
+    security_opt:
+      - no-new-privileges:true
+    cap_drop: [ALL]
     volumes:
       # Background-music drop-in. AUDIO_DIR points to a host directory
       # holding manifest.json + your mp3/ogg/etc. Default resolves to
@@ -192,6 +274,15 @@ volumes:
   db_data:
   maven_cache_data:
   maven_cache_squid:
+  # Private CA material (ca.crt + ca.key), mounted only by maven-cache.
+  cofemine_maven_cache_ca_key:
+    name: cofemine_maven_cache_ca_key
+  # Legacy volume. Still mounted by every MC container created before the
+  # CA volume split (binds are immutable), so the agent keeps it seeded
+  # with public material only and truncates ca.key on every seed.
+  # Declared here so `compose down -v` doesn't leave it orphaned.
+  # The pub volume MC containers use now (cofemine_maven_cache_ca_pub) is
+  # created by the agent — no compose service mounts it.
   cofemine_maven_cache_ca:
     name: cofemine_maven_cache_ca
   # mc_data / mc_backups are now bind-mounts to DATA_ROOT / BACKUP_ROOT,

@@ -19,8 +19,46 @@ permissions:
   packages: write
 
 jobs:
+  # Quality gate. Every push to main deploys straight to production, so
+  # this is the ONLY thing standing between a typo and a broken prod
+  # stack. Keep it as `needs:` of `build` — without it a type error
+  # reaches the server and is caught only by the post-deploy health
+  # probe (which passes for plenty of broken states).
+  check:
+    name: Typecheck
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9.7.0
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      # Frozen, same as the Dockerfiles. A drifting lockfile now fails
+      # CI instead of silently resolving different dependency versions
+      # in every build.
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # apps/api imports generated @prisma/client types; without this
+      # the typecheck fails on a fresh checkout.
+      - name: Generate Prisma client
+        run: pnpm db:generate
+
+      - name: Typecheck all packages
+        run: pnpm typecheck
+
   build:
     name: Build ${{ matrix.service }}
+    needs: check
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -93,7 +131,7 @@ jobs:
         }}
     steps:
       - name: SSH pull & restart
-        uses: appleboy/ssh-action@v1.2.0
+        uses: appleboy/ssh-action@7eaf76671a0d7eec5d98ee897acda4f968735a17 # v1.2.0
         with:
           host: ${{ secrets.DEPLOY_HOST }}
           username: ${{ secrets.DEPLOY_USER }}
@@ -147,7 +185,7 @@ jobs:
             step "done"
 
       - name: Health check
-        uses: appleboy/ssh-action@v1.2.0
+        uses: appleboy/ssh-action@7eaf76671a0d7eec5d98ee897acda4f968735a17 # v1.2.0
         with:
           host: ${{ secrets.DEPLOY_HOST }}
           username: ${{ secrets.DEPLOY_USER }}

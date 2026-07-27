@@ -8,4 +8,9 @@
 .local-data
 .env
 .env.local
+# Nested env files too — the root-only patterns above missed
+# apps/*/.env, which would otherwise be baked into an image layer.
+**/.env
+**/.env.*
+!**/.env.example
 **/.DS_Store
