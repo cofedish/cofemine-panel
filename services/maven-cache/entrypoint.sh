@@ -49,9 +49,14 @@ if [ -n "${UPSTREAM_PROXY:-}" ] && echo "$UPSTREAM_PROXY" | grep -q "host.docker
   fi
 fi
 
-FORWARD_FLAG=""
+# Built as an array, not a bare string. UPSTREAM_PROXY reaches this
+# container from the panel UI (Integrations → Download Proxy), so an
+# unquoted "${FORWARD_FLAG}" would word-split on whitespace and let a
+# panel admin smuggle extra gost listeners/flags into this command line.
+# Admin-only, hence not urgent — but it costs nothing to close.
+FORWARD_ARGS=()
 if [ -n "${UPSTREAM_PROXY:-}" ]; then
-  FORWARD_FLAG="-F=${UPSTREAM_PROXY}"
+  FORWARD_ARGS=("-F=${UPSTREAM_PROXY}")
   echo "[maven-cache] chaining gost through: ${UPSTREAM_PROXY}"
 else
   echo "[maven-cache] UPSTREAM_PROXY unset — gost goes direct"
@@ -75,7 +80,7 @@ gost \
   -L="tcp://127.0.0.1:8013/resources.download.minecraft.net:443" \
   -L="tcp://127.0.0.1:8014/bmclapi2.bangbang93.com:443" \
   -L="http://127.0.0.1:8082" \
-  ${FORWARD_FLAG} &
+  "${FORWARD_ARGS[@]}" &
 GOST_PID=$!
 sleep 1
 
@@ -90,7 +95,21 @@ else
   export SQUID_PEER_BLOCK=''
 fi
 
-envsubst '${SQUID_PEER_BLOCK}' < /etc/squid/squid.conf.template > /etc/squid/squid.conf
+# Optional source allowlist. Unset → empty block → any container that
+# can reach :8081 may use the proxy (still subject to the destination
+# denies). Set MCNET_CIDR to the cofemine_mcnet subnet to keep
+# neighbours on the shared Caddy network out.
+if [ -n "${MCNET_CIDR:-}" ]; then
+  export SQUID_SRC_BLOCK="acl mcnet src ${MCNET_CIDR}
+acl mcnet src 127.0.0.1/32
+http_access deny !mcnet"
+  echo "[maven-cache] restricting proxy clients to ${MCNET_CIDR}"
+else
+  export SQUID_SRC_BLOCK=''
+  echo "[maven-cache] MCNET_CIDR unset — proxy accepts any client that can reach :8081"
+fi
+
+envsubst '${SQUID_PEER_BLOCK} ${SQUID_SRC_BLOCK}' < /etc/squid/squid.conf.template > /etc/squid/squid.conf
 
 # 3. CA presence check + ssl_db init --------------------------------
 CA_READY=0
@@ -146,6 +165,29 @@ if ! squid -k parse -f /etc/squid/squid.conf 2>/tmp/squid-parse.log; then
 fi
 
 # 4. nginx ----------------------------------------------------------
+# Render the real_ip block. Without TRUSTED_PROXY_CIDR every public
+# request keys its rate limit on the reverse proxy's container address,
+# so the whole mirror shares one bucket. With it, limits apply per real
+# client. Never set it to 0.0.0.0/0 — that lets any client spoof its own
+# key via X-Forwarded-For.
+if [ -n "${TRUSTED_PROXY_CIDR:-}" ]; then
+  export NGINX_REAL_IP_BLOCK="set_real_ip_from ${TRUSTED_PROXY_CIDR};
+    real_ip_header X-Forwarded-For;
+    real_ip_recursive on;"
+  echo "[maven-cache] trusting X-Forwarded-For from ${TRUSTED_PROXY_CIDR}"
+else
+  export NGINX_REAL_IP_BLOCK=''
+  echo "[maven-cache] TRUSTED_PROXY_CIDR unset — rate limits key on the socket peer"
+fi
+envsubst '${NGINX_REAL_IP_BLOCK}' < /etc/nginx/nginx.conf.template > /etc/nginx/nginx.conf
+
+if ! nginx -t 2>/tmp/nginx-test.log; then
+  echo '[maven-cache] nginx config invalid:'
+  cat /tmp/nginx-test.log
+  kill $GOST_PID 2>/dev/null || true
+  exit 1
+fi
+
 nginx -g 'daemon off;' &
 NGINX_PID=$!
 

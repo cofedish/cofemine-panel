@@ -41,11 +41,19 @@ RUN set -eux; \
       *) echo "unsupported arch $arch"; exit 1 ;; \
     esac; \
     curl -fsSL -o /tmp/gost.tar.gz "https://github.com/go-gost/gost/releases/download/v${GOST_VERSION}/gost_${GOST_VERSION}_linux_${gost_arch}.tar.gz"; \
+    # Verify against the published checksum file, signature-free but
+    # enough to catch a tampered or truncated artifact. This binary
+    # terminates TLS for every loader download, so a swapped build would
+    # be an ideal place to hide.
+    curl -fsSL -o /tmp/gost.sha256 "https://github.com/go-gost/gost/releases/download/v${GOST_VERSION}/gost_${GOST_VERSION}_checksums.txt"; \
+    expected="$(grep " gost_${GOST_VERSION}_linux_${gost_arch}.tar.gz\$" /tmp/gost.sha256 | awk '{print $1}')"; \
+    [ -n "$expected" ] || { echo "no checksum entry for linux_${gost_arch}"; exit 1; }; \
+    echo "${expected}  /tmp/gost.tar.gz" | sha256sum -c -; \
     mkdir -p /tmp/gost-unpack; \
     tar -xzf /tmp/gost.tar.gz -C /tmp/gost-unpack; \
     mv /tmp/gost-unpack/gost /usr/local/bin/gost; \
     chmod +x /usr/local/bin/gost; \
-    rm -rf /tmp/gost.tar.gz /tmp/gost-unpack; \
+    rm -rf /tmp/gost.tar.gz /tmp/gost.sha256 /tmp/gost-unpack; \
     gost -V
 
 # squid needs an ssl_db, initialised once with security_file_certgen,
@@ -54,7 +62,9 @@ RUN set -eux; \
 # it in entrypoint to handle fresh installs.
 RUN install -d -o proxy -g proxy /var/spool/squid/ssl_db /var/cache/nginx/maven /etc/cofemine/ca
 
-COPY nginx.conf /etc/nginx/nginx.conf
+# nginx.conf is a template now (real_ip block is env-driven) — the
+# entrypoint renders it with envsubst before starting nginx.
+COPY nginx.conf /etc/nginx/nginx.conf.template
 COPY squid.conf.template /etc/squid/squid.conf.template
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh

@@ -46,8 +46,14 @@ acl mitm_domains ssl::server_name .neoforged.net
 acl mitm_domains ssl::server_name .minecraftforge.net
 acl mitm_domains ssl::server_name .fabricmc.net
 acl mitm_domains ssl::server_name .quiltmc.org
-acl mitm_domains ssl::server_name .mojang.com
-acl mitm_domains ssl::server_name .minecraft.net
+# Mojang is deliberately NOT here. The only thing keeping player auth
+# away from this proxy is NO_PROXY on the MC container, and an untrusted
+# mod ignores NO_PROXY at will. Bumping *.mojang.com would decrypt
+# session tokens and write them into access_log; splicing means we
+# tunnel them without ever holding the plaintext. There is nothing
+# cacheable on those endpoints anyway — the cacheable Mojang paths
+# (piston-data / piston-meta / libraries) go through nginx on :80, not
+# through squid.
 
 # at_step ACLs — squid evaluates ssl_bump rules at distinct phases of
 # the TLS handshake. step1=ClientHello received (we peek to learn the
@@ -62,8 +68,73 @@ ssl_bump peek step1
 ssl_bump bump step2 mitm_domains
 ssl_bump splice all
 
-# Allow everything by default — the panel network (cofemine_mcnet)
-# is the only thing that can reach :8081 anyway.
+# ---- Access control -------------------------------------------------
+#
+# :8081 is reachable by every container on cofemine_mcnet, and the agent
+# hands each MC container HTTPS_PROXY=http://maven-cache:8081. That makes
+# this an open forward proxy from the point of view of any mod running
+# inside a Minecraft server — i.e. arbitrary untrusted code. The rules
+# below take away the parts of that which are dangerous:
+#
+#   • cloud instance-metadata (169.254.169.254) — hands out IAM
+#     credentials for the whole host to anything that can issue a plain
+#     GET. This is the single highest-value target reachable from here.
+#   • RFC1918 / loopback / link-local — the docker networks, the panel's
+#     own API and Postgres, and anything else listening on the host.
+#     Requests to the real CDNs never resolve here.
+#   • non-web ports, and CONNECT to anything but 443 — stops the proxy
+#     being used as a generic TCP tunnel into the internal network.
+#
+# `http_access allow all` stays for now: MC containers route *all* their
+# HTTPS through here, including mod downloads hosted outside the CDN
+# allowlist (GitHub releases, CF mirrors). Narrowing to a dstdomain
+# allowlist needs a week of access_log first — see the hardening plan.
+acl SSL_ports port 443
+acl Safe_ports port 80
+acl Safe_ports port 443
+acl CONNECT method CONNECT
+
+acl to_metadata dst 169.254.169.254/32
+acl to_linklocal dst 169.254.0.0/16
+acl to_linklocal dst fe80::/10
+acl to_private dst 10.0.0.0/8
+acl to_private dst 172.16.0.0/12
+acl to_private dst 192.168.0.0/16
+acl to_private dst 127.0.0.0/8
+acl to_private dst fc00::/7
+acl to_private dst ::1/128
+
+# This container's own nginx layer (loader installer mirror on :80) is a
+# legitimate destination even though it resolves to a docker-private
+# address. MC containers are supposed to reach it directly — NO_PROXY
+# and the JVM's nonProxyHosts both list `maven-cache` — but a tool that
+# ignores those would hit the deny below and fail a loader install, so
+# allow it explicitly rather than depend on client-side config.
+acl to_cache dstdomain maven-cache
+
+# Optional source restriction. In prod this container also joins the
+# shared external Caddy network, so a container belonging to any other
+# stack on that network can reach :8081 and use it as a forward proxy to
+# the internet. The deny rules below stop it reaching anything private,
+# but not the open-proxy part.
+#
+# Set MCNET_CIDR (e.g. 172.28.0.0/16 — check `docker network inspect
+# cofemine_mcnet`) to lock the proxy to Minecraft containers. Left unset
+# the block is empty and behaviour is unchanged, because the subnet is
+# assigned dynamically by Docker and hardcoding a guess would break
+# every install.
+${SQUID_SRC_BLOCK}
+
+# Cache-manager interface: never expose it to the mcnet.
+http_access deny manager
+
+http_access deny to_metadata
+http_access deny !Safe_ports
+http_access deny CONNECT !SSL_ports
+http_access allow to_cache
+http_access deny to_linklocal
+http_access deny to_private
+
 http_access allow all
 
 # On-disk cache: 40 GB across 16 L1 / 256 L2 dirs.
