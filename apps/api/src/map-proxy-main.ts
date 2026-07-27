@@ -1,7 +1,9 @@
 import Fastify from "fastify";
 import cookie from "@fastify/cookie";
+import helmet from "@fastify/helmet";
 import sensible from "@fastify/sensible";
 import { ZodError } from "zod";
+import { config } from "./config.js";
 import { prisma } from "./db.js";
 import { registerAuthHook } from "./auth/plugin.js";
 import { mapRoutes } from "./servers/map-routes.js";
@@ -38,7 +40,9 @@ async function bootstrap(): Promise<void> {
     logger: {
       level: process.env.NODE_ENV === "production" ? "info" : "debug",
     },
-    trustProxy: true,
+    // Same reasoning as api/main.ts: trust X-Forwarded-For only from
+    // the private docker peers that actually sit in front of us.
+    trustProxy: config.TRUST_PROXY,
     // Same reason as in api/main.ts: BlueMap's iframe loads at
     // /servers/:id/map/bluemap/ (trailing slash) which Fastify's
     // wildcard `*` does not reliably match without this flag.
@@ -50,6 +54,34 @@ async function bootstrap(): Promise<void> {
     return this.toString();
   };
 
+  // This process streams third-party HTML/JS straight out of a
+  // Minecraft container (BlueMap, dynmap) into an iframe on the panel
+  // — the one place in the stack where untrusted markup reaches the
+  // user's browser under the panel's own origin. Until now it shipped
+  // no security headers at all.
+  //
+  // The policy is same-origin-everything: BlueMap serves all of its own
+  // assets, so nothing legitimate needs a third-party host. That kills
+  // exfiltration via connect-src and any injected off-site script,
+  // while leaving the renderer working. 'unsafe-inline'/'unsafe-eval'
+  // and blob: are required by BlueMap's bootstrap and its WebGL
+  // workers; dropping them breaks the map, so they stay.
+  await app.register(helmet, {
+    contentSecurityPolicy: {
+      useDefaults: false,
+      directives: {
+        "default-src": ["'self'", "data:", "blob:"],
+        "script-src": ["'self'", "'unsafe-inline'", "'unsafe-eval'", "blob:"],
+        "style-src": ["'self'", "'unsafe-inline'"],
+        "img-src": ["'self'", "data:", "blob:"],
+        "connect-src": ["'self'"],
+        "worker-src": ["'self'", "blob:"],
+        "frame-ancestors": ["'self'"],
+        "object-src": ["'none'"],
+        "base-uri": ["'none'"],
+      },
+    },
+  });
   await app.register(cookie);
   await app.register(sensible);
 

@@ -32,7 +32,11 @@ async function bootstrap(): Promise<void> {
     logger: {
       level: config.NODE_ENV === "production" ? "info" : "debug",
     },
-    trustProxy: true,
+    // Only private peers may dictate req.ip via X-Forwarded-For. With
+    // `true`, any client could send its own XFF header and both reset
+    // its rate-limit bucket and write a forged IP into the audit log.
+    // See TRUST_PROXY in config.ts for the deployment topology.
+    trustProxy: config.TRUST_PROXY,
     // Map iframe + relative-asset routing depends on the trailing
     // slash form of /servers/:id/map/bluemap/ matching the same route
     // as /servers/:id/map/bluemap/*. Without this, the slash variant
@@ -51,7 +55,23 @@ async function bootstrap(): Promise<void> {
     return this.toString();
   };
 
-  await app.register(helmet, { contentSecurityPolicy: false });
+  // This process serves JSON, a PEM download and .mrpack binaries —
+  // never a document that should load scripts, styles or frames. A
+  // deny-everything CSP costs nothing here and removes the "helmet is
+  // registered but CSP is off" footgun. The map-proxy process, which
+  // does proxy third-party HTML (BlueMap/dynmap), carries its own
+  // policy — see map-proxy-main.ts.
+  await app.register(helmet, {
+    contentSecurityPolicy: {
+      useDefaults: false,
+      directives: {
+        "default-src": ["'none'"],
+        "frame-ancestors": ["'none'"],
+        "base-uri": ["'none'"],
+        "form-action": ["'none'"],
+      },
+    },
+  });
   await app.register(cors, {
     origin: [config.WEB_ORIGIN, "https://cofemine.ru"],
     credentials: true,

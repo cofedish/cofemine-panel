@@ -34,3 +34,16 @@ export function decryptSecret(payload: string): string {
 export function sha256Hex(value: string): string {
   return crypto.createHash("sha256").update(value).digest("hex");
 }
+
+/**
+ * Constant-time string comparison for secrets.
+ *
+ * `timingSafeEqual` throws on length mismatch and comparing the lengths
+ * first would leak the secret's length, so both sides are hashed to a
+ * fixed 32 bytes and the digests are compared instead.
+ */
+export function timingSafeEqualStrings(a: string, b: string): boolean {
+  const ha = crypto.createHash("sha256").update(a, "utf8").digest();
+  const hb = crypto.createHash("sha256").update(b, "utf8").digest();
+  return crypto.timingSafeEqual(ha, hb);
+}

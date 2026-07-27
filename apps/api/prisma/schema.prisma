@@ -40,6 +40,7 @@ model User {
   memberships    Membership[]
   auditEvents    AuditEvent[]
   passwordResets PasswordResetToken[]
+  schedules      Schedule[]
 }
 
 model PasswordResetToken {
@@ -129,6 +130,14 @@ model Server {
   /// serves a freshly-built ZIP without panel auth. Owner-controlled,
   /// rotatable. Null = no public link.
   publicPackToken String? @unique
+  /// Whether this server appears in the public /p/index.json listing.
+  ///
+  /// Defaults to false on purpose: that listing embeds the raw token in
+  /// every URL, so publishing there turns a 128-bit unguessable link
+  /// into public knowledge — and the pack ships a servers.dat with the
+  /// server's address in it. Having a token and being *listed* are now
+  /// two separate decisions.
+  publicPackListed Boolean @default(false)
   /// Original CurseForge modpack reference. Persisted at install time
   /// for CF servers and NOT cleared on detach-from-source — that way
   /// the .mrpack export can rebuild from the canonical CF pack
@@ -203,10 +212,23 @@ model Schedule {
   enabled   Boolean   @default(true)
   lastRunAt DateTime?
   createdAt DateTime  @default(now())
+  /// Who created this schedule. Nullable because the column was added
+  /// after the fact (rows predating it stay null) and because the FK is
+  /// SetNull rather than Cascade — deleting a user must not silently
+  /// delete their backup schedules.
+  ///
+  /// Load-bearing for authorization: the scheduler re-checks that this
+  /// user still has `server.edit` on the target server before every run
+  /// and disables the schedule if they don't. Without it, a
+  /// `command: "op attacker"` schedule outlived the account that made
+  /// it and kept executing forever.
+  createdById String?
 
-  server Server @relation(fields: [serverId], references: [id], onDelete: Cascade)
+  server    Server @relation(fields: [serverId], references: [id], onDelete: Cascade)
+  createdBy User?  @relation(fields: [createdById], references: [id], onDelete: SetNull)
 
   @@index([serverId])
+  @@index([createdById])
 }
 
 model AuditEvent {

@@ -7,6 +7,7 @@ import { hashPassword } from "../auth/password.js";
 import { writeAudit } from "../audit/service.js";
 import { requireUser } from "../auth/context.js";
 import { issueResetTokenAndEmail } from "../auth/routes.js";
+import { restartScheduler } from "../schedules/scheduler.js";
 
 export async function usersRoutes(app: FastifyInstance): Promise<void> {
   app.get(
@@ -87,9 +88,27 @@ export async function usersRoutes(app: FastifyInstance): Promise<void> {
       if (id === current.id) {
         return reply.code(400).send({ error: "You cannot delete yourself" });
       }
+      // Disable this user's schedules BEFORE deleting them.
+      //
+      // The FK is onDelete: SetNull, so deletion would blank
+      // `createdById` — and the scheduler treats a null author as a
+      // legacy row and runs it. A `command: "op attacker"` schedule
+      // would therefore survive deletion of the account that created
+      // it, which is the exact scenario the author check exists to
+      // prevent. Disabling first makes the outcome deterministic
+      // instead of depending on an overloaded null.
+      const orphaned = await prisma.schedule.updateMany({
+        where: { createdById: id, enabled: true },
+        data: { enabled: false },
+      });
       await prisma.user.delete({ where: { id } });
-      await writeAudit(req, { action: "user.delete", resource: id });
-      return { ok: true };
+      await restartScheduler();
+      await writeAudit(req, {
+        action: "user.delete",
+        resource: id,
+        metadata: { schedulesDisabled: orphaned.count },
+      });
+      return { ok: true, schedulesDisabled: orphaned.count };
     }
   );
 

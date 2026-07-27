@@ -15,18 +15,31 @@ import {
  * cofemine_mcnet docker network is IPv4-only, so the JVM picking up an
  * AAAA record from a CDN with no IPv6 routing wedges TLS for ~30s.
  *
+ * Also the single place `CF_API_KEY` enters a container spec. It is
+ * injected here, at provision time, and deliberately NOT persisted on
+ * the `Server` row: the key used to live in `Server.env`, which meant
+ * every response carrying `env` handed the plaintext CurseForge key to
+ * anyone with `server.view`. Keeping it out of the row means there is
+ * nothing to leak in the first place — see servers/env-redaction.ts for
+ * the response-side backstop that covers operator-typed secrets.
+ *
  * Per-install proxying is no longer the API's job — the maven-cache
  * sidecar handles it transparently. The agent's itzg-provider injects
  * HTTPS_PROXY and the squid leaf-cert trust at container create time.
  */
 async function materializeEnv(
-  env: Record<string, string>
+  env: Record<string, string>,
+  serverType: string
 ): Promise<Record<string, string>> {
   const out: Record<string, string> = { ...env };
   const ipv4Opt = "-Djava.net.preferIPv4Stack=true";
   out.JAVA_TOOL_OPTIONS = out.JAVA_TOOL_OPTIONS
     ? `${out.JAVA_TOOL_OPTIONS} ${ipv4Opt}`
     : ipv4Opt;
+  if (serverType === "CURSEFORGE" && !out.CF_API_KEY) {
+    const key = await readCurseforgeApiKey();
+    if (key) out.CF_API_KEY = key;
+  }
   return out;
 }
 
@@ -105,13 +118,10 @@ async function mergeModpackEnv(
     if (input.modpack?.versionId) {
       env.CF_FILE_ID ??= input.modpack.versionId;
     }
-    // Inject the API key from our Integrations store so AUTO_CURSEFORGE
-    // can actually download the pack. Without this, itzg logs
-    // "API key is not set" and refuses to install.
-    if (!env.CF_API_KEY) {
-      const key = await readCurseforgeApiKey();
-      if (key) env.CF_API_KEY = key;
-    }
+    // NOTE: CF_API_KEY is deliberately NOT merged here. mergeModpackEnv's
+    // output is persisted on the Server row, and a plaintext CurseForge
+    // key in `Server.env` leaked through every response that returns env.
+    // `materializeEnv` injects it into the container spec instead.
     // Safety net: refuse to provision if we'd hand the agent a
     // CURSEFORGE spec with no usable project identifier. Better to
     // fail fast in the panel with an actionable message than have
@@ -371,6 +381,12 @@ export async function reconcileAndReprovision(
   // mods otherwise stay broken until the operator deletes and recreates
   // the server. mirrorUdpForMcPorts is idempotent, so this is a no-op
   // when the mirror is already there.
+  // One-way cleanup for rows created before CF_API_KEY moved out of the
+  // persisted env (see materializeEnv). Dropping it here means the very
+  // next repair / reprovision scrubs the stored plaintext key; the
+  // container still gets one because materializeEnv re-injects it.
+  if (refreshedEnv.CF_API_KEY) delete refreshedEnv.CF_API_KEY;
+
   const currentPorts =
     (server.ports as Array<{
       host: number;
@@ -395,7 +411,7 @@ export async function reconcileAndReprovision(
   const client = await NodeClient.forId(server.nodeId);
   const containerName =
     server.containerName ?? toContainerName(server.name, server.id);
-  const materialized = await materializeEnv(refreshedEnv);
+  const materialized = await materializeEnv(refreshedEnv, server.type);
   const spec = {
     id: server.id,
     name: server.name,
@@ -471,7 +487,7 @@ export async function provisionServerOnNode(serverId: string): Promise<void> {
   const client = await NodeClient.forId(server.nodeId);
   const containerName = toContainerName(server.name, server.id);
   const storedEnv = (server.env as Record<string, string> | null) ?? {};
-  const materialized = await materializeEnv(storedEnv);
+  const materialized = await materializeEnv(storedEnv, server.type);
   const spec = {
     id: server.id,
     name: server.name,

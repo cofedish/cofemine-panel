@@ -6,7 +6,24 @@ import { NodeClient } from "../nodes/node-client.js";
 import { z } from "zod";
 
 const createBackupSchema = z.object({
-  name: z.string().min(1).max(100).optional(),
+  // The agent turns this into `<name>.tar.gz` under the server's backup
+  // directory, so it has to be a bare filename. Without the charset
+  // restriction a name of `../<other-server-id>/x` writes outside this
+  // server's directory — the agent re-checks, but the operator should
+  // get a real error rather than a 400 from the node.
+  //
+  // Charset also has to keep the `manual-` / `scheduled-` prefixes
+  // intact: retention deletes only `scheduled-`-prefixed rows.
+  name: z
+    .string()
+    .min(1)
+    .max(100)
+    .regex(
+      /^[A-Za-z0-9._-]+$/,
+      "Backup name may contain only letters, digits, dot, dash and underscore"
+    )
+    .refine((n) => !n.startsWith("."), "Backup name must not start with a dot")
+    .optional(),
 });
 
 export async function backupsRoutes(app: FastifyInstance): Promise<void> {

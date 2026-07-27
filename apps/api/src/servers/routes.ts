@@ -21,6 +21,7 @@ import {
   reconcileAndReprovision,
 } from "./service.js";
 import { readDownloadProxy, makeProxyUrl } from "../integrations/download-proxy.js";
+import { redactEnv, restoreRedactedEnv } from "./env-redaction.js";
 import { reconcileMany } from "./status.js";
 import { streamMrpack } from "./export-mrpack.js";
 
@@ -100,6 +101,42 @@ async function curseforgeBulkLookup(
   }
 }
 
+/**
+ * Field projection for the single-server detail response. Kept as one
+ * constant so `GET /:id` and `PATCH /:id` cannot drift apart and
+ * accidentally reintroduce `node.tokenHash` / `node.host` / `containerId`
+ * on one of them.
+ */
+const SERVER_DETAIL_SELECT = {
+  id: true,
+  name: true,
+  description: true,
+  nodeId: true,
+  containerName: true,
+  runtime: true,
+  type: true,
+  version: true,
+  memoryMb: true,
+  cpuLimit: true,
+  ports: true,
+  env: true,
+  eulaAccepted: true,
+  status: true,
+  lastStartedAt: true,
+  templateId: true,
+  publicPackToken: true,
+  publicPackListed: true,
+  cfPackProjectId: true,
+  cfPackFileId: true,
+  clientPackExclusions: true,
+  clientServerAddress: true,
+  clientServerName: true,
+  createdAt: true,
+  updatedAt: true,
+  node: { select: { id: true, name: true, status: true } },
+  template: { select: { id: true, name: true } },
+} as const;
+
 export async function serversRoutes(app: FastifyInstance): Promise<void> {
   // List servers visible to the user.
   app.get("/", async (req) => {
@@ -143,9 +180,14 @@ export async function serversRoutes(app: FastifyInstance): Promise<void> {
   app.get("/:id", async (req, reply) => {
     const { id } = req.params as { id: string };
     await assertServerPermission(req, id, "server.view");
+    // Explicit projection, never `include: { node: true }` — the Node
+    // row carries `tokenHash` and the agent's internal `host`, and the
+    // browser has no business learning either (see
+    // .claude/rules/api-conventions.md). `containerId` is left out for
+    // the same reason: nothing in the UI reads it.
     const server = await prisma.server.findUnique({
       where: { id },
-      include: { node: true, template: true },
+      select: SERVER_DETAIL_SELECT,
     });
     if (!server) return reply.code(404).send({ error: "Not found" });
     // Same status-reconcile pass as the list endpoint, scoped to one
@@ -154,7 +196,11 @@ export async function serversRoutes(app: FastifyInstance): Promise<void> {
     const reconciled = await reconcileMany([
       { id: server.id, nodeId: server.nodeId, status: server.status },
     ]);
-    return { ...server, status: reconciled[server.id] ?? server.status };
+    return {
+      ...server,
+      env: redactEnv(server.env),
+      status: reconciled[server.id] ?? server.status,
+    };
   });
 
   app.post(
@@ -183,12 +229,28 @@ export async function serversRoutes(app: FastifyInstance): Promise<void> {
     const { id } = req.params as { id: string };
     await assertServerPermission(req, id, "server.edit");
     const body = updateServerSchema.parse(req.body);
+    const data: Record<string, unknown> = { ...body };
+    // The Env tab GETs the whole env (secret values masked), lets the
+    // user edit, then PATCHes it all back. Swap masked values for what
+    // is stored so a save doesn't overwrite the CurseForge key / RCON
+    // password with mask text. See servers/env-redaction.ts.
+    if (body.env) {
+      const existing = await prisma.server.findUniqueOrThrow({
+        where: { id },
+        select: { env: true },
+      });
+      data.env = restoreRedactedEnv(
+        body.env as Record<string, string>,
+        existing.env
+      );
+    }
     const updated = await prisma.server.update({
       where: { id },
-      data: body as any,
+      data: data as any,
+      select: SERVER_DETAIL_SELECT,
     });
     await writeAudit(req, { action: "server.update", resource: id });
-    return { ok: true, server: updated };
+    return { ok: true, server: { ...updated, env: redactEnv(updated.env) } };
   });
 
   app.delete("/:id", async (req) => {
@@ -312,7 +374,14 @@ export async function serversRoutes(app: FastifyInstance): Promise<void> {
     return { ok: true };
   });
 
-  app.post("/:id/clone", async (req, reply) => {
+  // Clone *creates* a new server + container, so it needs the same
+  // global gate as POST / — `server.view` on the source is necessary but
+  // nowhere near sufficient (it would let any VIEWER provision
+  // containers on the node).
+  app.post(
+    "/:id/clone",
+    { preHandler: requireGlobalPermission("server.create") },
+    async (req, reply) => {
     const { id } = req.params as { id: string };
     await assertServerPermission(req, id, "server.view");
     const source = await prisma.server.findUniqueOrThrow({ where: { id } });
@@ -386,7 +455,8 @@ export async function serversRoutes(app: FastifyInstance): Promise<void> {
       metadata: { source: source.id },
     });
     return reply.code(201).send({ id: cloned.id });
-  });
+    }
+  );
 
   // Files
   app.get("/:id/files", async (req) => {
@@ -836,7 +906,7 @@ export async function serversRoutes(app: FastifyInstance): Promise<void> {
     return reply.code(202).send({
       ok: true,
       async: Boolean(body.loader && body.version),
-      env: next,
+      env: redactEnv(next),
     });
     } catch (err) {
       // Log the full error with stack on the panel side so we can
@@ -1004,8 +1074,27 @@ export async function serversRoutes(app: FastifyInstance): Promise<void> {
         files: z
           .array(
             z.object({
-              filename: z.string().min(1).max(256),
-              downloadUrl: z.string().url(),
+              // Bare filename, allowed extension, https URL. The agent
+              // enforces all three again — it must not trust callers —
+              // but rejecting here gives the operator a real error
+              // instead of a per-file failure row, and keeps the API
+              // from forwarding a traversal attempt at all.
+              filename: z
+                .string()
+                .min(1)
+                .max(256)
+                .regex(
+                  /^[^/\\]+\.(jar|zip)$/i,
+                  "Bare .jar/.zip filename required (no path separators)"
+                )
+                .refine((n) => !n.startsWith("."), "Filename must not start with a dot"),
+              downloadUrl: z
+                .string()
+                .url()
+                .refine(
+                  (u) => u.startsWith("https://"),
+                  "Only https:// download URLs are allowed"
+                ),
             })
           )
           .min(1)
@@ -1492,7 +1581,10 @@ export async function serversRoutes(app: FastifyInstance): Promise<void> {
       memoryMb: s.memoryMb,
       cpuLimit: s.cpuLimit,
       ports: s.ports,
-      env: s.env,
+      // Exports get shared and pasted into issue trackers — masked, not
+      // plaintext. Re-importing fills the credentials back in from the
+      // panel's own Integrations store.
+      env: redactEnv(s.env),
     };
   });
 

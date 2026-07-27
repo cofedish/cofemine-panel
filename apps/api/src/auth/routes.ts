@@ -5,11 +5,17 @@ import { loginSchema, setupSchema } from "@cofemine/shared";
 import { prisma } from "../db.js";
 import { hashPassword, verifyPassword } from "./password.js";
 import { signSession } from "./jwt.js";
-import { sha256Hex } from "../crypto.js";
+import { sha256Hex, timingSafeEqualStrings } from "../crypto.js";
 import { config } from "../config.js";
 import { SESSION_COOKIE } from "./plugin.js";
 import { writeAudit } from "../audit/service.js";
 import { requireUser } from "./context.js";
+import {
+  checkLoginAllowed,
+  clearLoginFailures,
+  loginThrottleKeys,
+  recordLoginFailure,
+} from "./login-throttle.js";
 import { buildResetLink, sendMail } from "../mail/smtp.js";
 
 /** Reset tokens are valid for 1 hour from issue. */
@@ -28,13 +34,32 @@ const SESSION_COOKIE_OPTS = {
 export async function authRoutes(app: FastifyInstance): Promise<void> {
   app.get("/setup-status", async () => {
     const userCount = await prisma.user.count();
-    return { setupRequired: userCount === 0 };
+    const setupRequired = userCount === 0;
+    if (setupRequired && !config.SETUP_TOKEN) {
+      app.log.warn(
+        "first-run setup is OPEN: the next caller of POST /auth/setup becomes OWNER. " +
+          "Set SETUP_TOKEN (or BOOTSTRAP_OWNER_*) to close this window."
+      );
+    }
+    return { setupRequired, setupTokenRequired: Boolean(config.SETUP_TOKEN) };
   });
 
   app.post("/setup", async (req, reply) => {
     const existing = await prisma.user.count();
     if (existing > 0) {
       return reply.code(409).send({ error: "Setup already completed" });
+    }
+    // Trust-on-first-use guard. When SETUP_TOKEN is configured the
+    // caller must present it, so a stranger who finds the panel during
+    // the install window can't claim OWNER.
+    if (config.SETUP_TOKEN) {
+      const supplied = z
+        .object({ setupToken: z.string().max(500).optional() })
+        .parse(req.body ?? {}).setupToken;
+      if (!supplied || !timingSafeEqualStrings(supplied, config.SETUP_TOKEN)) {
+        await writeAudit(req, { action: "auth.setup-rejected" });
+        return reply.code(403).send({ error: "Invalid setup token" });
+      }
     }
     const body = setupSchema.parse(req.body);
     const user = await prisma.user.create({
@@ -52,14 +77,34 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
 
   app.post("/login", async (req, reply) => {
     const body = loginSchema.parse(req.body);
+    // Throttle per account AND per source address. The global 600/min
+    // limiter is far too loose to stop password guessing on a single
+    // account. See auth/login-throttle.ts.
+    const throttleKeys = loginThrottleKeys(req.ip, body.usernameOrEmail);
+    const verdict = checkLoginAllowed(throttleKeys);
+    if (!verdict.allowed) {
+      reply.header("retry-after", String(verdict.retryAfterSeconds));
+      return reply.code(429).send({
+        error: `Too many failed attempts. Try again in ${verdict.retryAfterSeconds}s.`,
+      });
+    }
     const user = await prisma.user.findFirst({
       where: {
         OR: [{ email: body.usernameOrEmail }, { username: body.usernameOrEmail }],
       },
     });
     if (!user || !(await verifyPassword(body.password, user.password))) {
+      recordLoginFailure(throttleKeys);
+      // Failed attempts are the ones worth having in the audit trail —
+      // a successful login after twenty of these is the signal.
+      // `resource` holds what was typed, not a confirmed account.
+      await writeAudit(req, {
+        action: "auth.login-failed",
+        resource: body.usernameOrEmail.slice(0, 200),
+      });
       return reply.code(401).send({ error: "Invalid credentials" });
     }
+    clearLoginFailures(throttleKeys);
     await issueSession(app, req, reply, user.id);
     await writeAudit(req, { action: "auth.login", resource: user.id });
     return reply.send({ ok: true });
@@ -173,8 +218,17 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
     const user = requireUser(req);
     const body = z
       .object({
+        // Format-checked, not just size-capped. An arbitrary string
+        // here renders as an <img src> in the panel, so a remote URL
+        // would turn every page view into a callback to whoever set it
+        // — a deanonymisation beacon on the admin. Same shape the
+        // server-icon route already enforces.
         avatar: z
           .string()
+          .regex(
+            /^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/]+={0,2}$/,
+            "Avatar must be a base64 PNG/JPEG/WebP data URL"
+          )
           .max(300_000, "Avatar too large (max ~300KB base64)")
           .nullable()
           .optional(),

@@ -3,11 +3,34 @@ import { createTemplateSchema } from "@cofemine/shared";
 import { prisma } from "../db.js";
 import { requireGlobalPermission } from "../auth/rbac.js";
 import { writeAudit } from "../audit/service.js";
+import { redactEnv } from "../servers/env-redaction.js";
 
 export async function templatesRoutes(app: FastifyInstance): Promise<void> {
-  app.get("/", async () => {
-    return prisma.template.findMany({ orderBy: { createdAt: "asc" } });
-  });
+  // Templates carry an `env` blob of exactly the kind redactEnv exists
+  // for. This was the one route in the router without a gate, so any
+  // authenticated user — including a VIEWER with no server access at
+  // all — could read every template's env in plaintext.
+  app.get(
+    "/",
+    { preHandler: requireGlobalPermission("template.manage") },
+    async () => {
+      const rows = await prisma.template.findMany({
+        orderBy: { createdAt: "asc" },
+        select: {
+          id: true,
+          name: true,
+          description: true,
+          type: true,
+          version: true,
+          memoryMb: true,
+          env: true,
+          createdAt: true,
+          updatedAt: true,
+        },
+      });
+      return rows.map((t) => ({ ...t, env: redactEnv(t.env) }));
+    }
+  );
 
   app.post(
     "/",

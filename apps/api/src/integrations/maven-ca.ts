@@ -11,9 +11,29 @@ import { decryptSecret, encryptSecret } from "../crypto.js";
  * Threat model: this CA signs leaf certs ONLY for whitelisted CDN
  * hostnames inside squid's `ssl_bump bump` ACL. Everything outside
  * that whitelist is `ssl_bump splice`-d (passthrough, no MITM).
- * Player auth (sessionserver.mojang.com etc.) is excluded from the
- * proxy entirely via NO_PROXY on the MC container, so it never even
- * reaches this CA.
+ * Mojang auth domains are excluded from that ACL, so session traffic is
+ * tunnelled without ever being decrypted here.
+ *
+ * The certificate carries X.509 Name Constraints limiting it to the CDN
+ * domains below — but do not treat that as the control protecting you.
+ *
+ * **Name Constraints do not bind Java clients.** The JDK's PKIXValidator
+ * builds trust anchors as `new TrustAnchor(cert, null)`, discarding any
+ * name constraints the anchor itself carries, so a leaf signed by this
+ * CA for an unrelated host is accepted by a JVM that trusts it. Java is
+ * exactly the client that matters here — mc-image-helper and the
+ * Minecraft server are the whole reason this cert is imported into
+ * cacerts. The constraint does bind OpenSSL-based clients (curl/wget
+ * inside the container, an operator's browser), so it stays, but the
+ * property that actually contains a compromise is key confinement: the
+ * private key only ever reaches the maven-cache sidecar's own volume
+ * (see apps/agent/src/routes/maven-cache.ts).
+ *
+ * Caveat worth testing on a staging server: squid mimics the origin
+ * certificate when it mints a leaf, including subjectAltName. If a CDN
+ * behind Cloudflare presents SANs outside the permitted set, the whole
+ * leaf fails constraint checking — which would break the OpenSSL path
+ * while Java carries on, i.e. a confusing partial failure.
  *
  * Both the cert and the private key are encrypted with the panel's
  * SECRETS_KEY before they land in IntegrationSetting (cert PEM is
@@ -38,8 +58,13 @@ const KEYS = {
 export type MavenCaMaterial = {
   /** PEM-encoded root certificate. Safe to ship into MC containers. */
   certPem: string;
-  /** PEM-encoded private key. Only sent to maven-cache sidecar,
-   *  never to a Minecraft container. */
+  /**
+   * PEM-encoded private key. The agent writes it to the private
+   * `cofemine_maven_cache_ca` volume, which only the maven-cache
+   * sidecar mounts. MC containers mount the separate `_ca_pub` volume,
+   * which never receives this value — see
+   * apps/agent/src/routes/maven-cache.ts.
+   */
   keyPem: string;
 };
 
@@ -110,9 +135,77 @@ export async function clearMavenCa(): Promise<void> {
 }
 
 /**
- * Generate a fresh self-signed CA (RSA-2048, valid 10 years) and
- * persist it. The cert is marked as a CA via Basic Constraints + Key
- * Usage so JVM/openssl chains accept it as an intermediate signer.
+ * Domains this CA is permitted to sign for. Must stay a superset of
+ * squid's `mitm_domains` ACL (services/maven-cache/squid.conf.template)
+ * — a domain that squid bumps but that isn't listed here produces a
+ * leaf certificate every PKIX verifier rejects, which surfaces as a
+ * failed modpack install.
+ *
+ * Bare domains, not `.domain`: an X.509 dNSName constraint already
+ * covers the domain and everything under it.
+ */
+const PERMITTED_DOMAINS = [
+  "forgecdn.net",
+  "curseforge.com",
+  "modrinth.com",
+  "neoforged.net",
+  "minecraftforge.net",
+  "fabricmc.net",
+  "quiltmc.org",
+];
+
+/**
+ * Validity window. Short on purpose: this is a trust root installed
+ * into every Minecraft container's JVM truststore, and there is no
+ * revocation path for it — expiry IS the revocation mechanism. 180 days
+ * rather than 90 because rotation is still a manual action in the
+ * Integrations UI; the panel warns when the CA is close to expiring.
+ */
+const CA_VALIDITY_DAYS = 180;
+
+/**
+ * Build the DER for an X.509 NameConstraints extension permitting only
+ * the dNSNames above.
+ *
+ * Hand-rolled because node-forge has no builder for this extension —
+ * it does pass through a raw `{ id, critical, value }` triple, where
+ * `value` is the DER of the extension body.
+ *
+ *   NameConstraints ::= SEQUENCE { permittedSubtrees [0] GeneralSubtrees }
+ *   GeneralSubtrees ::= SEQUENCE OF GeneralSubtree
+ *   GeneralSubtree  ::= SEQUENCE { base GeneralName }
+ *   GeneralName     ::= ... dNSName [2] IA5String
+ */
+function nameConstraintsExtension(): {
+  id: string;
+  critical: boolean;
+  value: string;
+} {
+  const { asn1 } = forge;
+  const subtrees = PERMITTED_DOMAINS.map((domain) =>
+    asn1.create(asn1.Class.UNIVERSAL, asn1.Type.SEQUENCE, true, [
+      // [2] dNSName, context-specific + primitive
+      asn1.create(asn1.Class.CONTEXT_SPECIFIC, 2, false, domain),
+    ])
+  );
+  const permitted = asn1.create(asn1.Class.CONTEXT_SPECIFIC, 0, true, subtrees);
+  const body = asn1.create(asn1.Class.UNIVERSAL, asn1.Type.SEQUENCE, true, [
+    permitted,
+  ]);
+  return {
+    // 2.5.29.30 — id-ce-nameConstraints. RFC 5280 requires it to be
+    // marked critical.
+    id: "2.5.29.30",
+    critical: true,
+    value: asn1.toDer(body).getBytes(),
+  };
+}
+
+/**
+ * Generate a fresh self-signed CA (RSA-2048) and persist it. The cert is
+ * marked as a CA via Basic Constraints + Key Usage so JVM/openssl chains
+ * accept it as a signer, and constrained by Name Constraints to the CDN
+ * domains squid is allowed to intercept.
  *
  * RSA-2048 vs ECC: most JVMs (especially older java8/11 itzg variants
  * the panel still supports) ship with patchy EC curve coverage, while
@@ -128,11 +221,14 @@ export async function generateMavenCa(): Promise<MavenCaDisplay> {
   // a stable parent serial to chain leaf certs from.
   cert.serialNumber = forge.util.bytesToHex(forge.random.getBytesSync(16));
   const now = new Date();
-  cert.validity.notBefore = now;
+  // Backdate slightly: a container whose clock lags the panel's would
+  // otherwise reject a freshly minted CA as not-yet-valid.
+  cert.validity.notBefore = new Date(now.getTime() - 60 * 60 * 1000);
+  // Arithmetic on epoch ms, not on the local-time Date constructor —
+  // the previous `new Date(y+10, m, d)` form was interpreted in the
+  // server's local timezone while X.509 validity is UTC.
   cert.validity.notAfter = new Date(
-    now.getFullYear() + 10,
-    now.getMonth(),
-    now.getDate()
+    now.getTime() + CA_VALIDITY_DAYS * 24 * 60 * 60 * 1000
   );
   const attrs = [
     { name: "commonName", value: "Cofemine Panel maven-cache CA" },
@@ -151,6 +247,7 @@ export async function generateMavenCa(): Promise<MavenCaDisplay> {
       critical: true,
     },
     { name: "subjectKeyIdentifier" },
+    nameConstraintsExtension(),
   ]);
   cert.sign(keys.privateKey, forge.md.sha256.create());
 

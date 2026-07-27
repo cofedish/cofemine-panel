@@ -100,7 +100,52 @@ export function resolveMcVersion(server: Server): string {
  * and the public /p/:token.mrpack endpoint (resolved by token first
  * → server, then handed here).
  */
+/**
+ * Process-wide dispatcher for pack exports, created on first use.
+ */
+let sharedDispatcher: UndiciAgent | null = null;
+function mrpackDispatcher(): UndiciAgent {
+  sharedDispatcher ??= new UndiciAgent({
+    connections: 4,
+    bodyTimeout: 30 * 60_000, // 30 min — CF rebuild streams 320+ files
+  });
+  return sharedDispatcher;
+}
+
+/**
+ * Cap on concurrent pack builds.
+ *
+ * Rate limiting bounds how *often* `/p/<token>.mrpack` is requested, not
+ * how many builds run at once — and each one makes the agent assemble a
+ * ZIP of every jar on the server while holding a 30-minute body timeout.
+ * Without a ceiling, a handful of parallel anonymous requests is enough
+ * to keep a node busy indefinitely (and, on CurseForge packs, to spend
+ * the operator's API quota doing it).
+ */
+const MAX_CONCURRENT_EXPORTS = 3;
+let activeExports = 0;
+
 export async function streamMrpack(
+  server: Server,
+  node: Node,
+  reply: FastifyReply,
+  opts: { includeAutoDetected?: boolean } = {}
+): Promise<FastifyReply> {
+  if (activeExports >= MAX_CONCURRENT_EXPORTS) {
+    return reply
+      .code(503)
+      .header("retry-after", "60")
+      .send({ error: "Too many pack builds in progress — try again shortly." });
+  }
+  activeExports += 1;
+  try {
+    return await buildMrpack(server, node, reply, opts);
+  } finally {
+    activeExports -= 1;
+  }
+}
+
+async function buildMrpack(
   server: Server,
   node: Node,
   reply: FastifyReply,
@@ -187,10 +232,11 @@ export async function streamMrpack(
     });
   }
 
-  const dispatcher = new UndiciAgent({
-    connections: 4,
-    bodyTimeout: 30 * 60_000, // 30 min — CF rebuild streams 320+ files
-  });
+  // One shared dispatcher for the whole process. It used to be
+  // constructed per request and never closed, so every export leaked a
+  // connection pool — and `/p/<token>.mrpack` is unauthenticated, so
+  // "every export" is attacker-controlled.
+  const dispatcher = mrpackDispatcher();
   const target = `${node.host.replace(/\/$/, "")}/servers/${server.id}/export-mrpack?${params.toString()}`;
   const upstream = await undiciRequest(target, {
     method: "GET",

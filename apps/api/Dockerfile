@@ -6,10 +6,22 @@ RUN apk add --no-cache openssl \
 WORKDIR /app
 
 FROM base AS deps
-COPY package.json pnpm-workspace.yaml pnpm-lock.yaml* ./
+# Every workspace member's manifest, not just this app's: a frozen
+# install compares the lockfile against the whole workspace, so a
+# missing manifest reads as "lockfile out of date" and fails the build.
+# No `*` on the lockfile either — if it's absent we want a loud failure,
+# not a silent fresh resolve.
+COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
 COPY apps/api/package.json apps/api/package.json
+COPY apps/agent/package.json apps/agent/package.json
+COPY apps/web/package.json apps/web/package.json
 COPY packages/shared/package.json packages/shared/package.json
-RUN pnpm install --frozen-lockfile=false --filter @cofemine/api... --prod=false
+# Frozen: builds install exactly what the committed lockfile pins.
+# Without this every rebuild re-resolved caret ranges from the registry,
+# so a malicious patch release of any of ~400 transitive packages would
+# reach production through the push-to-main auto-deploy with nobody in
+# the loop.
+RUN pnpm install --frozen-lockfile --filter @cofemine/api... --prod=false
 
 FROM deps AS build
 COPY tsconfig.base.json ./

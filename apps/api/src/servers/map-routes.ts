@@ -130,6 +130,52 @@ async function assertServerPermissionCached(
 }
 
 /**
+ * Longest asset path we'll accept. BlueMap's deepest tile paths sit
+ * around 120 chars; 1 KB is generous headroom without letting someone
+ * hand us a megabyte of URL to normalise.
+ */
+const SUBPATH_MAX_LENGTH = 1024;
+
+/**
+ * Validate + re-encode the wildcard subpath before it is spliced into
+ * the agent URL.
+ *
+ * Why this is security-critical: the forwarded request carries the
+ * node's `AGENT_TOKEN`, which authorises *every* agent route — file
+ * manager included. Fastify percent-decodes wildcard params, so a
+ * request for `/map/bluemap/%2e%2e%2f%2e%2e%2fservers/<other>/files`
+ * arrives here as `../../servers/<other>/files`; WHATWG-URL then
+ * normalises it away and the panel would happily read another server's
+ * filesystem with a privileged token. Traversal here is privilege
+ * escalation, not a wrong 404.
+ *
+ * Returns the safe, re-encoded subpath, or null when the input must be
+ * rejected.
+ */
+function sanitizeSubpath(raw: string): string | null {
+  if (raw.length > SUBPATH_MAX_LENGTH) return null;
+  // Backslash, NUL and other control characters are never part of a map
+  // asset path, and each is a decoder-dependent traversal primitive
+  // somewhere down the chain (Windows paths, header splitting). Checked
+  // by code point rather than a regex so this file stays free of literal
+  // control bytes (which make it unsearchable with ripgrep).
+  for (let i = 0; i < raw.length; i++) {
+    const code = raw.charCodeAt(i);
+    if (code < 0x20 || code === 0x7f || raw[i] === "\\") return null;
+  }
+  // A surviving `%` means the caller double-encoded something. No real
+  // BlueMap/dynmap asset needs that, and allowing it would hand the
+  // next decoder in the chain an escape hatch.
+  if (raw.includes("%")) return null;
+  const segments = raw.split("/");
+  if (segments.some((s) => s === "." || s === "..")) return null;
+  // Re-encode per segment so what we send is unambiguous for the agent
+  // (spaces / non-ASCII in world names included). `/` stays structural
+  // because we split on it ourselves.
+  return segments.map((s) => encodeURIComponent(s)).join("/");
+}
+
+/**
  * Forward one GET to the agent's container proxy on the chosen
  * upstream port. Returns the streamed reply or sends a 502 if the
  * upstream isn't responding.
@@ -146,10 +192,42 @@ async function forwardToProvider(
   const node = await resolveServerNode(serverId);
   if (!node) return reply.code(404).send({ error: "Server / node not found" });
 
+  const safeSubpath = sanitizeSubpath(subpath);
+  if (safeSubpath === null) {
+    req.log.warn(
+      { serverId, subpath, ua: req.headers["user-agent"] },
+      "map proxy rejected a malformed subpath"
+    );
+    return reply.code(400).send({ error: "Invalid map path" });
+  }
+
   const qs = req.url.includes("?")
     ? req.url.slice(req.url.indexOf("?"))
     : "";
-  const target = `${node.host.replace(/\/$/, "")}/servers/${serverId}/proxy/${port}/${subpath}${qs}`;
+  // Belt and braces on top of sanitizeSubpath: build the URL, let WHATWG
+  // normalise it, then assert the result still points inside THIS
+  // server's proxy namespace. The request below carries the node's agent
+  // token, so anything that escapes `/servers/<id>/proxy/<port>/` reads
+  // another server's data with full node privileges.
+  const encodedId = encodeURIComponent(serverId);
+  const expectedPrefix = `/servers/${encodedId}/proxy/${port}/`;
+  let target: string;
+  try {
+    const url = new URL(
+      `${node.host.replace(/\/$/, "")}${expectedPrefix}${safeSubpath}`
+    );
+    if (!url.pathname.startsWith(expectedPrefix)) {
+      req.log.warn(
+        { serverId, subpath, pathname: url.pathname },
+        "map proxy rejected a subpath that normalised outside its namespace"
+      );
+      return reply.code(400).send({ error: "Invalid map path" });
+    }
+    if (qs) url.search = qs;
+    target = url.toString();
+  } catch {
+    return reply.code(400).send({ error: "Invalid map path" });
+  }
 
   try {
     // Forward enough of the request for caching + ranged fetches to

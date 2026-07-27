@@ -86,6 +86,22 @@ export async function applyDownloadProxyToMavenCaches(
   // run squid in pure CONNECT-passthrough mode" — fine for an
   // operator who hasn't generated one yet.
   const ca = await readMavenCa();
+  // The CA is short-lived by design (see maven-ca.ts) and rotation is a
+  // manual click in Integrations. Expiry is silent otherwise: squid
+  // keeps minting leaves from a dead root and modpack installs start
+  // failing with opaque TLS errors. Warn while there's still time.
+  if (ca) {
+    const { notAfter } = await readMavenCaForDisplay();
+    const daysLeft = notAfter
+      ? Math.floor((new Date(notAfter).getTime() - Date.now()) / 86_400_000)
+      : null;
+    if (daysLeft !== null && daysLeft <= 30) {
+      log.warn(
+        { daysLeft, notAfter },
+        "maven-cache CA expires soon — regenerate it in Integrations and recreate MC containers"
+      );
+    }
+  }
   const nodes = await prisma.node.findMany();
   const results: Array<{ node: string; ok: boolean; error?: string }> = [];
   for (const n of nodes) {
@@ -109,7 +125,15 @@ export async function applyDownloadProxyToMavenCaches(
 }
 
 export async function integrationsRoutes(app: FastifyInstance): Promise<void> {
-  app.get("/", async () => {
+  // Reads on this router expose the panel's integration topology
+  // (which providers are wired, proxy host/port, SMTP host/from, CA
+  // fingerprint and validity). Secrets are already masked by the
+  // read*ForDisplay helpers, but the configuration itself is
+  // admin-only information — the mutations were gated and the reads
+  // were not, which is just an oversight.
+  const integrationRead = { preHandler: requireGlobalPermission("integration.manage") };
+
+  app.get("/", integrationRead, async () => {
     const [modrinthOn, curseforgeOn, rows] = await Promise.all([
       modrinth.isEnabled(),
       curseforge.isEnabled(),
@@ -161,30 +185,46 @@ export async function integrationsRoutes(app: FastifyInstance): Promise<void> {
     }
   );
 
+  // Content browsing. Not "manage" — these are the search/detail calls
+  // the Content tab makes before installing something, so they're gated
+  // on the permission that lets you install: `server.edit`.
+  //
+  // The CurseForge half spends the operator's API key on every call, so
+  // leaving it open to any authenticated user let a VIEWER burn the
+  // quota and break modpack installs panel-wide. Modrinth is gated the
+  // same way for consistency — it is rate-limited per user-agent, which
+  // is a shared resource too.
+  //
+  // Caveat: requireGlobalPermission reads the *global* role, so a user
+  // whose global role is VIEWER but who holds an OPERATOR Membership on
+  // a server is denied here. That combination is unreachable today —
+  // there are no routes that create Membership rows.
+  const contentBrowse = { preHandler: requireGlobalPermission("server.edit") };
+
   // Modrinth
-  app.get("/modrinth/search", async (req) => {
+  app.get("/modrinth/search", contentBrowse, async (req) => {
     const filters = modrinthSearchSchema.parse(req.query);
     return modrinth.search(filters);
   });
 
-  app.get("/modrinth/projects/:id", async (req) => {
+  app.get("/modrinth/projects/:id", contentBrowse, async (req) => {
     const { id } = req.params as { id: string };
     return modrinth.getProject(id);
   });
 
-  app.get("/modrinth/projects/:id/details", async (req) => {
+  app.get("/modrinth/projects/:id/details", contentBrowse, async (req) => {
     const { id } = req.params as { id: string };
     return modrinth.getDetails(id);
   });
 
-  app.get("/modrinth/projects/:id/versions", async (req) => {
+  app.get("/modrinth/projects/:id/versions", contentBrowse, async (req) => {
     const { id } = req.params as { id: string };
     const q = req.query as { gameVersion?: string; loader?: string };
     return modrinth.getVersions(id, q);
   });
 
   // CurseForge
-  app.get("/curseforge/search", async (req) => {
+  app.get("/curseforge/search", contentBrowse, async (req) => {
     if (!(await curseforge.isEnabled())) {
       return { disabled: true, results: [] };
     }
@@ -192,7 +232,7 @@ export async function integrationsRoutes(app: FastifyInstance): Promise<void> {
     return { disabled: false, results: await curseforge.search(filters) };
   });
 
-  app.get("/curseforge/projects/:id/details", async (req) => {
+  app.get("/curseforge/projects/:id/details", contentBrowse, async (req) => {
     const { id } = req.params as { id: string };
     if (!(await curseforge.isEnabled())) {
       const err = new Error(
@@ -204,7 +244,7 @@ export async function integrationsRoutes(app: FastifyInstance): Promise<void> {
     return curseforge.getDetails(Number(id));
   });
 
-  app.get("/curseforge/projects/:id/versions", async (req) => {
+  app.get("/curseforge/projects/:id/versions", contentBrowse, async (req) => {
     const { id } = req.params as { id: string };
     const q = req.query as { gameVersion?: string; loader?: string };
     return curseforge.getVersions(Number(id), q);
@@ -419,14 +459,26 @@ export async function integrationsRoutes(app: FastifyInstance): Promise<void> {
   // mod-install containers that are explicitly opted-in (per-server flag
   // flipped by the UI). Settings live under `download.proxy.*` keys in
   // IntegrationSetting; password is encrypted via SECRETS_KEY.
-  app.get("/download-proxy", async () => {
+  app.get("/download-proxy", integrationRead, async () => {
     return readDownloadProxyForDisplay();
   });
 
   const writeProxySchema = z.object({
     enabled: z.boolean().default(false),
     protocol: z.enum(["socks", "http"]).default("socks"),
-    host: z.string().min(1).max(255),
+    // Charset-restricted because this value ends up as
+    // `UPSTREAM_PROXY` on the maven-cache container, where it becomes a
+    // gost command-line argument. The entrypoint now quotes it, but a
+    // hostname has no business containing whitespace or shell
+    // metacharacters in the first place.
+    host: z
+      .string()
+      .min(1)
+      .max(255)
+      .regex(
+        /^[A-Za-z0-9._:[\]-]+$/,
+        "Host must be a hostname or IP address (no spaces or shell characters)"
+      ),
     port: z.coerce.number().int().min(1).max(65535),
     username: z.string().max(255).optional(),
     /** undefined = keep existing, "" = clear, otherwise overwrite. */
@@ -471,7 +523,7 @@ export async function integrationsRoutes(app: FastifyInstance): Promise<void> {
     }
   );
 
-  app.get("/maven-cache/status", async () => {
+  app.get("/maven-cache/status", integrationRead, async () => {
     const nodes = await prisma.node.findMany({ orderBy: { name: "asc" } });
     const out = await Promise.all(
       nodes.map(async (n) => {
@@ -509,7 +561,7 @@ export async function integrationsRoutes(app: FastifyInstance): Promise<void> {
   // CA for the MITM-caching squid inside maven-cache. The cert is
   // distributed to every MC container (and to squid itself) on every
   // /maven-cache/apply, so jars cached on disk can be served decrypted.
-  app.get("/maven-cache/ca", async () => {
+  app.get("/maven-cache/ca", integrationRead, async () => {
     return readMavenCaForDisplay();
   });
 
@@ -553,7 +605,7 @@ export async function integrationsRoutes(app: FastifyInstance): Promise<void> {
   // Public cert download — the operator can install this in their own
   // browser / OS truststore if they want to inspect squid traffic
   // manually, but the panel auto-imports it into every MC container.
-  app.get("/maven-cache/ca/cert.pem", async (_req, reply) => {
+  app.get("/maven-cache/ca/cert.pem", integrationRead, async (_req, reply) => {
     const pem = await readMavenCaCertPem();
     if (!pem) {
       reply.code(404);
@@ -572,7 +624,7 @@ export async function integrationsRoutes(app: FastifyInstance): Promise<void> {
   // future invite/notification flows. Stored encrypted; password is
   // never returned, only `hasPassword: true` so the UI can hide the
   // field behind the same "stored" placeholder we use elsewhere.
-  app.get("/smtp", async () => {
+  app.get("/smtp", integrationRead, async () => {
     return readSmtpForDisplay();
   });
 

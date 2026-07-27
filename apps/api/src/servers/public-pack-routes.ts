@@ -1,5 +1,6 @@
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import type { Server } from "@prisma/client";
+import { config } from "../config.js";
 import { prisma } from "../db.js";
 import { streamMrpack, resolveMcVersion } from "./export-mrpack.js";
 
@@ -57,10 +58,30 @@ function deriveLoader(server: Server): {
   return { loader: null, loaderVersion: null };
 }
 
-/** Public base URL the request came in on. Honours X-Forwarded-* headers
- *  because Fastify is configured with trustProxy=true (see main.ts).
- *  Falls back to host header if the proxy didn't tell us a scheme. */
+/**
+ * Base URL used to build the client-pack links in these public
+ * responses.
+ *
+ * `PUBLIC_BASE_URL` wins when configured. Without it we fall back to the
+ * request's own Host, which is attacker-controlled — a request carrying
+ * a forged `Host` gets back a pack listing whose `mrpackUrl` points at
+ * the attacker's domain. Impact is limited today (these responses are
+ * `no-store`, so there is no shared cache to poison, and the forged
+ * answer goes back to whoever forged it), but any operator serving real
+ * packs should set the env var and take the header out of the loop.
+ */
+let warnedAboutHostFallback = false;
+
 function publicBaseUrl(req: FastifyRequest): string {
+  const configured = config.PUBLIC_BASE_URL;
+  if (configured) return configured.replace(/\/$/, "");
+  if (!warnedAboutHostFallback) {
+    warnedAboutHostFallback = true;
+    req.log.warn(
+      "PUBLIC_BASE_URL is not set — client-pack links are being built from the " +
+        "client-supplied Host header. Set it on any panel serving real packs."
+    );
+  }
   const proto = req.protocol || "https";
   const host = req.hostname || (req.headers.host as string | undefined) || "";
   return `${proto}://${host}`;
@@ -94,9 +115,16 @@ export async function publicPackRoutes(app: FastifyInstance): Promise<void> {
    * Lives at /p/index.json (NOT /p/<token>.json) — the regex below
    * makes sure the token-only metadata route doesn't shadow it.
    */
-  app.get("/p/index.json", async (req, reply) => {
+  app.get("/p/index.json", {
+    config: { rateLimit: { max: 30, timeWindow: "1 minute" } },
+  }, async (req, reply) => {
     const servers = await prisma.server.findMany({
-      where: { publicPackToken: { not: null } },
+      // Opt-in only. This response embeds each server's raw pack token
+      // in a URL, so listing a server here converts its unguessable
+      // link into public knowledge — and the pack it points at contains
+      // a servers.dat with the server address. Owners now tick a box
+      // per server instead of every tokened server being enumerable.
+      where: { publicPackToken: { not: null }, publicPackListed: true },
       orderBy: { updatedAt: "desc" },
     });
     const baseUrl = publicBaseUrl(req);
@@ -113,7 +141,13 @@ export async function publicPackRoutes(app: FastifyInstance): Promise<void> {
    *   .mrpack → stream the ZIP
    *   .json   → return metadata only (cheap, no agent call)
    */
-  app.get("/p/:tokenWithExt", async (req, reply) => {
+  // Tighter than the global 600/min. A `.mrpack` request makes the
+  // agent assemble a ZIP out of every jar on the server, unauthenticated
+  // — one client looping this endpoint is enough to keep a node busy
+  // indefinitely.
+  app.get("/p/:tokenWithExt", {
+    config: { rateLimit: { max: 12, timeWindow: "1 minute" } },
+  }, async (req, reply) => {
     const { tokenWithExt } = req.params as { tokenWithExt: string };
     const m = /^([a-f0-9]{32})\.(mrpack|json)$/i.exec(tokenWithExt);
     if (!m) {
