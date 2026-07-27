@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
+import DOMPurify from "dompurify";
 import useSWR from "swr";
 import {
   X,
@@ -16,6 +17,7 @@ import {
 } from "lucide-react";
 import { fetcher } from "@/lib/api";
 import { cn } from "@/lib/cn";
+import { safeExternalUrl } from "@/lib/safe-url";
 import { ModrinthMark, CurseForgeMark } from "./brand-icons";
 import { useT } from "@/lib/i18n";
 
@@ -172,12 +174,12 @@ export function ContentDetailDrawer({
                 )}
               </div>
               <div className="flex items-center gap-2">
-                {merged.pageUrl && (
+                {safeExternalUrl(merged.pageUrl) && (
                   <a
                     className="btn btn-ghost"
-                    href={merged.pageUrl}
+                    href={safeExternalUrl(merged.pageUrl)}
                     target="_blank"
-                    rel="noreferrer"
+                    rel="noreferrer noopener"
                   >
                     {provider === "modrinth" ? "Modrinth" : "CurseForge"}{" "}
                     <ExternalLink size={12} />
@@ -323,17 +325,22 @@ function DetailBody({
 
       {data.links && data.links.length > 0 && (
         <div className="flex flex-wrap gap-2">
-          {data.links.map((l) => (
-            <a
-              key={l.url}
-              className="chip"
-              href={l.url}
-              target="_blank"
-              rel="noreferrer"
-            >
-              {l.label} <ExternalLink size={10} />
-            </a>
-          ))}
+          {data.links
+            // Registry-supplied URLs — drop anything that isn't a plain
+            // web link rather than handing `javascript:` to an anchor.
+            .map((l) => ({ ...l, url: safeExternalUrl(l.url) }))
+            .filter((l): l is typeof l & { url: string } => !!l.url)
+            .map((l) => (
+              <a
+                key={l.url}
+                className="chip"
+                href={l.url}
+                target="_blank"
+                rel="noreferrer noopener"
+              >
+                {l.label} <ExternalLink size={10} />
+              </a>
+            ))}
         </div>
       )}
 
@@ -476,19 +483,12 @@ function BodyRender({
     );
   }
   // Both Modrinth (markdown, but CommonMark allows raw HTML) and
-  // CurseForge (HTML) end up as an HTML string, then through the same
-  // sanitiser, then dangerouslySetInnerHTML. The unified path is what
-  // makes mods like Geckolib / Jade — whose Modrinth bodies are mostly
-  // <center> / <img> / <h1 style=...> raw HTML — render correctly
-  // instead of showing the literal markup as text.
+  // CurseForge (HTML) end up as an HTML string rendered through
+  // SafeHtml. The unified path is what makes mods like Geckolib / Jade
+  // — whose Modrinth bodies are mostly <center> / <img> / <h1> raw HTML
+  // — render correctly instead of showing the literal markup as text.
   const raw = format === "html" ? body : markdownToHtml(body);
-  const safe = sanitizeHtml(raw);
-  return (
-    <div
-      className="content-body text-sm leading-relaxed"
-      dangerouslySetInnerHTML={{ __html: safe }}
-    />
-  );
+  return <SafeHtml html={raw} className="content-body text-sm leading-relaxed" />;
 }
 
 /* ============================ MARKDOWN MINI ============================ */
@@ -719,44 +719,81 @@ function isSafeUrl(url: string): boolean {
 }
 
 /**
- * Tiny HTML cleaner for content bodies. Removes <script>, <iframe>,
- * <style>, on* event-handler attributes, javascript: hrefs, and ALL
- * inline `style` attributes — mod authors love things like
- * `<h1 style="font-size:10vw">` that blow up to fill the modal, and
- * inline styles are also a common XSS / overlay vector. The panel's
- * own .content-body CSS handles the real styling.
+ * Renderer for untrusted HTML bodies from Modrinth / CurseForge.
  *
- * Width/height attributes on <img> are stripped too so the CSS can
- * cap them at 100%; otherwise huge banners overflow the dialog.
+ * This content is attacker-controlled: publishing a mod on either
+ * registry is unmoderated, and its description renders on the panel's
+ * own origin with the operator's session. Script execution here is a
+ * full panel takeover — write a jar through the file manager, create an
+ * OWNER, read anything. httpOnly cookies don't help, because the
+ * requests go out as the logged-in user.
  *
- * Not a full sanitiser — relies on the upstream API already delivering
- * mostly-clean HTML — but enough to keep the panel safe and laid out.
+ * This used to be a regex denylist over the HTML string. It let through
+ * `<img src=x/onerror=…>`, `<svg/onload=…>`, `<base>`, `<form>` and
+ * several `javascript:` forms — HTML5 accepts `/` as an attribute
+ * separator, and a single-pass replace rebuilds `<ifr<iframe>ame>` into
+ * a working tag. Denylists cannot express "no `<base>`", so it was
+ * replaced rather than patched.
+ *
+ * Two properties make this version safe:
+ *   • DOMPurify parses the markup and applies an *allowlist* — anything
+ *     not named below is dropped, including attributes and URL schemes.
+ *   • The result is inserted as DOM nodes, never re-serialised back
+ *     through innerHTML. That removes the second parse that mutation-XSS
+ *     gadgets rely on.
+ *
+ * Inline `style` stays forbidden for layout reasons too: mod authors
+ * love `<h1 style="font-size:10vw">`, which blows the dialog apart. The
+ * panel's `.content-body` CSS does the styling.
  */
-function sanitizeHtml(html: string): string {
-  let h = html;
-  h = h.replace(/<\/?(script|iframe|style|object|embed)[^>]*>/gi, "");
-  h = h.replace(/\son\w+\s*=\s*"[^"]*"/gi, "");
-  h = h.replace(/\son\w+\s*=\s*'[^']*'/gi, "");
-  h = h.replace(/\son\w+\s*=\s*[^\s>]+/gi, "");
-  // Strip inline style + width/height attrs (quoted and unquoted forms).
-  h = h.replace(/\sstyle\s*=\s*"[^"]*"/gi, "");
-  h = h.replace(/\sstyle\s*=\s*'[^']*'/gi, "");
-  h = h.replace(/\sstyle\s*=\s*[^\s>]+/gi, "");
-  h = h.replace(/\s(width|height)\s*=\s*"[^"]*"/gi, "");
-  h = h.replace(/\s(width|height)\s*=\s*'[^']*'/gi, "");
-  h = h.replace(/\s(width|height)\s*=\s*[^\s>]+/gi, "");
-  h = h.replace(/href\s*=\s*"javascript:[^"]*"/gi, 'href="#"');
-  h = h.replace(/href\s*=\s*'javascript:[^']*'/gi, "href='#'");
-  // Force every <a> to open in a new tab + drop opener.
-  h = h.replace(/<a\b([^>]*)>/gi, (full, attrs) => {
-    const cleaned = String(attrs).replace(
-      /\s(target|rel)\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi,
-      ""
-    );
-    return `<a${cleaned} target="_blank" rel="noreferrer">`;
-  });
-  return h;
+const ALLOWED_TAGS = [
+  "a", "b", "blockquote", "br", "center", "code", "del", "div", "em",
+  "h1", "h2", "h3", "h4", "h5", "h6", "hr", "i", "img", "li", "ol", "p",
+  "pre", "s", "small", "span", "strong", "sub", "sup", "table", "tbody",
+  "td", "tfoot", "th", "thead", "tr", "u", "ul",
+];
+const ALLOWED_ATTR = ["href", "src", "alt", "title", "colspan", "rowspan"];
+
+function SafeHtml({
+  html,
+  className,
+}: {
+  html: string;
+  className?: string;
+}): JSX.Element {
+  const hostRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const host = hostRef.current;
+    if (!host) return;
+    const fragment = DOMPurify.sanitize(html, {
+      ALLOWED_TAGS,
+      ALLOWED_ATTR,
+      // Only http(s), mailto and data:image — no javascript:, no
+      // vbscript:, no data:text/html.
+      ALLOWED_URI_REGEXP: /^(?:https?:|mailto:|data:image\/(?:png|jpe?g|gif|webp);)/i,
+      // Belt and braces on top of the tag allowlist: these are the ones
+      // whose absence from the allowlist is easiest to regress.
+      FORBID_TAGS: ["script", "style", "iframe", "object", "embed", "base", "form", "input", "svg", "math"],
+      FORBID_ATTR: ["style", "width", "height", "srcset", "formaction", "form"],
+      // Return nodes, not a string — see the docblock.
+      RETURN_DOM_FRAGMENT: true,
+    }) as unknown as DocumentFragment;
+    // Links leave the panel, so force the safe rel/target combination.
+    for (const anchor of Array.from(fragment.querySelectorAll("a"))) {
+      anchor.setAttribute("target", "_blank");
+      anchor.setAttribute("rel", "noreferrer noopener");
+    }
+    host.replaceChildren(fragment);
+    return () => host.replaceChildren();
+  }, [html]);
+
+  // Rendered empty and filled after mount: nothing untrusted goes
+  // through the server-rendered HTML, and there is no DOM on the server
+  // for DOMPurify to use anyway.
+  return <div ref={hostRef} className={className} />;
 }
+
 
 function formatDate(iso: string): string {
   try {

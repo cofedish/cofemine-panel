@@ -3,10 +3,14 @@ RUN corepack enable && corepack prepare pnpm@9.7.0 --activate
 WORKDIR /app
 
 FROM base AS deps
-COPY package.json pnpm-workspace.yaml pnpm-lock.yaml* ./
+# See apps/api/Dockerfile for why all manifests are copied and why the
+# install is frozen.
+COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
+COPY apps/api/package.json apps/api/package.json
+COPY apps/agent/package.json apps/agent/package.json
 COPY apps/web/package.json apps/web/package.json
 COPY packages/shared/package.json packages/shared/package.json
-RUN pnpm install --frozen-lockfile=false --filter @cofemine/web...
+RUN pnpm install --frozen-lockfile --filter @cofemine/web...
 
 FROM deps AS build
 COPY tsconfig.base.json ./

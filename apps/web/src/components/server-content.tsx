@@ -5,6 +5,7 @@ import useSWR, { mutate } from "swr";
 import { motion } from "framer-motion";
 import { api, ApiError, fetcher } from "@/lib/api";
 import { cn } from "@/lib/cn";
+import { safeExternalUrl } from "@/lib/safe-url";
 import {
   Search,
   Download,
@@ -687,12 +688,12 @@ function InstalledCard({
             <span className="font-mono">{file.modrinth.versionNumber}</span>
           )}
           <span className="tabular-nums">{formatSize(file.size)}</span>
-          {pageUrl && (
+          {safeExternalUrl(pageUrl) && (
             <a
               className="link inline-flex items-center gap-1"
-              href={pageUrl}
+              href={safeExternalUrl(pageUrl)}
               target="_blank"
-              rel="noreferrer"
+              rel="noreferrer noopener"
               onClick={(e) => e.stopPropagation()}
             >
               page <ExternalLink size={10} />
@@ -840,11 +841,11 @@ function ExclusionsTab({ serverId }: { serverId: string }): JSX.Element {
               </div>
               <div className="text-[11px] text-ink-muted flex items-center gap-2 mt-0.5">
                 <span className="tabular-nums">#{item.modId}</span>
-                {item.pageUrl && (
+                {safeExternalUrl(item.pageUrl) && (
                   <a
-                    href={item.pageUrl}
+                    href={safeExternalUrl(item.pageUrl)}
                     target="_blank"
-                    rel="noreferrer"
+                    rel="noreferrer noopener"
                     className="link inline-flex items-center gap-1"
                   >
                     page <ExternalLink size={10} />

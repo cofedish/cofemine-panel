@@ -74,6 +74,7 @@ export function ClientModsTab({ serverId }: { serverId: string }): JSX.Element {
   const { data: server } = useSWR<{
     name: string;
     publicPackToken: string | null;
+    publicPackListed: boolean;
     cfPackProjectId: number | null;
     cfPackFileId: number | null;
     clientServerAddress: string | null;
@@ -162,6 +163,22 @@ export function ClientModsTab({ serverId }: { serverId: string }): JSX.Element {
     setLinkBusy(true);
     try {
       await api.post(`/servers/${serverId}/public-pack-token`);
+      mutate(`/servers/${serverId}`);
+    } catch (e) {
+      dialog.alert({
+        tone: "danger",
+        title: t("common.error"),
+        message: e instanceof ApiError ? e.message : String(e),
+      });
+    } finally {
+      setLinkBusy(false);
+    }
+  }
+
+  async function setPublicListed(listed: boolean): Promise<void> {
+    setLinkBusy(true);
+    try {
+      await api.patch(`/servers/${serverId}`, { publicPackListed: listed });
       mutate(`/servers/${serverId}`);
     } catch (e) {
       dialog.alert({
@@ -541,6 +558,19 @@ export function ClientModsTab({ serverId }: { serverId: string }): JSX.Element {
                 {t("clientMods.publicLink.disable")}
               </button>
             </div>
+            {/* Listing is a separate decision from having a link: the
+                public directory embeds the raw token, so a listed pack
+                is downloadable by anyone who knows the panel's URL. */}
+            <label className="flex items-start gap-2 text-[11px] text-ink-muted cursor-pointer">
+              <input
+                type="checkbox"
+                className="mt-0.5"
+                checked={server?.publicPackListed ?? false}
+                disabled={linkBusy}
+                onChange={(e) => void setPublicListed(e.target.checked)}
+              />
+              <span>{t("clientMods.publicLink.listed")}</span>
+            </label>
           </>
         ) : (
           <div>

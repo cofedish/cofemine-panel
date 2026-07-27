@@ -714,11 +714,35 @@ function BlueMapView({
             // BlueMap's bundled scripts.
             allow="fullscreen; pointer-lock"
             referrerPolicy="no-referrer"
-            // Sandbox is loose intentionally: BlueMap's viewer is
-            // first-party JS that ships inside the MC server image
-            // we control. Allowing same-origin lets it cache its own
-            // chunks; allow-scripts is required for Three.js to run.
-            sandbox="allow-same-origin allow-scripts allow-forms"
+            // KNOWN EXPOSURE — read before changing anything here.
+            //
+            // `allow-same-origin` + `allow-scripts` on same-origin
+            // content is not a sandbox at all: the frame shares the
+            // panel's origin, so its scripts can reach into
+            // `window.top`, call the panel's API with the operator's
+            // session, and read the parent DOM. The child's CSP does
+            // not help either — code that grabs `parent.fetch` runs
+            // under the *parent's* policy.
+            //
+            // An earlier comment here claimed BlueMap is "first-party
+            // JS we control". It is not: BlueMap is a third-party mod,
+            // and its webroot lives under the server's data directory,
+            // which the file manager (`server.edit`) and any installed
+            // mod can write. Swapping one .js file there turns opening
+            // the Map tab into session theft.
+            //
+            // Why it is still like this: dropping `allow-same-origin`
+            // gives the frame an opaque origin, and BlueMap's own
+            // relative fetches then travel cross-site, so the
+            // SameSite=Lax session cookie is not attached and every
+            // tile 401s. Fixing it properly means serving maps from a
+            // separate origin with non-cookie auth (a scoped,
+            // short-lived token) — a design change, not an attribute
+            // tweak. Tracked in docs/security.md.
+            //
+            // `allow-forms` was dropped: the viewer has no forms, and
+            // it was one more exfiltration primitive.
+            sandbox="allow-same-origin allow-scripts"
           />
         </div>
       </div>
