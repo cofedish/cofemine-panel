@@ -45,27 +45,22 @@ The interface ships three appearance modes — **light**, **dark** and **system*
 accent colours (Emerald, Sky, Violet, Ruby, Lucifer, Caramel and Minecraft), all switchable at runtime
 from the appearance menu.
 
-<!--
-  Drop the captures into docs/images/ using the names below, then delete this comment block
-  to publish them. docs/images/README.md lists exactly which screens to capture and how.
-
 <div align="center">
   <img src="docs/images/dashboard-dark.png" alt="Server dashboard, dark theme" width="49%">
   <img src="docs/images/dashboard-light.png" alt="Server dashboard, light theme" width="49%">
+  <br><em>The dashboard in dark and light — same view, same servers.</em>
 </div>
 
 <div align="center">
-  <img src="docs/images/console.png" alt="Live console" width="49%">
-  <img src="docs/images/content.png" alt="Modrinth / CurseForge content browser" width="49%">
+  <img src="docs/images/console.png" alt="Live console streaming a running server" width="49%">
+  <img src="docs/images/content.png" alt="Modrinth content browser filtered to the server's version and loader" width="49%">
+  <br><em>Live console over WebSocket, and the content browser filtered to the server's version and loader.</em>
 </div>
 
 <div align="center">
-  <img src="docs/images/accents.png" alt="Accent colour palette" width="80%">
+  <img src="docs/images/accents.png" alt="Appearance settings: mode, accent colours, motion and background music" width="62%">
+  <br><em>Appearance settings — mode, accent, motion and background music.</em>
 </div>
--->
-
-> Screenshots are not committed yet — see [`docs/images/README.md`](docs/images/README.md) for the
-> capture checklist and file names the markdown above already expects.
 
 ## Quick start
 

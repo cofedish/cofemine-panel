@@ -1,45 +1,39 @@
 # Screenshots
 
-The README references the files below by exact name. Once they exist here, delete the HTML comment
-wrapper around the `Screenshots` block in [`../../README.md`](../../README.md) and they will render.
+These are the images the root README embeds. They were captured from a real panel driving real
+Minecraft containers — three servers, one of them running — not mocked up.
 
-They are not committed yet because capturing them means driving an authenticated browser session
-against a running panel with real servers in it — an empty panel photographs badly, and a fabricated
-one would misrepresent the product.
+| File | Screen |
+|---|---|
+| `dashboard-dark.png` | Server list, dark theme |
+| `dashboard-light.png` | The same view in light theme, framed identically |
+| `console.png` | Live console on a running server, with RCON command output |
+| `content.png` | Modrinth browser, filtered to the server's version and loader |
+| `accents.png` | Appearance card: mode, the seven accents, motion, background music |
 
-## Files the README expects
+## Re-capturing them
 
-| File | Screen | Notes |
-|---|---|---|
-| `dashboard-dark.png` | Server list / overview | Dark theme. The pair below it is the same screen, so frame them identically. |
-| `dashboard-light.png` | Server list / overview | Light theme, same viewport and same servers as above. |
-| `console.png` | A server's Console tab | Catch it mid-output — a booting server with log lines beats an idle prompt. |
-| `content.png` | Content tab | Modrinth or CurseForge search with results and a mod card open. |
-| `accents.png` | Appearance menu | The seven accent swatches visible. A composite strip of the same view in several accents also works. |
+Bring up the stack, create a couple of servers with recognisable names, start one so the status dots
+and player counts are populated, then drive a browser against `http://localhost:3000`. The two
+dashboard shots must share a viewport and the same servers, or the side-by-side pair in the README
+looks misaligned.
 
-## Capture guidelines
+Useful details if you script it:
 
-- **Viewport**: 1440×900, browser chrome cropped out. Both dashboard shots must match exactly, or the
-  side-by-side comparison in the README will look misaligned.
-- **Theme**: switch via the appearance menu (top-right avatar → appearance). Modes are light, dark and
-  system; accents are Emerald, Sky, Violet, Ruby, Lucifer, Caramel and Minecraft. The choice persists
-  in `localStorage` under `cofemine-theme`.
-- **Content**: have two or three servers with real names, at least one running so the status dots and
-  player counts are populated. A dashboard of empty placeholder rows undersells it.
-- **Format**: PNG, and run them through an optimiser (`oxipng -o4`, `pngquant`) — these land in the
-  repository and in every clone.
-- **Width**: 2× the display width if you want them crisp on HiDPI; the README constrains them to 49%
-  so oversized files are wasted bytes.
+- Language and theme are read from `localStorage` before the app renders — set `cofemine-lang` to
+  `en`, `cofemine-theme` to `light` or `dark`, and `cofemine-motion` to `reduced` so animations do not
+  land mid-frame. Setting them in an init script is more reliable than clicking through the UI.
+- The login form's identifier field has no `type` attribute, so `input[type=text]` will not match it.
+  Address the inputs positionally.
+- The settings page scrolls inside its own container, so `window.scrollBy` does not move it. Capture
+  the Appearance card as an element instead of cropping a page screenshot.
+- Capture at 2× device scale, then downscale to ~1920px wide and re-encode. Straight 2× exports run
+  500–650 KB each; the same images land at 40–200 KB with no visible loss, and they live in the
+  repository forever.
 
-## Before you commit them
+## Before committing new ones
 
-Screenshots of a control panel leak more than people expect. Check each image for:
-
-- Server addresses, ports and public IPs.
-- Real player names and UUIDs, if you would rather not publish them.
-- The Integrations page — API keys are masked in the UI, but SMTP hosts, proxy hosts and node
-  addresses are not secrets the panel hides, and they are still yours.
-- Anything in the audit log: it records usernames and source IPs.
-- Browser tabs, bookmarks and notifications in the background.
-
-The safest source for screenshots is a throwaway local stack with invented server names.
+Screenshots of a control panel leak more than people expect. Check each image for server addresses and
+ports, real player names, node hostnames on the Infrastructure page, usernames and source addresses in
+the audit log, and anything in the browser chrome around the capture. The safest source is a throwaway
+local stack with invented server names — which is what these were.
