@@ -10,6 +10,7 @@
     "lint": "pnpm -r run lint",
     "typecheck": "pnpm -r run typecheck",
     "db:generate": "pnpm --filter @cofemine/api exec prisma generate",
+    "db:push": "pnpm --filter @cofemine/api exec prisma db push",
     "db:migrate": "pnpm --filter @cofemine/api exec prisma migrate dev",
     "db:deploy": "pnpm --filter @cofemine/api exec prisma migrate deploy",
     "db:seed": "pnpm --filter @cofemine/api exec tsx prisma/seed.ts"
