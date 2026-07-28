@@ -45,7 +45,9 @@ RUN set -eux; \
     # enough to catch a tampered or truncated artifact. This binary
     # terminates TLS for every loader download, so a swapped build would
     # be an ideal place to hide.
-    curl -fsSL -o /tmp/gost.sha256 "https://github.com/go-gost/gost/releases/download/v${GOST_VERSION}/gost_${GOST_VERSION}_checksums.txt"; \
+    # goreleaser publishes this as a bare `checksums.txt`, not a
+    # version-prefixed name — guessing the latter 404s and fails the build.
+    curl -fsSL -o /tmp/gost.sha256 "https://github.com/go-gost/gost/releases/download/v${GOST_VERSION}/checksums.txt"; \
     expected="$(grep " gost_${GOST_VERSION}_linux_${gost_arch}.tar.gz\$" /tmp/gost.sha256 | awk '{print $1}')"; \
     [ -n "$expected" ] || { echo "no checksum entry for linux_${gost_arch}"; exit 1; }; \
     echo "${expected}  /tmp/gost.tar.gz" | sha256sum -c -; \
